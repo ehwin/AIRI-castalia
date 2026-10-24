@@ -1142,6 +1142,20 @@ pages:
         thinking:
           label: 思考（Ollama）
           description: '开启时，通过 Ollama 发送的视觉请求带有 `think: true`；关闭时带有 `think: false`。'
+    perception:
+      title: 感知
+      description: 她能看什么
+      enable-screen:
+        label: 允许她看屏幕
+        description: 抓到的画面会交给视觉模型，转成一行简短的描述。只有当你接受这些内容发往已配置的视觉提供商时，才开启。
+      enable-camera:
+        label: 允许她用摄像头
+        description: 摄像头采集还没做，开关会一直关着，直到有对应的管道。
+      status:
+        title: 状态
+        summary: 屏幕复用现有的抓帧器和 `screen:interpret` 工作负载。在接上某个感知之前，她是看不见的。
+        screen-missing: 请先在「视觉」页配置视觉模型。
+        camera-missing: 还没有摄像头管道。
     x:
       description: X / Twitter 的浏览和使用
       enable: 启用X / Twitter集成

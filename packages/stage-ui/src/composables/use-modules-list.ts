@@ -14,6 +14,7 @@ import { useFactorioStore } from '../stores/modules/gaming-factorio'
 import { useMinecraftStore } from '../stores/modules/gaming-minecraft'
 import { useHearingStore } from '../stores/modules/hearing'
 import { useHomeAssistantStore } from '../stores/modules/home-assistant'
+import { usePerceptionStore } from '../stores/modules/perception'
 import { useSpeechStore } from '../stores/modules/speech'
 import { useStickersStore } from '../stores/modules/stickers'
 import { useTwitterStore } from '../stores/modules/twitter'
@@ -50,6 +51,7 @@ export function useModulesList() {
   const homeAssistantStore = useHomeAssistantStore()
   const artistryStore = useArtistryStore()
   const memoryStore = useMemoryStore()
+  const perceptionStore = usePerceptionStore()
   const toolCardsStore = useToolCardsStore()
   const beatSyncState = ref<BeatSyncDetectorState>()
   const beatSyncSupported = isBeatSyncSupported()
@@ -91,6 +93,15 @@ export function useModulesList() {
       icon: 'i-solar:eye-closed-bold-duotone',
       to: '/settings/modules/vision',
       configured: visionStore.configured,
+      category: 'essential',
+    },
+    {
+      id: 'perception',
+      name: t('settings.pages.modules.perception.title'),
+      description: t('settings.pages.modules.perception.description'),
+      icon: 'i-solar:eye-bold-duotone',
+      to: '/settings/modules/perception',
+      configured: perceptionStore.anyEnabled,
       category: 'essential',
     },
     {

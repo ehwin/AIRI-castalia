@@ -1200,6 +1200,20 @@ pages:
         thinking:
           label: Thinking (Ollama)
           description: 'When on, vision requests through Ollama include `think: true`. When off, they include `think: false`.'
+    perception:
+      title: Perception
+      description: What the companion may look at
+      enable-screen:
+        label: Let the companion look at the screen
+        description: A captured frame goes to the vision model and becomes a short line of text. Enable this only when you are fine with that content reaching the configured vision provider.
+      enable-camera:
+        label: Let the companion look through the camera
+        description: Camera capture is not available yet. The toggle stays off until a camera pipeline exists.
+      status:
+        title: Status
+        summary: Screen uses the existing capture ticker and the `screen:interpret` workload. The companion is blind until a sense is attached.
+        screen-missing: Configure a vision model on the Vision page first.
+        camera-missing: No camera pipeline yet.
     x:
       description: X / Twitter browsing and usage
       title: X / Twitter
