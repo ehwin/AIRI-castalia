@@ -9,6 +9,7 @@ import factorioIcon from '../assets/factorio-simple.png'
 import { useMemoryStore } from '../stores/memory'
 import { useArtistryStore } from '../stores/modules/artistry'
 import { useConsciousnessStore } from '../stores/modules/consciousness'
+import { useDiaryStore } from '../stores/modules/diary'
 import { useDiscordStore } from '../stores/modules/discord'
 import { useFactorioStore } from '../stores/modules/gaming-factorio'
 import { useMinecraftStore } from '../stores/modules/gaming-minecraft'
@@ -52,6 +53,7 @@ export function useModulesList() {
   const artistryStore = useArtistryStore()
   const memoryStore = useMemoryStore()
   const perceptionStore = usePerceptionStore()
+  const diaryStore = useDiaryStore()
   const toolCardsStore = useToolCardsStore()
   const beatSyncState = ref<BeatSyncDetectorState>()
   const beatSyncSupported = isBeatSyncSupported()
@@ -102,6 +104,15 @@ export function useModulesList() {
       icon: 'i-solar:eye-bold-duotone',
       to: '/settings/modules/perception',
       configured: perceptionStore.anyEnabled,
+      category: 'essential',
+    },
+    {
+      id: 'diary',
+      name: t('settings.pages.modules.diary.title'),
+      description: t('settings.pages.modules.diary.description'),
+      icon: 'i-solar:notebook-bold-duotone',
+      to: '/settings/modules/diary',
+      configured: diaryStore.thoughts.length > 0,
       category: 'essential',
     },
     {

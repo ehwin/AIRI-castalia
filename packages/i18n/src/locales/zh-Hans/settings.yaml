@@ -1142,6 +1142,14 @@ pages:
         thinking:
           label: 思考（Ollama）
           description: '开启时，通过 Ollama 发送的视觉请求带有 `think: true`；关闭时带有 `think: false`。'
+    diary:
+      title: 日记
+      description: 没人问的时候，她在想什么
+      summary: '{days} 天，其中 {said} 条说出口过'
+      privacy: 这些是她自己写的。这一页上的内容，她都没有对你说过。
+      loading: 正在翻开她的日记…
+      empty: 还没写。她只在有事值得琢磨的时候才写。
+      day-count: '{count} 条记录'
     perception:
       title: 感知
       description: 她能看什么

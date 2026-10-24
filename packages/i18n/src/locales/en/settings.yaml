@@ -1200,6 +1200,14 @@ pages:
         thinking:
           label: Thinking (Ollama)
           description: 'When on, vision requests through Ollama include `think: true`. When off, they include `think: false`.'
+    diary:
+      title: Diary
+      description: What she thought about while nobody asked
+      summary: '{days} days, {said} of them said out loud'
+      privacy: She writes here on her own. Nothing on this page was said to you.
+      loading: Opening her diary...
+      empty: Nothing yet. She writes when something is worth dwelling on.
+      day-count: 'no entries | one entry | {count} entries'
     perception:
       title: Perception
       description: What the companion may look at
