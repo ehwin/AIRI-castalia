@@ -3,7 +3,8 @@ import type { ContextMessage } from '../../../types/chat'
 import { ContextUpdateStrategy } from '@proj-airi/server-sdk'
 import { nanoid } from 'nanoid'
 
-const MIND_STATE_CONTEXT_ID = 'system:airi-mind-state'
+/** Short on purpose: the renderer prints this id as the bullet label, so it reads as a note. */
+const MIND_STATE_CONTEXT_ID = 'mind'
 
 /**
  * The companion's state right now: tired, bored, holding something back.

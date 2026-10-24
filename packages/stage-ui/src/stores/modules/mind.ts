@@ -71,6 +71,41 @@ export const useMindStore = defineStore('mind', () => {
   /** Set by `lookAround` and consumed by the next tick. */
   const novelty = ref(false)
 
+  // How many sends a changed state stays visible. SillyTavern calls the same
+  // control "Sticky": an activated entry stays for N messages, then stops on its
+  // own. A note near the end of the chat has strong pull, so repeating an
+  // unchanged line every turn drowns the persona.
+  const STATE_STICKY_SENDS = 3
+  let sendsLeft = 0
+  let lastSentState = ''
+
+  /**
+   * The state line for this send, or an empty string.
+   *
+   * A change restarts the sticky window. While the state holds, the line rides
+   * along for a few sends and then goes quiet, so the model reads it as
+   * something that happened rather than a constant instruction.
+   */
+  function stateLineForSend(): string {
+    const line = stateLine.value
+    if (!line) {
+      lastSentState = ''
+      sendsLeft = 0
+      return ''
+    }
+
+    if (line !== lastSentState) {
+      lastSentState = line
+      sendsLeft = STATE_STICKY_SENDS
+    }
+
+    if (sendsLeft <= 0)
+      return ''
+
+    sendsLeft--
+    return line
+  }
+
   /** The line a prompt may carry, or an empty string when nothing is worth it. */
   const stateLine = computed(() => renderStateLine({
     drives: drives.value,
@@ -246,6 +281,7 @@ export const useMindStore = defineStore('mind', () => {
     drives,
     stream,
     stateLine,
+    stateLineForSend,
     opening,
     wokeUp,
     heldBack,

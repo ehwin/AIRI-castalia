@@ -219,8 +219,9 @@ describe('what the model reads', () => {
     const tired = renderStateLine({ drives: { fatigue: 80, boredom: 20, curiosity: 0, focus: 10 } })
 
     expect(calm).toBe('')
-    expect(tired).toContain('tired=high')
-    expect(tired.startsWith('[self: ')).toBe(true)
+    expect(tired).toContain('very tired')
+    // No brackets, no key=value, no system-looking id: nothing to mirror back.
+    expect(tired).not.toMatch(/[[\]{}]/)
   })
 
   it('recovers fatigue but keeps the rest of the day', () => {

@@ -49,7 +49,8 @@ import { resolveLlmTools } from './ai/chat-llm/tool-resolver'
 import { useLlmToolsStore } from './ai/chat-llm/tools'
 import { useLlmToolsetPromptsStore } from './ai/chat-llm/toolset-prompts'
 import { useAuthStore } from './auth'
-import { createMindStateContext, createMinecraftContext, createRuntimePromptContext, createUserAccountContext } from './chat/context-providers'
+import { createMinecraftContext, createRuntimePromptContext, createUserAccountContext } from './chat/context-providers'
+import { createMindStateContext } from './chat/context-providers/mind-state'
 import { useChatContextStore } from './chat/context-store'
 import { describeChatImages, replaceToolResultImages } from './chat/image-projection'
 import { composeRecipeSpacePrompt, composeSystemPrompt } from './chat/prompt-recipe'
@@ -1002,7 +1003,7 @@ export const useChatStore = defineStore('chat', () => {
       () => createRuntimePromptContext(runtimePrompt.value),
       // Her state changes every turn. It goes here, not in the system prompt,
       // so the cacheable prefix stays byte-stable.
-      () => createMindStateContext(mindStore.stateLine),
+      () => createMindStateContext(mindStore.stateLineForSend()),
       createMinecraftContext,
     ],
     // A card that the model draws is part of its answer, so the reply shows the card, not the call.

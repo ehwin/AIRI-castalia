@@ -73,21 +73,22 @@ describe('state line', () => {
   })
 
   it('reports fatigue above the threshold', () => {
-    expect(renderStateLine({ drives: { ...calm, fatigue: 80 } })).toContain('tired=high')
+    expect(renderStateLine({ drives: { ...calm, fatigue: 80 } })).toContain('very tired')
   })
 
   it('reports a fresh return from a long absence', () => {
-    expect(renderStateLine({ drives: calm, slept: true })).toContain('just-woke-up')
+    expect(renderStateLine({ drives: calm, slept: true })).toContain('just woke up')
   })
 
   it('reports something held back', () => {
-    expect(renderStateLine({ drives: calm, heldBack: true })).toContain('holding-something-back')
+    expect(renderStateLine({ drives: calm, heldBack: true })).toContain('holding something back')
   })
 
-  it('always tags the line so the model can find it', () => {
-    const line = renderStateLine({ drives: { ...calm, boredom: 60 } })
-    expect(line.startsWith('[self: ')).toBe(true)
-    expect(line.endsWith(']')).toBe(true)
+  it('reads as narration, with no markup to mirror back', () => {
+    const line = renderStateLine({ drives: { ...calm, fatigue: 80, boredom: 60 } })
+    expect(line).toContain('very tired')
+    expect(line).not.toMatch(/[[\]{}<>]/)
+    expect(line).not.toContain('=')
   })
 
   it('stays short enough to repeat every turn', () => {

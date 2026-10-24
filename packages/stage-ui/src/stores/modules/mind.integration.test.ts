@@ -169,3 +169,49 @@ describe('mind store, end to end', () => {
     mind.dispose()
   })
 })
+
+describe('how often the state reaches the model', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    store.thoughts = []
+    store.lastSeenAt = undefined
+    vi.clearAllMocks()
+    vi.useRealTimers()
+  })
+
+  it('sticks to a changed state for three sends, then goes quiet', async () => {
+    const mind = useMindStore()
+    await mind.initialize()
+
+    mind.drives = { fatigue: 80, boredom: 0, curiosity: 0, focus: 0 } // very tired
+    // Sticky: rides along for three sends, then goes quiet until it changes.
+    expect(mind.stateLineForSend()).toBe('very tired')
+    expect(mind.stateLineForSend()).toBe('very tired')
+    expect(mind.stateLineForSend()).toBe('very tired')
+    expect(mind.stateLineForSend()).toBe('')
+    expect(mind.stateLineForSend()).toBe('')
+
+    mind.dispose()
+  })
+
+  it('sends nothing when there is nothing to say', async () => {
+    const mind = useMindStore()
+    await mind.initialize()
+    mind.drives = { fatigue: 0, boredom: 0, curiosity: 0, focus: 0 }
+    expect(mind.stateLineForSend()).toBe('')
+    mind.dispose()
+  })
+
+  it('sends a new state even inside the wait', async () => {
+    const mind = useMindStore()
+    await mind.initialize()
+
+    mind.drives = { fatigue: 80, boredom: 0, curiosity: 0, focus: 0 }
+    expect(mind.stateLineForSend()).toBe('very tired')
+
+    mind.drives = { fatigue: 50, boredom: 0, curiosity: 0, focus: 0 }
+    expect(mind.stateLineForSend()).toBe('tired')
+
+    mind.dispose()
+  })
+})
