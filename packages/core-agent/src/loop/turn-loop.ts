@@ -163,6 +163,15 @@ const lastAssistantText = (messages: LoopMessage[]) => {
  *
  * The driver only carries out effects. Every decision lives in `step`, so a
  * change of behaviour means a change to one pure function.
+ *
+ * NOTICE:
+ * This loop is deliberately not a second orchestrator.
+ * `runtime/chat-orchestrator-runtime.ts` and `runtime/llm-service.ts` already run
+ * streaming turns with providers, rounds, and continuations. This loop exists
+ * for one purpose: a provider-free turn with a hard round and tool budget, so it
+ * can be replayed and tested without a model.
+ * Add streaming, providers, or continuation handling here and the duplication
+ * becomes real. Use `runtime/` for those instead.
  */
 export async function runTurn(input: string, deps: TurnDeps): Promise<TurnResult> {
   const policy = deps.policy ?? defaultLoopPolicy
