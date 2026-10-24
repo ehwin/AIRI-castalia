@@ -10,6 +10,7 @@
  * there. `maxRounds` is the hard stop this loop adds.
  */
 import type { MemoryPort, ToolCall, ToolPort } from './ports'
+import type { StepRecord } from './session-log'
 
 import { emptyMemory } from './ports'
 
@@ -144,6 +145,8 @@ export interface TurnResult {
   state: LoopState
   /** The last assistant text of the turn. */
   text: string
+  /** Every step of the turn, in order, so the turn can be replayed. */
+  record: StepRecord[]
 }
 
 const lastAssistantText = (messages: LoopMessage[]) => {
@@ -167,13 +170,25 @@ export async function runTurn(input: string, deps: TurnDeps): Promise<TurnResult
   const tools = new Map(deps.tools.map(tool => [tool.name, tool]))
 
   let state = createState()
-  let effects = step(state, { type: 'user-said', text: input }, policy).effects
+  const record: StepRecord[] = []
+
+  /** Every decision goes through here so the turn keeps its own log. */
+  const advance = (current: LoopState, event: LoopEvent) => {
+    const next = step(current, event, policy)
+    // Copy: the driver consumes the live array with shift(), so a reference would be drained.
+    record.push({ event, effects: [...next.effects] })
+    return next
+  }
+
+  const started = advance(state, { type: 'user-said', text: input })
+  state = started.state
+  let effects = started.effects
 
   /** A cancel wins over a reply that arrived after the user interrupted. */
   const cancelIfAborted = (): boolean => {
     if (!deps.signal?.aborted)
       return false
-    const cancelled = step(state, { type: 'cancelled' }, policy)
+    const cancelled = advance(state, { type: 'cancelled' })
     state = cancelled.state
     effects = cancelled.effects
     return true
@@ -189,7 +204,7 @@ export async function runTurn(input: string, deps: TurnDeps): Promise<TurnResult
       const text = lastAssistantText(effect.messages)
       if (text)
         await memory.record({ text }).catch(() => {})
-      return { state, text }
+      return { state, text, record }
     }
 
     if (cancelIfAborted())
@@ -199,7 +214,7 @@ export async function runTurn(input: string, deps: TurnDeps): Promise<TurnResult
       const reply = await deps.send(effect.messages, deps.signal)
       if (cancelIfAborted())
         continue
-      const next = step(state, { type: 'model-replied', text: reply.text, toolCalls: reply.toolCalls }, policy)
+      const next = advance(state, { type: 'model-replied', text: reply.text, toolCalls: reply.toolCalls })
       state = next.state
       effects = next.effects
       continue
@@ -221,11 +236,11 @@ export async function runTurn(input: string, deps: TurnDeps): Promise<TurnResult
           event = { type: 'tool-failed', callId: effect.call.callId, error: message }
         }
       }
-      const next = step(state, event, policy)
+      const next = advance(state, event)
       state = next.state
       effects = [...next.effects, ...effects]
     }
   }
 
-  return { state, text: lastAssistantText(state.messages) }
+  return { state, text: lastAssistantText(state.messages), record }
 }
