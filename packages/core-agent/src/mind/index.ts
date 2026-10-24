@@ -27,3 +27,5 @@ export {
   mayProvoke,
   planExpression,
 } from './expression'
+export type { SenseDigest, SenseKind, SenseObservation, SensePort } from './sense'
+export { blindSense, digestSense } from './sense'

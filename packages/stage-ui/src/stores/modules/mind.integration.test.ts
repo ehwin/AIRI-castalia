@@ -132,4 +132,40 @@ describe('mind store, end to end', () => {
     mind.dispose()
     expect(store.saveLastSeenAt).toHaveBeenCalled()
   })
+
+  it('is blind until a sense is attached', async () => {
+    const mind = useMindStore()
+    await mind.initialize()
+
+    expect(mind.senseAttached).toBe(false)
+    await expect(mind.lookAround()).resolves.toBe(0)
+    mind.dispose()
+  })
+
+  it('takes what a sense sees as new once, not on every look', async () => {
+    const mind = useMindStore()
+    await mind.initialize()
+
+    const look = vi.fn(async () => [
+      { kind: 'screen' as const, text: 'a failing test in the editor', at: Date.now() },
+      { kind: 'camera' as const, text: 'the owner is at the desk', at: Date.now() },
+    ])
+
+    mind.attachSense({ look })
+    expect(mind.senseAttached).toBe(true)
+
+    await expect(mind.lookAround()).resolves.toBe(2)
+    // The same desktop is not new twice.
+    await expect(mind.lookAround()).resolves.toBe(0)
+    mind.dispose()
+  })
+
+  it('survives a sense that throws', async () => {
+    const mind = useMindStore()
+    await mind.initialize()
+    mind.attachSense({ look: async () => { throw new Error('permission denied') } })
+
+    await expect(mind.lookAround()).resolves.toBe(0)
+    mind.dispose()
+  })
 })

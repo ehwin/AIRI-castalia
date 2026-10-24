@@ -1,0 +1,61 @@
+/**
+ * How the companion perceives the world.
+ *
+ * The mind never holds pixels. A sense turns whatever it can capture into one
+ * line of text per observation, so a later vision model, a screen capture, or a
+ * camera changes the adapter and nothing in the loop.
+ *
+ * NOTICE:
+ * No sense is implemented yet. Screen capture exists in AIRI as a WebRTC
+ * sharing surface (`@proj-airi/electron-screen-capture`), not as perception,
+ * and there is no camera capture at all. The host attaches a port when one
+ * exists; until then the companion is blind and behaves exactly as before.
+ */
+
+export type SenseKind = 'screen' | 'camera' | 'window' | 'text'
+
+export interface SenseObservation {
+  kind: SenseKind
+  /** One line. Already summarized; the mind never receives an image. */
+  text: string
+  /** When the host observed it. */
+  at: number
+}
+
+export interface SensePort {
+  /** What the companion can perceive right now. Empty when nothing is available or allowed. */
+  look: () => Promise<SenseObservation[]>
+}
+
+/** A companion with no eyes and no webcam. The default. */
+export const blindSense: SensePort = {
+  look: async () => [],
+}
+
+export interface SenseDigest {
+  /** Observations worth thinking about, newest last. */
+  texts: string[]
+  /** True when at least one observation had not been seen recently. */
+  novel: boolean
+  /** The observations that were new. */
+  fresh: SenseObservation[]
+}
+
+/**
+ * Compares what the sense returned with what the companion already saw.
+ *
+ * Novelty is what raises curiosity, so a static desktop must not keep counting
+ * as new. The caller passes the texts it already holds, oldest first.
+ */
+export function digestSense(
+  observations: SenseObservation[],
+  seenTexts: string[],
+): SenseDigest {
+  const seen = new Set(seenTexts)
+  const fresh = observations.filter(observation => observation.text.trim() && !seen.has(observation.text))
+  return {
+    texts: fresh.map(observation => observation.text),
+    novel: fresh.length > 0,
+    fresh,
+  }
+}

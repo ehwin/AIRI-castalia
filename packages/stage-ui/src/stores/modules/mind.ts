@@ -1,13 +1,15 @@
-import type { Drives, InnerStream, Thought } from '@proj-airi/core-agent'
+import type { Drives, InnerStream, SensePort, Thought } from '@proj-airi/core-agent'
 
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
 import {
   advanceDrives,
+  blindSense,
   composeThought,
   createRefusalState,
   createStream,
+  digestSense,
   evaluateRefusal,
   inferRequestTraits,
   planReturn,
@@ -24,6 +26,9 @@ const TICK_MS = 45_000
 
 /** How many observations the lane may draw on. */
 const OBSERVATION_LIMIT = 8
+
+/** How many seen sense lines are remembered to decide what is new. */
+const SENSE_MEMORY = 32
 
 /** Who it is, for friction. A tidy character with a normal patience. */
 const personaForFriction = { tidiness: 0.6, patience: 0.5 }
@@ -52,11 +57,19 @@ export const useMindStore = defineStore('mind', () => {
   const opening = ref<string>()
   const heldBack = ref<Thought>()
   const initialized = ref(false)
+  /** True once a sense is attached, so a host can show what it can perceive. */
+  const senseAttached = ref(false)
 
   let timer: ReturnType<typeof setInterval> | null = null
   let lastTickAt = Date.now()
   let observations: string[] = []
   let detachTurnComplete: (() => void) | null = null
+  /** Where perception comes from. Blind until a host attaches a port. */
+  let sense: SensePort = blindSense
+  /** Sense lines already seen, oldest first, so the same desktop is not new twice. */
+  let seenTexts: string[] = []
+  /** Set by `lookAround` and consumed by the next tick. */
+  const novelty = ref(false)
 
   /** The line a prompt may carry, or an empty string when nothing is worth it. */
   const stateLine = computed(() => renderStateLine({
@@ -73,6 +86,32 @@ export const useMindStore = defineStore('mind', () => {
     observations = [...observations, trimmed].slice(-OBSERVATION_LIMIT)
   }
 
+  /** Points the mind at something that can look at the world. Unset means blind. */
+  function attachSense(port: SensePort | undefined) {
+    sense = port ?? blindSense
+    senseAttached.value = Boolean(port)
+  }
+
+  /**
+   * Asks the sense what it can see and feeds the result to the lane.
+   *
+   * Returning the number of fresh observations keeps this testable without a
+   * screen. A host calls it on a timer, or from `tick` as the app grows.
+   */
+  async function lookAround(): Promise<number> {
+    const observationsSeen = await sense.look().catch(() => [])
+    const digest = digestSense(observationsSeen, seenTexts)
+    if (!digest.novel)
+      return 0
+
+    seenTexts = [...seenTexts, ...digest.texts].slice(-SENSE_MEMORY)
+    for (const text of digest.texts)
+      observe(text)
+    // Something new is what raises curiosity at the next tick.
+    novelty.value = true
+    return digest.texts.length
+  }
+
   /** Advances every drive and lets the background lane write at most one thought. */
   function tick(now = Date.now()) {
     const elapsed = Math.max(0, now - lastTickAt)
@@ -83,7 +122,9 @@ export const useMindStore = defineStore('mind', () => {
       fullscreen: false,
       micActive: false,
       hourOfDay: new Date(now).getHours(),
+      novelty: novelty.value,
     })
+    novelty.value = false
 
     // The roll is the impure input the pure lane needs. It lives here on purpose.
     const thought = composeThought({
@@ -213,6 +254,9 @@ export const useMindStore = defineStore('mind', () => {
     observe,
     tick,
     poke,
+    attachSense,
+    lookAround,
+    senseAttached,
     handoffFor,
     delegations,
     settleDelegation,
