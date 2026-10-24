@@ -1204,10 +1204,20 @@ pages:
       title: Diary
       description: What she thought about while nobody asked
       summary: '{days} days, {said} of them said out loud'
-      privacy: She writes here on her own. Nothing on this page was said to you.
+      privacy: She writes here on her own. Nothing in it was said to you.
       loading: Opening her diary...
       empty: Nothing yet. She writes when something is worth dwelling on.
       day-count: 'no entries | one entry | {count} entries'
+      hidden: '{count} lines kept to herself'
+      distill: Remember this day
+      distilled: Remembered
+      reveal:
+        label: Show everything she wrote
+        description: Off by default. The lines stay hidden so the diary stays hers.
+        warning: With this on you read what she did not choose to say. It stops being a diary.
+      shared:
+        title: What she said out loud
+        empty: Nothing yet. She keeps almost everything to herself.
     perception:
       title: Perception
       description: What the companion may look at
