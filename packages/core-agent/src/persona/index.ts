@@ -7,4 +7,5 @@ export { applyFriction, assessFriction, defaultFrictionConfig } from './friction
 export type { InnerStream, Thought, ThoughtVisibility } from './inner-stream'
 export { createStream, record, recent, sharedRatio, surface } from './inner-stream'
 export type { StateLineInput } from './state-line'
+export { inferRequestTraits } from './request-traits'
 export { renderStateLine } from './state-line'

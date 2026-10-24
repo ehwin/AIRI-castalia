@@ -5,8 +5,11 @@ import { computed, ref } from 'vue'
 
 import {
   advanceDrives,
+  applyFriction,
+  assessFriction,
   composeThought,
   createStream,
+  inferRequestTraits,
   planReturn,
   recent,
   record,
@@ -21,6 +24,9 @@ const TICK_MS = 45_000
 
 /** How many observations the lane may draw on. */
 const OBSERVATION_LIMIT = 8
+
+/** Who it is, for friction. A tidy character with a normal patience. */
+const personaForFriction = { tidiness: 0.6, patience: 0.5 }
 
 /**
  * The mind: drives, a private stream, and what happened while the app was off.
@@ -125,6 +131,24 @@ export const useMindStore = defineStore('mind', () => {
   }
 
   /**
+   * Whether the companion refuses this request.
+   *
+   * Returns the words to show instead of sending, or `undefined` to send. A
+   * grumble passes through and only costs fatigue.
+   */
+  function refuseFor(text: string): string | undefined {
+    const result = assessFriction(inferRequestTraits(text), personaForFriction, drives.value)
+    if (result.stance === 'accept')
+      return undefined
+
+    drives.value = applyFriction(drives.value, result)
+    if (result.stance === 'grumble')
+      return undefined
+
+    return `Not right now. ${result.reason}.`
+  }
+
+  /**
    * Counts each finished turn as effort.
    *
    * The parameter is the chat store's registration function, passed straight
@@ -163,6 +187,7 @@ export const useMindStore = defineStore('mind', () => {
     observe,
     tick,
     poke,
+    refuseFor,
     attachTurnComplete,
     dispose,
   }

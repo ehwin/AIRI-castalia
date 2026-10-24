@@ -15,6 +15,8 @@ import { fileSource } from '@proj-airi/audio/encoding'
 import { createChatOrchestratorRuntime, isBackgroundRecipe, matchKeywordRecipes, renderConversationPreview } from '@proj-airi/core-agent'
 import { IOAttributes, IOEvents, IOSpanNames, IOSubsystems } from '@proj-airi/stage-shared'
 import { isEqual } from 'es-toolkit'
+
+import { useMindStore } from './modules/mind'
 import { nanoid } from 'nanoid'
 import { defineStore, storeToRefs } from 'pinia'
 import { computed, shallowRef, toRaw } from 'vue'
@@ -276,6 +278,7 @@ export const useChatStore = defineStore('chat', () => {
   const chatSession = useChatSessionStore()
   const chatStream = useChatStreamStore()
   const chatContext = useChatContextStore()
+  const mindStore = useMindStore()
   const cardStore = useAiriCardStore()
   const recipes = useRecipesStore()
   const memory = useMemoryStore()
@@ -992,7 +995,12 @@ export const useChatStore = defineStore('chat', () => {
     },
     getActiveSessionId: () => activeSessionId.value,
     getActiveProvider: () => activeProvider.value,
-    getSystemPromptSupplement: () => llmToolsetPromptsStore.activeToolsetPrompt,
+    // The companion reads its own state every send. A tired afternoon sounds
+    // different from a fresh morning. The toolset prompt keeps its place.
+    getSystemPromptSupplement: () => [
+      llmToolsetPromptsStore.activeToolsetPrompt,
+      mindStore.stateLine || undefined,
+    ].filter(Boolean).join('\n\n') || undefined,
     // Identity follows the session's persona at request time, so a card switch never rewrites another session.
     getSystemPrompt: sessionSystemPrompt,
     runtimeContextProviders: [
@@ -1313,6 +1321,15 @@ export const useChatStore = defineStore('chat', () => {
     const existing = requests.get(key)
     if (existing)
       return existing.request
+
+    // A refusal never reaches the model. It shows as a failed send so the owner
+    // can retry, and the reason reads as something the companion said.
+    const refusal = mindStore.refuseFor(payload.text)
+    if (refusal) {
+      const error = new Error(refusal)
+      appendSendError(payload.sessionId, error)
+      return { accepted: Promise.resolve({ sessionId: payload.sessionId, messageId }), done: Promise.resolve() }
+    }
 
     const abort = new AbortController()
     // A keyword invokes its recipes like slash commands. A decision among them judges with the judgment tool.
