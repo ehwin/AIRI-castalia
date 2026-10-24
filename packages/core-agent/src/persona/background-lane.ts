@@ -18,6 +18,8 @@ export interface LaneInput {
   observations: string[]
   /** A number in 0 to 1 from the caller, so this stays pure. */
   roll: number
+  /** When the last thought was written. A companion that dwells every minute is not quiet. */
+  lastThoughtAt?: number
 }
 
 export interface LaneConfig {
@@ -25,18 +27,22 @@ export interface LaneConfig {
   minBoredom: number
   /** Chance that a tick with observations produces a thought. */
   chance: number
+  /** Shortest gap between two thoughts, so the stream stays readable. */
+  minGapMs: number
 }
 
 export const defaultLaneConfig: LaneConfig = {
   minBoredom: 25,
   chance: 0.25,
+  minGapMs: 10 * 60_000,
 }
 
 /**
  * Returns one private thought, or `undefined` when this tick stays quiet.
  *
- * Three gates, in order: there is something to think about, the companion is
- * bored enough to dwell on it, and the roll passes. Quiet is the common case.
+ * Four gates, in order: there is something to think about, the companion is
+ * bored enough to dwell on it, enough time passed since the last thought, and
+ * the roll passes. Quiet is the common case.
  */
 export function composeThought(
   input: LaneInput,
@@ -47,6 +53,9 @@ export function composeThought(
     return undefined
 
   if (input.drives.boredom < config.minBoredom)
+    return undefined
+
+  if (input.lastThoughtAt !== undefined && input.now - input.lastThoughtAt < config.minGapMs)
     return undefined
 
   if (input.roll >= config.chance)

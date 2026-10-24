@@ -98,3 +98,27 @@ describe('state line', () => {
     expect(line.length).toBeLessThan(120)
   })
 })
+
+describe('the lane stays quiet', () => {
+  it('writes nothing when the last thought is recent', () => {
+    const thought = composeThought({
+      now: 1_000_000,
+      drives: { fatigue: 0, boredom: 60, curiosity: 0, focus: 0 },
+      observations: ['a failed build'],
+      roll: 0.01,
+      lastThoughtAt: 1_000_000 - 60_000,
+    })
+    expect(thought).toBeUndefined()
+  })
+
+  it('writes again once the gap passed', () => {
+    const thought = composeThought({
+      now: 1_000_000,
+      drives: { fatigue: 0, boredom: 60, curiosity: 0, focus: 0 },
+      observations: ['a failed build'],
+      roll: 0.01,
+      lastThoughtAt: 1_000_000 - 11 * 60_000,
+    })
+    expect(thought?.text).toContain('a failed build')
+  })
+})
