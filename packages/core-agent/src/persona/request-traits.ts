@@ -14,7 +14,12 @@ const clamp01 = (value: number) => Math.min(1, Math.max(0, value))
 const CHORE_WORDS = /\b(clean\s*up|reformat|reorder|proofread|sort|summari[sz]e|refactor|rename)\b/i
 const CHORE_WORDS_CJK = /(整理|格式化|重排|校对|排序|归纳|摘要|重构|改名)/
 
-export function inferRequestTraits(text: string): RequestTraits {
+/** Whether the request asks for rework rather than an answer. Only chores can be refused. */
+export interface RequestTraitsWithKind extends RequestTraits {
+  isChore: boolean
+}
+
+export function inferRequestTraits(text: string): RequestTraitsWithKind {
   const trimmed = text.trim()
   const length = trimmed.length
   const lines = trimmed.split('\n')
@@ -30,5 +35,5 @@ export function inferRequestTraits(text: string): RequestTraits {
   // A short question is a minute. A dump of 3,000 characters is not.
   const durationMin = Math.min(30, Math.round(length / 300))
 
-  return { tedium, mess, durationMin }
+  return { tedium, mess, durationMin, isChore }
 }

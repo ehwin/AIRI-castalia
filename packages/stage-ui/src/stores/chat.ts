@@ -1322,12 +1322,11 @@ export const useChatStore = defineStore('chat', () => {
     if (existing)
       return existing.request
 
-    // A refusal never reaches the model. It shows as a failed send so the owner
-    // can retry, and the reason reads as something the companion said.
-    const refusal = mindStore.refuseFor(payload.text)
-    if (refusal) {
-      const error = new Error(refusal)
-      appendSendError(payload.sessionId, error)
+    // A handoff never reaches the model as a request to do the work. She says her
+    // line and the task is queued for whoever does it. It never means silence.
+    const handoff = mindStore.handoffFor(payload.text)
+    if (handoff) {
+      appendSendError(payload.sessionId, new Error(handoff.line))
       return { accepted: Promise.resolve({ sessionId: payload.sessionId, messageId }), done: Promise.resolve() }
     }
 

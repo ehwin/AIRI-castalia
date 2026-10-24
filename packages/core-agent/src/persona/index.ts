@@ -7,5 +7,8 @@ export { applyFriction, assessFriction, defaultFrictionConfig } from './friction
 export type { InnerStream, Thought, ThoughtVisibility } from './inner-stream'
 export { createStream, record, recent, sharedRatio, surface } from './inner-stream'
 export type { StateLineInput } from './state-line'
+export type { RequestTraitsWithKind } from './request-traits'
 export { inferRequestTraits } from './request-traits'
+export type { RefusalDecision, RefusalInput, RefusalPolicy, RefusalState } from './refusal-policy'
+export { createRefusalState, defaultRefusalPolicy, evaluateRefusal } from './refusal-policy'
 export { renderStateLine } from './state-line'

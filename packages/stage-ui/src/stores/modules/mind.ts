@@ -5,10 +5,10 @@ import { computed, ref } from 'vue'
 
 import {
   advanceDrives,
-  applyFriction,
-  assessFriction,
   composeThought,
+  createRefusalState,
   createStream,
+  evaluateRefusal,
   inferRequestTraits,
   planReturn,
   recent,
@@ -27,6 +27,13 @@ const OBSERVATION_LIMIT = 8
 
 /** Who it is, for friction. A tidy character with a normal patience. */
 const personaForFriction = { tidiness: 0.6, patience: 0.5 }
+
+/** A task she handed to someone else because it is not hers to do. */
+export interface DelegatedTask {
+  id: string
+  text: string
+  at: number
+}
 
 /**
  * The mind: drives, a private stream, and what happened while the app was off.
@@ -130,22 +137,41 @@ export const useMindStore = defineStore('mind', () => {
     return thought
   }
 
+  let refusalState = createRefusalState()
+  /** Tasks she handed to someone else. Drained by the deep lane, never dropped. */
+  const delegations = ref<DelegatedTask[]>([])
+
   /**
-   * Whether the companion refuses this request.
+   * Whether the companion hands this request off instead of doing it herself.
    *
-   * Returns the words to show instead of sending, or `undefined` to send. A
-   * grumble passes through and only costs fatigue.
+   * A handoff is work, not silence: it returns the line she says and queues the
+   * task. Asking again within the insist window makes her do it herself, and the
+   * hourly budget turns later handoffs into complaints.
    */
-  function refuseFor(text: string): string | undefined {
-    const result = assessFriction(inferRequestTraits(text), personaForFriction, drives.value)
-    if (result.stance === 'accept')
+  function handoffFor(text: string): { line: string, task: string } | undefined {
+    const decision = evaluateRefusal(refusalState, {
+      text,
+      traits: inferRequestTraits(text),
+      persona: personaForFriction,
+      drives: drives.value,
+      now: Date.now(),
+    })
+    refusalState = decision.state
+    drives.value = decision.drives
+    if (!decision.handoff || !decision.message || !decision.task)
       return undefined
 
-    drives.value = applyFriction(drives.value, result)
-    if (result.stance === 'grumble')
-      return undefined
+    delegations.value = [...delegations.value, {
+      id: `delegation-${Date.now()}`,
+      text: decision.task,
+      at: Date.now(),
+    }].slice(-20)
+    return { line: decision.message, task: decision.task }
+  }
 
-    return `Not right now. ${result.reason}.`
+  /** Removes a handed-off task once someone reports back. */
+  function settleDelegation(id: string) {
+    delegations.value = delegations.value.filter(item => item.id !== id)
   }
 
   /**
@@ -187,7 +213,9 @@ export const useMindStore = defineStore('mind', () => {
     observe,
     tick,
     poke,
-    refuseFor,
+    handoffFor,
+    delegations,
+    settleDelegation,
     attachTurnComplete,
     dispose,
   }
