@@ -31,13 +31,15 @@ export const defaultLoopPolicy: LoopPolicy = {
   maxToolCalls: 12,
 }
 
-export type LoopFinish = 'ok' | 'budget' | 'cancelled'
+export type LoopFinish = 'ok' | 'budget' | 'cancelled' | 'error'
 
 export type LoopEvent =
   | { type: 'user-said', text: string }
   | { type: 'model-replied', text: string, toolCalls: ToolCall[] }
   | { type: 'tool-settled', callId: string, output: string }
   | { type: 'tool-failed', callId: string, error: string }
+  | { type: 'request-header', model: string, tools: string[] }
+  | { type: 'model-failed', error: string }
   | { type: 'cancelled' }
 
 export interface LoopState {
@@ -77,6 +79,16 @@ export function step(
     return { state, effects: [] }
 
   switch (event.type) {
+    // Configuration is recorded, not acted on. It exists so a replay can check
+    // that the same model and tools produced this turn.
+    case 'request-header':
+      return { state, effects: [] }
+
+    // A failed model call still owns a record. Dropping it would leave the turn
+    // with no trace of what happened.
+    case 'model-failed':
+      return finish(state, 'error')
+
     case 'user-said': {
       const next: LoopState = {
         ...createState(),
@@ -131,6 +143,8 @@ export function step(
 }
 
 export interface TurnDeps {
+  /** The model name, recorded so a replay can tell which model produced this turn. */
+  model?: string
   /** One model call. Returns the reply text and any tool calls the model asked for. */
   send: (messages: LoopMessage[], signal?: AbortSignal) => Promise<{ text: string, toolCalls: ToolCall[] }>
   tools: ToolPort[]
@@ -181,6 +195,13 @@ export async function runTurn(input: string, deps: TurnDeps): Promise<TurnResult
   let state = createState()
   const record: StepRecord[] = []
 
+  // What this turn ran with. Without it, a replay cannot tell a real match from
+  // a coincidence where a different model happened to behave the same way.
+  record.push({
+    event: { type: 'request-header', model: deps.model ?? 'unknown', tools: deps.tools.map(tool => tool.name) },
+    effects: [],
+  })
+
   /** Every decision goes through here so the turn keeps its own log. */
   const advance = (current: LoopState, event: LoopEvent) => {
     const next = step(current, event, policy)
@@ -220,7 +241,19 @@ export async function runTurn(input: string, deps: TurnDeps): Promise<TurnResult
       continue
 
     if (effect.type === 'call-model') {
-      const reply = await deps.send(effect.messages, deps.signal)
+      let reply: { text: string, toolCalls: ToolCall[] }
+      try {
+        reply = await deps.send(effect.messages, deps.signal)
+      }
+      catch (error) {
+        if (cancelIfAborted())
+          continue
+        // A failed call still owns a record, so the turn leaves a trace.
+        const failed = advance(state, { type: 'model-failed', error: error instanceof Error ? error.message : String(error) })
+        state = failed.state
+        effects = failed.effects
+        continue
+      }
       if (cancelIfAborted())
         continue
       const next = advance(state, { type: 'model-replied', text: reply.text, toolCalls: reply.toolCalls })

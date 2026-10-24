@@ -73,8 +73,7 @@ describe('replay', () => {
   })
 })
 
-describe('malformed tool calls', () => {
-  it('records an unknown tool as a failure instead of throwing', async () => {
+describe('malformed tool calls', () => {  it('records an unknown tool as a failure instead of throwing', async () => {
     const send = vi.fn()
       .mockResolvedValueOnce({ text: '', toolCalls: [{ callId: 'x', name: '', arguments: 'not json' }] })
       .mockResolvedValueOnce({ text: 'sorry', toolCalls: [] })
@@ -96,5 +95,42 @@ describe('malformed tool calls', () => {
     const result = await runTurn('question', { send, tools: [] })
     const toolMessage = result.state.messages.find(message => message.role === 'tool')
     expect(toolMessage).toMatchObject({ failed: true })
+  })
+})
+
+describe('what the record keeps', () => {
+  it('starts with the request header', async () => {
+    const send = vi.fn().mockResolvedValue({ text: 'ok', toolCalls: [] })
+    const result = await runTurn('question', {
+      send,
+      tools: [tool('lookup', async () => 'x')],
+      model: 'local/qwen',
+    })
+
+    const header = result.record[0].event
+    expect(header).toMatchObject({ type: 'request-header', model: 'local/qwen', tools: ['lookup'] })
+    expect(replay(result.record).matches).toBe(true)
+  })
+
+  it('keeps a failed model call instead of losing the turn', async () => {
+    const send = vi.fn().mockRejectedValue(new Error('connection reset'))
+    const result = await runTurn('question', { send, tools: [] })
+
+    expect(result.state.finished).toBe('error')
+    const failed = result.record.find(step => step.event.type === 'model-failed')
+    expect(failed?.event).toMatchObject({ type: 'model-failed', error: 'connection reset' })
+    expect(replay(result.record).matches).toBe(true)
+  })
+
+  it('records the failure after a successful first round', async () => {
+    const send = vi.fn()
+      .mockResolvedValueOnce({ text: '', toolCalls: [call('a')] })
+      .mockRejectedValueOnce(new Error('rate limited'))
+
+    const result = await runTurn('question', { send, tools: [tool('lookup', async () => '42')] })
+
+    expect(result.state.finished).toBe('error')
+    expect(result.record.some(step => step.event.type === 'tool-settled')).toBe(true)
+    expect(replay(result.record).matches).toBe(true)
   })
 })
