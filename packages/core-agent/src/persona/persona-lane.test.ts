@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { Drives } from '../mind/drives'
 
 import { composeThought, defaultLaneConfig } from './background-lane'
+import { createStream, record, sharedRatio } from './inner-stream'
 import { renderStateLine } from './state-line'
 
 const calm: Drives = { fatigue: 0, boredom: 0, curiosity: 0, focus: 0 }
@@ -99,26 +100,27 @@ describe('state line', () => {
   })
 })
 
-describe('the lane stays quiet', () => {
-  it('writes nothing when the last thought is recent', () => {
-    const thought = composeThought({
-      now: 1_000_000,
-      drives: { fatigue: 0, boredom: 60, curiosity: 0, focus: 0 },
-      observations: ['a failed build'],
-      roll: 0.01,
-      lastThoughtAt: 1_000_000 - 60_000,
-    })
-    expect(thought).toBeUndefined()
-  })
+describe('the lane is a diary, not chatter', () => {
+  it('writes often while bored and never shares a thought', () => {
+    let stream = createStream()
+    let written = 0
 
-  it('writes again once the gap passed', () => {
-    const thought = composeThought({
-      now: 1_000_000,
-      drives: { fatigue: 0, boredom: 60, curiosity: 0, focus: 0 },
-      observations: ['a failed build'],
-      roll: 0.01,
-      lastThoughtAt: 1_000_000 - 11 * 60_000,
-    })
-    expect(thought?.text).toContain('a failed build')
+    for (let tick = 0; tick < 160; tick++) {
+      const thought = composeThought({
+        now: tick * 45_000,
+        drives: { fatigue: 0, boredom: 60, curiosity: 0, focus: 0 },
+        observations: ['a failed build', 'a green test run'],
+        roll: 0.01,
+      })
+      if (!thought)
+        continue
+      written++
+      stream = record(stream, thought)
+    }
+
+    // Roughly one thought every few minutes is a day of thinking, not noise.
+    expect(written).toBeGreaterThan(20)
+    // None of it is spoken. The user sees one only after asking.
+    expect(sharedRatio(stream)).toBe(0)
   })
 })

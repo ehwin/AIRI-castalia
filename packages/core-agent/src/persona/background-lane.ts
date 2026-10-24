@@ -3,10 +3,15 @@
  *
  * A companion with no background lane has an empty inner stream, so there is
  * nothing to be lost in thought about. This turns observations into private
- * thoughts at a low rate, so most ticks produce nothing.
+ * thoughts, and none of them reach the user unless they poke the companion.
  *
  * Source: Generative Agents (Park et al., UIST 2023) runs reflection on a
  * schedule, not on every step. The rate matters more than the prompt.
+ *
+ * A thought every few minutes is a diary, not chatter. The lane writes often on
+ * purpose: an inner life that only ticks once an hour reads as empty. What keeps
+ * this from feeling noisy is that `visibility` stays `private`, so the stream is
+ * never spoken.
  */
 import type { Drives } from '../mind/drives'
 import type { Thought } from './inner-stream'
@@ -18,8 +23,6 @@ export interface LaneInput {
   observations: string[]
   /** A number in 0 to 1 from the caller, so this stays pure. */
   roll: number
-  /** When the last thought was written. A companion that dwells every minute is not quiet. */
-  lastThoughtAt?: number
 }
 
 export interface LaneConfig {
@@ -27,22 +30,19 @@ export interface LaneConfig {
   minBoredom: number
   /** Chance that a tick with observations produces a thought. */
   chance: number
-  /** Shortest gap between two thoughts, so the stream stays readable. */
-  minGapMs: number
 }
 
 export const defaultLaneConfig: LaneConfig = {
   minBoredom: 25,
   chance: 0.25,
-  minGapMs: 10 * 60_000,
 }
 
 /**
  * Returns one private thought, or `undefined` when this tick stays quiet.
  *
- * Four gates, in order: there is something to think about, the companion is
- * bored enough to dwell on it, enough time passed since the last thought, and
- * the roll passes. Quiet is the common case.
+ * Three gates, in order: there is something to think about, the companion is
+ * bored enough to dwell on it, and the roll passes. A thought here is never
+ * spoken. It waits in the stream until the user asks what she is thinking.
  */
 export function composeThought(
   input: LaneInput,
@@ -53,9 +53,6 @@ export function composeThought(
     return undefined
 
   if (input.drives.boredom < config.minBoredom)
-    return undefined
-
-  if (input.lastThoughtAt !== undefined && input.now - input.lastThoughtAt < config.minGapMs)
     return undefined
 
   if (input.roll >= config.chance)

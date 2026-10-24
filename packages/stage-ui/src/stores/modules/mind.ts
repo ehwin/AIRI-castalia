@@ -68,8 +68,6 @@ export const useMindStore = defineStore('mind', () => {
   let sense: SensePort = blindSense
   /** Sense lines already seen, oldest first, so the same desktop is not new twice. */
   let seenTexts: string[] = []
-  /** When the last private thought was written, so the lane can stay quiet. */
-  let lastThoughtAt: number | undefined
   /** Set by `lookAround` and consumed by the next tick. */
   const novelty = ref(false)
 
@@ -134,13 +132,11 @@ export const useMindStore = defineStore('mind', () => {
       drives: drives.value,
       observations,
       roll: Math.random(),
-      lastThoughtAt,
     })
     if (!thought)
       return
 
     observations = []
-    lastThoughtAt = now
     stream.value = record(stream.value, thought)
     void innerThoughtsRepo.append(thought).catch(() => {})
   }
