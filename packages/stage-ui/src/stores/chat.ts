@@ -49,7 +49,7 @@ import { resolveLlmTools } from './ai/chat-llm/tool-resolver'
 import { useLlmToolsStore } from './ai/chat-llm/tools'
 import { useLlmToolsetPromptsStore } from './ai/chat-llm/toolset-prompts'
 import { useAuthStore } from './auth'
-import { createMinecraftContext, createRuntimePromptContext, createUserAccountContext } from './chat/context-providers'
+import { createMindStateContext, createMinecraftContext, createRuntimePromptContext, createUserAccountContext } from './chat/context-providers'
 import { useChatContextStore } from './chat/context-store'
 import { describeChatImages, replaceToolResultImages } from './chat/image-projection'
 import { composeRecipeSpacePrompt, composeSystemPrompt } from './chat/prompt-recipe'
@@ -995,16 +995,14 @@ export const useChatStore = defineStore('chat', () => {
     },
     getActiveSessionId: () => activeSessionId.value,
     getActiveProvider: () => activeProvider.value,
-    // The companion reads its own state every send. A tired afternoon sounds
-    // different from a fresh morning. The toolset prompt keeps its place.
-    getSystemPromptSupplement: () => [
-      llmToolsetPromptsStore.activeToolsetPrompt,
-      mindStore.stateLine || undefined,
-    ].filter(Boolean).join('\n\n') || undefined,
+    getSystemPromptSupplement: () => llmToolsetPromptsStore.activeToolsetPrompt,
     // Identity follows the session's persona at request time, so a card switch never rewrites another session.
     getSystemPrompt: sessionSystemPrompt,
     runtimeContextProviders: [
       () => createRuntimePromptContext(runtimePrompt.value),
+      // Her state changes every turn. It goes here, not in the system prompt,
+      // so the cacheable prefix stays byte-stable.
+      () => createMindStateContext(mindStore.stateLine),
       createMinecraftContext,
     ],
     // A card that the model draws is part of its answer, so the reply shows the card, not the call.
