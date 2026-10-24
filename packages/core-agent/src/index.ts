@@ -76,3 +76,8 @@ export type {
   StreamOptions,
 } from './types/llm'
 export * from './voice'
+
+export * from './loop'
+export * from './mind'
+export * from './persona'
+export * from './presence'

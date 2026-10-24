@@ -13,6 +13,7 @@ import { isSherpawModelBundled, setSherpawModelAssetHost } from '@proj-airi/stag
 import { useAuthStore } from '@proj-airi/stage-ui/stores/auth'
 import { useCharacterOrchestratorStore } from '@proj-airi/stage-ui/stores/character'
 import { useChatStore } from '@proj-airi/stage-ui/stores/chat'
+import { useMindStore } from '@proj-airi/stage-ui/stores/modules/mind'
 import { usePluginHostInspectorStore } from '@proj-airi/stage-ui/stores/devtools/plugin-host-debug'
 import { useDisplayModelsStore } from '@proj-airi/stage-ui/stores/display-models'
 import { useModsServerChannelStore } from '@proj-airi/stage-ui/stores/mods/api/channel-server'
@@ -110,6 +111,7 @@ const setLocale = useElectronEventaInvoke(i18nSetLocale)
 const windowContext = resolveRendererWindowContext()
 const initialRoutePath = resolveInitialRendererRoutePath(route.path)
 const chatStore = useChatStore()
+const mindStore = useMindStore()
 const builtinToolsStore = useTamagotchiBuiltinToolsStore()
 const homeAssistantStore = useTamagotchiHomeAssistantStore()
 const mcpToolsStore = useTamagotchiMcpToolsStore()
@@ -402,6 +404,12 @@ onMounted(async () => {
 
   await chatStore.initialize(syncedPinia)
 
+  // The mind reads what happened while the app was off, then keeps its own clock.
+  // It only listens to finished turns; it never reads the chat store directly, so
+  // the two stores stay independent.
+  mindStore.attachTurnComplete(chatStore.onChatTurnComplete)
+  await mindStore.initialize()
+
   await fullStageRuntime?.initialize()
   await chatStreamView?.initializeStreamView()
 })
@@ -415,6 +423,7 @@ watch(themeColorsHueDynamic, () => {
 }, { immediate: true })
 
 onUnmounted(() => {
+  mindStore.dispose()
   stopIOTraceHubBridge()
   stopModelAssetStatus()
   stopLeadershipListener?.()
