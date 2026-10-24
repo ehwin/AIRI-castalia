@@ -114,35 +114,33 @@ describe('gatesFrom', () => {
 })
 
 describe('decide', () => {
-  it('provokes when boredom crosses the threshold and the gates allow it', () => {
-    const gates = gatesFrom({ ...quietEnvironment, hourOfDay: 15 })
-    expect(decide({ ...idle(), boredom: 61 }, gates)).toBe('provoke')
+  it('wants to speak when boredom crosses the threshold', () => {
+    expect(decide({ ...idle(), boredom: 61 })).toBe('provoke')
   })
 
-  it('stays idle when fatigue passes the sleep threshold, even when bored', () => {
-    const gates = gatesFrom({ ...quietEnvironment, hourOfDay: 15 })
-    expect(decide({ ...idle(), boredom: 90, fatigue: 85 }, gates)).toBe('idle')
+  it('wants nothing when fatigue passes the sleep threshold, even when bored', () => {
+    expect(decide({ ...idle(), boredom: 90, fatigue: 85 })).toBe('idle')
   })
 
-  it('stays idle when the gates block speech and nothing else demands action', () => {
+  it('still wants to speak while the gates block it', () => {
+    // Intent and permission are separate: `decide` reports the urge, and
+    // `planExpression` turns it into a held-back bubble.
     const gates = gatesFrom({ ...quietEnvironment, fullscreen: true })
-    expect(decide({ ...idle(), boredom: 61 }, gates)).toBe('idle')
+    expect(gates.allowProvoke).toBe(false)
+    expect(decide({ ...idle(), boredom: 61 })).toBe('provoke')
   })
 
   it('thinks when curiosity crosses the think threshold', () => {
-    const gates = gatesFrom({ ...quietEnvironment, hourOfDay: 15 })
-    expect(decide({ ...idle(), curiosity: 60 }, gates)).toBe('think')
+    expect(decide({ ...idle(), curiosity: 60 })).toBe('think')
   })
 
   it('prefers speaking over thinking when both cross their thresholds', () => {
-    const gates = gatesFrom({ ...quietEnvironment, hourOfDay: 15 })
-    expect(decide({ ...idle(), boredom: 70, curiosity: 70 }, gates)).toBe('provoke')
+    expect(decide({ ...idle(), boredom: 70, curiosity: 70 })).toBe('provoke')
   })
 
   it('uses the configured thresholds', () => {
-    const gates = gatesFrom({ ...quietEnvironment, hourOfDay: 15 })
     const strict = { ...defaultActionThresholds, provoke: 95 }
-    expect(decide({ ...idle(), boredom: 61 }, gates, strict)).toBe('idle')
+    expect(decide({ ...idle(), boredom: 61 }, strict)).toBe('idle')
   })
 })
 

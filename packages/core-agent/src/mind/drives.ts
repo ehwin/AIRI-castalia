@@ -215,21 +215,24 @@ export const defaultActionThresholds: ActionThresholds = {
 }
 
 /**
- * Picks one action from the drives and the gates.
+ * Picks what the companion wants to do, before any gate applies.
  *
- * Fatigue wins over every other drive. A tired companion does nothing, even
- * when it is bored, because rest is the only way back.
+ * This is intent, not permission. The gates live in `planExpression`, which
+ * decides whether the intent becomes speech, a bubble, or a held-back thought.
+ * Mixing the two here made "wants to talk but is blocked" impossible.
+ *
+ * Fatigue still wins over every other drive: a tired companion wants nothing,
+ * and rest is the only way back.
  */
 export function decide(
   drives: Drives,
-  gates: Gates,
   thresholds: ActionThresholds = defaultActionThresholds,
 ): MindAction {
   if (drives.fatigue >= thresholds.sleep)
     return 'idle'
-  if (drives.boredom >= thresholds.provoke && gates.allowProvoke)
+  if (drives.boredom >= thresholds.provoke)
     return 'provoke'
-  if (drives.curiosity >= thresholds.think && gates.allowThink)
+  if (drives.curiosity >= thresholds.think)
     return 'think'
   return 'idle'
 }
