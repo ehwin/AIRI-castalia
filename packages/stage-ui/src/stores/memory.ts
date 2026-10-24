@@ -1,6 +1,6 @@
 import { useLocalStorageManualReset } from '@proj-airi/stage-shared/composables'
 import { defineStore } from 'pinia'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
 /** One remembered fact. A character keeps it on its own card. A general memory reaches every card. */
 export interface MemoryEntry {
@@ -12,6 +12,20 @@ export interface MemoryEntry {
   /** The character card that owns this memory. Without it, the owner made the memory general. */
   persona?: string
   updatedAt: number
+}
+
+/**
+ * A durable store behind the in-memory entries.
+ *
+ * The prompt index must stay synchronous, so the local entries remain the read
+ * path and this port only receives writes. A remote that is slow, offline, or
+ * absent never blocks a reply.
+ */
+export interface MemoryRemotePort {
+  /** Every entry the remote holds. Replaces the local cache on start. */
+  list: () => Promise<MemoryEntry[]>
+  save: (entry: MemoryEntry) => Promise<void>
+  forget: (entry: Pick<MemoryEntry, 'name' | 'persona'>) => Promise<void>
 }
 
 /** Turns a free name into the kebab-case key that entries use. */
@@ -36,7 +50,37 @@ export const useMemoryStore = defineStore('memory', () => {
   const enabled = useLocalStorageManualReset<boolean>('memory/enabled', true)
   const entries = useLocalStorageManualReset<MemoryEntry[]>('memory/entries', [])
 
+  /** True once a remote answered, so a host can show where memories live. */
+  const remoteAttached = ref(false)
+  let remote: MemoryRemotePort | undefined
+
   const sorted = computed(() => [...entries.value].sort((left, right) => left.name.localeCompare(right.name)))
+
+  /**
+   * Points the store at a durable backend.
+   *
+   * The local entries keep serving `indexFor`, `read`, and the tools without
+   * waiting. This port only mirrors changes outward, and `hydrate` pulls the
+   * remote state in once at start.
+   */
+  function attachRemote(port: MemoryRemotePort | undefined) {
+    remote = port
+    remoteAttached.value = Boolean(port)
+  }
+
+  /** Replaces the local cache with the remote state. Keeps the cache when the remote fails. */
+  async function hydrate(): Promise<boolean> {
+    if (!remote)
+      return false
+    try {
+      entries.value = await remote.list()
+      return true
+    }
+    catch (cause) {
+      console.warn('[memory] remote hydrate failed, keeping local entries:', cause)
+      return false
+    }
+  }
 
   /** General memories and the persona's own. */
   function visibleTo(personaId: string) {
@@ -69,6 +113,7 @@ export const useMemoryStore = defineStore('memory', () => {
       return undefined
     const next: MemoryEntry = { name, description: entry.description.trim(), body: entry.body.trim(), persona: personaId, updatedAt: Date.now() }
     entries.value = [...entries.value.filter(existing => existing.name !== name || existing.persona !== personaId), next]
+    void remote?.save(next).catch((cause) => { console.warn('[memory] remote save failed:', cause) })
     return next
   }
 
@@ -78,12 +123,18 @@ export const useMemoryStore = defineStore('memory', () => {
     if (!source?.persona)
       return
     const { persona: _card, ...general } = source
-    entries.value = [...entries.value.filter(existing => existing !== source && (existing.name !== source.name || existing.persona)), { ...general, updatedAt: Date.now() }]
+    const moved: MemoryEntry = { ...general, updatedAt: Date.now() }
+    entries.value = [...entries.value.filter(existing => existing !== source && (existing.name !== source.name || existing.persona)), moved]
+    if (remote) {
+      void remote.forget({ name: source.name, persona: source.persona }).catch((cause) => { console.warn('[memory] remote forget failed:', cause) })
+      void remote.save(moved).catch((cause) => { console.warn('[memory] remote save failed:', cause) })
+    }
   }
 
   /** Removes one entry, from a tool or from Settings. */
   function remove(entry: Pick<MemoryEntry, 'name' | 'persona'>) {
     entries.value = entries.value.filter(existing => existing.name !== entry.name || existing.persona !== entry.persona)
+    void remote?.forget({ name: entry.name, persona: entry.persona }).catch((cause) => { console.warn('[memory] remote forget failed:', cause) })
   }
 
   /** Forgets an entry of the card by name. General memories belong to the owner, so a run cannot forget them. */
@@ -104,6 +155,9 @@ export const useMemoryStore = defineStore('memory', () => {
   return {
     enabled,
     entries: sorted,
+    remoteAttached,
+    attachRemote,
+    hydrate,
     visibleTo,
     indexFor,
     read,
