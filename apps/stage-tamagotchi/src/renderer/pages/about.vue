@@ -1,21 +1,19 @@
 <script setup lang="ts">
 import type { BugReportDialogSubmitPayload } from '@proj-airi/stage-ui/components'
 
-import type { ElectronUpdaterChannel } from '../../shared/eventa'
-
 import semver from 'semver'
 
 import { useElectronAutoUpdater, useElectronEventaInvoke } from '@proj-airi/electron-vueuse'
 import { AboutContent, BugReportDialog, createBugReportPageContext, MarkdownRenderer } from '@proj-airi/stage-ui/components'
-import { useAnalytics, useBreakpoints, useBuildInfo } from '@proj-airi/stage-ui/composables'
-import { Button, ContainerError, DoubleCheckButton, FieldSelect, Progress, ScrollableArea } from '@proj-airi/ui'
+import { useBreakpoints, useBuildInfo } from '@proj-airi/stage-ui/composables'
+import { Button, ContainerError, DoubleCheckButton, Progress, ScrollableArea } from '@proj-airi/ui'
 import { useClipboard } from '@vueuse/core'
 import { DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui'
 import { DrawerContent, DrawerDescription, DrawerHandle, DrawerOverlay, DrawerPortal, DrawerRoot, DrawerTitle } from 'vaul-vue'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { electronAppGetVersion, electronGetUpdaterPreferences, electronSetUpdaterPreferences } from '../../shared/eventa'
+import { electronAppGetVersion } from '../../shared/eventa'
 
 const buildInfo = useBuildInfo()
 // The main process owns the app version. Packaging can change it after the renderer build, so `buildInfo.version`
@@ -32,17 +30,10 @@ const {
   quitAndInstall,
 } = useElectronAutoUpdater()
 
-const {
-  trackUpdateDownloaded,
-  trackUpdateInstallClicked,
-  trackSettingsChanged,
-} = useAnalytics()
-
 const isDisabled = computed(() => updateState.value.status === 'disabled')
 // Every build of this tree reports `disabled`: the main process passes `enabled: false`, because
 // this fork has no release feed of its own. A Steam install is updated by Steam, not by the app.
 const isSteamDistribution = import.meta.env.VITE_DISTRIBUTION === 'steam'
-const isExternallyUpdated = computed(() => isSteamDistribution || isDisabled.value)
 const isLatestVersion = computed(() => {
   return updateState.value.status === 'not-available' && !isDisabled.value
 })
@@ -66,16 +57,6 @@ const updaterErrorMessage = computed(() => {
 const showChangelog = ref(false)
 const showBugReportDialog = ref(false)
 const { isDesktop } = useBreakpoints()
-const updateChannelOptions = ['auto', 'latest', 'stable', 'alpha', 'beta', 'nightly', 'canary'] as const
-type UpdateChannelOption = typeof updateChannelOptions[number]
-const updateChannelSelectOptions = computed(() => updateChannelOptions.map(channel => ({
-  label: channel === 'latest'
-    ? 'Latest (any release)'
-    : t(`tamagotchi.stage.about.update.channels.${channel}`),
-  value: channel,
-})))
-const selectedUpdateChannel = ref<UpdateChannelOption>('auto')
-const isUpdateChannelUpdating = ref(false)
 const bugReportDescription = ref('')
 const includeBugReportTriageContext = ref(false)
 const uploadBugReportMediaFromLibrary = ref(false)
@@ -127,20 +108,6 @@ const isDowngradeUpdate = computed(() => {
 })
 
 const getAppVersion = useElectronEventaInvoke(electronAppGetVersion)
-const getUpdaterPreferences = useElectronEventaInvoke(electronGetUpdaterPreferences)
-const setUpdaterPreferences = useElectronEventaInvoke(electronSetUpdaterPreferences)
-
-function handleQuitAndInstall() {
-  trackUpdateInstallClicked({ channel: selectedUpdateChannel.value, version: updateState.value.info?.version })
-  quitAndInstall()
-}
-
-// Fires on the state transition (not the download click) so the event means
-// "an update binary actually landed on this machine".
-watch(() => updateState.value.status, (status) => {
-  if (status === 'downloaded')
-    trackUpdateDownloaded({ channel: selectedUpdateChannel.value, version: updateState.value.info?.version })
-})
 
 function handleDownloadClick() {
   if (updateState.value.info?.releaseNotes)
@@ -197,34 +164,6 @@ async function refreshAppVersion() {
   appVersion.value = await getAppVersion()
 }
 
-async function refreshUpdaterChannelPreference() {
-  const preferences = await getUpdaterPreferences()
-  selectedUpdateChannel.value = preferences?.channel ?? 'auto'
-}
-
-async function setUpdateChannelPreference(channel: UpdateChannelOption) {
-  if (isUpdateChannelUpdating.value)
-    return
-
-  isUpdateChannelUpdating.value = true
-  try {
-    const previousChannel = selectedUpdateChannel.value
-    const nextChannel = channel === 'auto' ? undefined : channel as ElectronUpdaterChannel
-    const preferences = await setUpdaterPreferences({ channel: nextChannel })
-    selectedUpdateChannel.value = preferences?.channel ?? 'auto'
-    trackSettingsChanged({
-      setting_name: 'update_channel',
-      previous_value: previousChannel,
-      new_value: selectedUpdateChannel.value,
-      source: 'settings',
-    })
-    await checkForUpdates()
-  }
-  finally {
-    isUpdateChannelUpdating.value = false
-  }
-}
-
 // Ensure releaseNotes is a string for the renderer
 const releaseNotesContent = computed(() => {
   const notes = updateState.value.info?.releaseNotes
@@ -236,7 +175,6 @@ const releaseNotesContent = computed(() => {
 
 onMounted(() => {
   void refreshAppVersion()
-  void refreshUpdaterChannelPreference()
 })
 </script>
 
@@ -287,17 +225,6 @@ onMounted(() => {
                 <div>{{ buildInfo.builtOn }}</div>
               </div>
             </div>
-
-            <FieldSelect
-              v-if="!isExternallyUpdated"
-              :model-value="selectedUpdateChannel"
-              :disabled="isUpdateChannelUpdating || isBusy"
-              :label="t('tamagotchi.stage.about.update.lane.label')"
-              :description="t('tamagotchi.stage.about.update.lane.description')"
-              :placeholder="t('tamagotchi.stage.about.update.lane.placeholder')"
-              :options="updateChannelSelectOptions"
-              @update:model-value="setUpdateChannelPreference($event as UpdateChannelOption)"
-            />
 
             <!-- Update Logic -->
             <div :class="['flex flex-col gap-4']">
@@ -362,7 +289,7 @@ onMounted(() => {
                   <DoubleCheckButton
                     color="neutral"
                     variant="secondary"
-                    @confirm="handleQuitAndInstall()"
+                    @confirm="quitAndInstall()"
                   >
                     {{ restartButtonLabel }}
                     <template #confirm>
@@ -390,7 +317,6 @@ onMounted(() => {
 
                 <div :class="['flex flex-wrap gap-2']">
                   <Button
-                    v-track-button="{ name: 'update_check_clicked', channel: selectedUpdateChannel }"
                     :color="isError ? 'orange' : 'neutral'"
                     :variant="isError ? 'primary' : 'secondary'"
                     :loading="isBusy"

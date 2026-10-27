@@ -10,13 +10,11 @@ import { useI18n } from 'vue-i18n'
 
 import SessionsDialog from './sessions-dialog.vue'
 
-import { useAnalytics } from '../../../../composables/use-analytics'
 import { useBreakpoints } from '../../../../composables/use-breakpoints'
 import { extractMessageText } from '../../../../libs/chat-sync'
 import { useChatStore } from '../../../../stores/chat'
 import { useChatSessionStore } from '../../../../stores/chat/session-store'
 import { useAiriCardStore } from '../../../../stores/modules/airi-card'
-import { useConsciousnessStore } from '../../../../stores/modules/consciousness'
 
 const props = withDefaults(defineProps<{
   desktopMode?: 'dialog' | 'popover'
@@ -34,8 +32,6 @@ const chatSession = useChatSessionStore()
 const chat = useChatStore()
 const { sessionMetas, sessionMessages, activeSessionId } = storeToRefs(chatSession)
 const { activeCardId } = storeToRefs(useAiriCardStore())
-const { activeModel } = storeToRefs(useConsciousnessStore())
-const { trackChatSessionSelected, trackChatSessionStarted } = useAnalytics()
 
 // Creating persists the session, so prevent a second click from creating an
 // orphan session while the first is pending.
@@ -96,13 +92,6 @@ const rows = computed<SessionRow[]>(() => {
 })
 
 async function selectSession(sessionId: string) {
-  const selectedRow = rows.value.find(row => row.meta.sessionId === sessionId)
-  if (sessionId !== activeSessionId.value && selectedRow) {
-    trackChatSessionSelected({
-      source: 'sessions_drawer',
-      message_count: (sessionMessages.value[sessionId] ?? []).filter(message => message.role !== 'system').length,
-    })
-  }
   await chatSession.setActiveSession(sessionId)
   showDialog.value = false
 }
@@ -121,9 +110,6 @@ async function startNewSession() {
     // not let that stale continuation replace a newer local user selection.
     if (activeSessionId.value === selectionBeforeCreation)
       await chatSession.setActiveSession(sessionId)
-    // Store-created sessions also include restore and fork flows; only this
-    // user action belongs in the retention denominator.
-    trackChatSessionStarted(activeModel.value || 'unknown')
     showDialog.value = false
   }
   finally {

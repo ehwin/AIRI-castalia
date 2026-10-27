@@ -36,7 +36,7 @@ describe('card detail', () => {
         plugins: [pinia, createI18n({ legacy: false, locale: 'en', messages: { en } })],
       },
     })
-    const cardId = await useAiriCardStore(pinia).addCard({ name: 'Luna', version: '1.0.0' }, 'scratch')
+    const cardId = await useAiriCardStore(pinia).addCard({ name: 'Luna', version: '1.0.0' })
     await screen.rerender({ cardId })
     return { screen, cardId }
   }

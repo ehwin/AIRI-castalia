@@ -8,7 +8,6 @@ import { artistrySyncConfig } from '@proj-airi/stage-shared'
 import { ToasterRoot } from '@proj-airi/stage-ui/components'
 import { updateModelAssetStatus, useInferencePreload } from '@proj-airi/stage-ui/composables'
 import { usePiniaSynced } from '@proj-airi/stage-ui/libs/pinia'
-import { initializeAnalytics } from '@proj-airi/stage-ui/libs/product-signals'
 import { isSherpawModelBundled, setSherpawModelAssetHost } from '@proj-airi/stage-ui/libs/providers/providers/sherpaw/model-assets'
 import { useCharacterOrchestratorStore } from '@proj-airi/stage-ui/stores/character'
 import { useChatStore } from '@proj-airi/stage-ui/stores/chat'
@@ -281,7 +280,6 @@ function createFullStageRuntime() {
 
   return {
     async initialize() {
-      initializeAnalytics()
       await displayModelsStore.initialize()
       await cardStore.initialize()
 

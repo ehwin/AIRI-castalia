@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { OnboardingDialog, OnboardingStepAnalyticsNotice, StartupOverlay, ToasterRoot } from '@proj-airi/stage-ui/components'
+import { OnboardingDialog, StartupOverlay, ToasterRoot } from '@proj-airi/stage-ui/components'
 import { useStartupResourceTimeout } from '@proj-airi/stage-ui/composables/use-startup-resource-timeout'
 import { usePiniaSynced } from '@proj-airi/stage-ui/libs/pinia'
-import { initializeAnalytics, isAnalyticsAvailableInBuild } from '@proj-airi/stage-ui/libs/product-signals'
 import { useCharacterOrchestratorStore } from '@proj-airi/stage-ui/stores/character'
 import { useDisplayModelsStore } from '@proj-airi/stage-ui/stores/display-models'
 import { useModsServerChannelStore } from '@proj-airi/stage-ui/stores/mods/api/channel-server'
@@ -95,7 +94,6 @@ watch(settings.themeColorsHueDynamic, () => {
 
 async function loadStartup() {
   try {
-    initializeAnalytics()
     await startup.run('modelIndex', () => displayModelsStore.initialize())
     await startup.run('card', () => cardStore.initialize())
     await startup.run('services', () => {
@@ -144,11 +142,6 @@ function openOnboardingAfterStartup() {
 }
 
 const extraSteps = computed(() => [
-  ...(
-    isAnalyticsAvailableInBuild()
-      ? [{ id: 'analytics-notice', component: OnboardingStepAnalyticsNotice }]
-      : []
-  ),
   {
     id: 'step-permissions',
     component: OnboardingPermissionsStep,

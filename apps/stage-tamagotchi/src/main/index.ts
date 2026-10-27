@@ -275,13 +275,6 @@ app.whenReady().then(async () => {
       // build with the official commercial one. Keep it off for every install.
       enabled: false,
       getStoredUpdateLane: () => dependsOn.appConfig.get()?.updateChannel,
-      setStoredUpdateLane: (lane) => {
-        const currentConfig = dependsOn.appConfig.get()
-        dependsOn.appConfig.update({
-          ...currentConfig,
-          updateChannel: lane,
-        })
-      },
     }),
   })
 

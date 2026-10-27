@@ -221,9 +221,9 @@ describe('terms.yaml', () => {
   it('holds no term that neither the interface nor the English documentation uses', async () => {
     const concepts = await loadConcepts()
 
-    // The glossary shares one Crowdin container with the documentation terminology, so a
-    // term may live in prose rather than in a string. `Project AIRI` appears six times in
-    // README.md and in no interface string.
+    // The glossary shared one container with the documentation terminology in the upstream
+    // translation project, so a term may live in prose rather than in a string. `Project AIRI`
+    // appears six times in README.md and in no interface string.
     //
     // The check still has teeth. A term that appears in none of these places can never match
     // in the editor, so it cannot help a translator. `Ayaka Neko` was such a term, and it is
@@ -245,8 +245,8 @@ describe('terms.yaml', () => {
 
     const haystack = [...await loadEnglishStrings(), ...prose].join('\n').toLowerCase()
 
-    // The `documentation` concepts were adopted from the Crowdin glossary, and Crowdin is
-    // where they are maintained. Repository text is not their source, so checking them
+    // The `documentation` concepts were adopted from the upstream glossary, which is where
+    // they were maintained. Repository text is not their source, so checking them
     // against it would delete data this file exists to preserve. `Ayaka Neko` is one: the
     // reversed name order, which no file here writes.
     const missing = concepts

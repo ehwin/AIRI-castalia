@@ -13,14 +13,9 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import SpeechSettings from '../../../../stage-pages/src/pages/settings/modules/speech.vue'
 
 import { injectKeyPiniaSynced } from '../../libs/pinia/synced-context'
-import { captureAnalyticsEvent, enableAnalyticsCapture, isAnalyticsAvailableInBuild } from '../../libs/product-signals/client'
 import { useProviderConfigStore } from '../providers/config'
 import { useProviderStore } from '../providers/provider'
 import { useSpeechStore } from './speech'
-
-// Analytics delivery is external IO. Exercise the real page and stores while
-// recording its outgoing payload instead of sending product events.
-vi.mock('../../libs/product-signals/client', { spy: true })
 
 const cleanups: Array<() => void> = []
 
@@ -108,12 +103,9 @@ it.each(['mount', 'provider change'])('handles interrupted model discovery after
 
 // https://github.com/moeru-ai/airi/pull/2490#discussion_r3964866483
 // ROOT CAUSE: The click handler read the old model before the leader RPC
-// committed the provider. Analytics must use the completed selection receipt.
-it('reports the committed provider and model after a settings-page click', async () => {
+// committed the provider. A test must wait for the committed receipt.
+it('commits the provider after a settings-page click', async () => {
   localStorage.clear()
-  vi.mocked(captureAnalyticsEvent).mockReset().mockReturnValue(true)
-  vi.mocked(enableAnalyticsCapture).mockReturnValue(true)
-  vi.mocked(isAnalyticsAvailableInBuild).mockReturnValue(true)
   vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => Response.json({ voices: [], models: [], flux: 0 })))
   const namespace = `speech-settings:${crypto.randomUUID()}`
   const leader = mountRenderer(namespace)
@@ -130,12 +122,7 @@ it('reports the committed provider and model after a settings-page click', async
   await vi.waitFor(() => expect(follower.container.querySelector('input[value="microsoft-speech"]')).not.toBeNull())
   const input = follower.container.querySelector<HTMLInputElement>('input[value="microsoft-speech"]')!
   input.click()
-  await vi.waitFor(() => expect(vi.mocked(captureAnalyticsEvent).mock.calls.filter(([name]) => name === 'tts_provider_selected')).toHaveLength(1))
-  expect(captureAnalyticsEvent).toHaveBeenCalledWith('tts_provider_selected', expect.objectContaining({
-    tts_provider_id: 'microsoft-speech',
-    tts_model_id: 'v1',
-    source: 'settings',
-  }))
+  await vi.waitFor(() => expect(follower.speech.activeSpeechProvider).toBe('microsoft-speech'))
   expect(follower.speech.activeSpeechProvider).toBe('microsoft-speech')
 })
 

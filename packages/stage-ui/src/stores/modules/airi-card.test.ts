@@ -275,7 +275,7 @@ describe('airi-card store', () => {
           agents: {},
         },
       },
-    }, 'scratch')
+    })
     const live2dCardId = await cardStore.addCard({
       name: 'Live2D card',
       version: '1.0.0',
@@ -302,7 +302,7 @@ describe('airi-card store', () => {
           agents: {},
         },
       },
-    }, 'scratch')
+    })
 
     stageModelStore.stageModelSelected = 'preset-live2d-1'
     await cardStore.activateCard(vrmCardId)
@@ -372,7 +372,7 @@ describe('airi-card store', () => {
       name: 'New Character',
       version: '1.0.0',
       description: '',
-    }, 'scratch', 'preset-vrm-1')
+    }, 'preset-vrm-1')
 
     const card = cardStore.getCard(cardId)
     expect(card?.extensions.airi.avatarModels).toHaveLength(1)
@@ -533,8 +533,8 @@ describe('airi-card store', () => {
           agents: {},
         },
       },
-    }, 'import')
-    const inactiveCardId = await cardStore.addCard(cardStore.getCard(cardId)!, 'duplicate')
+    })
+    const inactiveCardId = await cardStore.addCard(cardStore.getCard(cardId)!)
     await cardStore.activateCard(cardId)
     expect(cardStore.selectedAvatarModel?.displayModelId).toBe('display-model-imported')
 
@@ -593,7 +593,7 @@ describe('airi-card store', () => {
           agents: {},
         },
       },
-    }, 'import')
+    })
     await cardStore.activateCard(cardId)
 
     expect(cardStore.selectedAvatarModel?.displayModelId).toBe('display-model-on-other-device')
@@ -631,7 +631,7 @@ describe('airi-card store', () => {
           agents: {},
         },
       },
-    }, 'import')
+    })
     const referencedModels = () => cardStore.getCard(cardId)?.extensions.airi.avatarModels.map(model => model.displayModelId)
 
     await displayModelsStore.removeDisplayModel('display-model-stored')
@@ -706,7 +706,7 @@ describe('airi-card store', () => {
           agents: {},
         },
       },
-    }, 'scratch')
+    })
     cardStore.activeCardId = cardId
 
     await cardStore.initialize()
@@ -780,7 +780,7 @@ describe('airi-card store', () => {
         },
       },
     }
-    const cardId = await cardStore.addCard(card, 'scratch')
+    const cardId = await cardStore.addCard(card)
 
     await cardStore.activateCard(cardId)
 
@@ -820,7 +820,7 @@ describe('airi-card store', () => {
           agents: {},
         },
       },
-    }, 'scratch')
+    })
     await cardStore.activateCard(cardId)
 
     const card = cardStore.getCard(cardId)
@@ -871,7 +871,7 @@ describe('airi-card store', () => {
           agents: {},
         },
       },
-    }, 'scratch')
+    })
     await cardStore.activateCard(cardId)
 
     const applicationsBeforeSnapshot = resetArtistryToGlobal.mock.calls.length
@@ -942,7 +942,7 @@ describe('airi-card store', () => {
           agents: {},
         },
       },
-    }, 'scratch')
+    })
 
     await cardStore.activateCard(cardId)
 
@@ -993,7 +993,7 @@ describe('airi-card store', () => {
       name: 'Custom card',
       version: '1.0.0',
       description: 'A removable card.',
-    }, 'scratch')
+    })
     await cardStore.activateCard(cardId)
 
     await cardStore.removeCard(cardId)
@@ -1018,7 +1018,7 @@ describe('airi-card store', () => {
       name: 'Selected Character',
       version: '1.0.0',
       description: 'Keep this selection.',
-    }, 'scratch')
+    })
     cardStore.activeCardId = cardId
 
     await cardStore.initialize()

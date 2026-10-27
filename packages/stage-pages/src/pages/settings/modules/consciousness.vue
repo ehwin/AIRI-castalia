@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { Alert, ErrorContainer, RadioCardManySelect, RadioCardSimple } from '@proj-airi/stage-ui/components'
-import { useAnalytics } from '@proj-airi/stage-ui/composables'
 import { useAiriCardStore } from '@proj-airi/stage-ui/stores/modules/airi-card'
 import { useConsciousnessStore } from '@proj-airi/stage-ui/stores/modules/consciousness'
 import { useConsciousnessSettingsStore } from '@proj-airi/stage-ui/stores/modules/consciousness-settings'
@@ -36,7 +35,6 @@ const {
 } = storeToRefs(consciousnessStore)
 
 const { t } = useI18n()
-const { trackModelSwitched, trackProviderClick } = useAnalytics()
 watch(activeProvider, async (provider) => {
   if (!provider)
     return
@@ -53,12 +51,8 @@ function updateCustomModelName(value: string) {
 }
 
 async function selectModel(modelId: string) {
-  const previousModelId = activeModel.value
   activeModel.value = modelId
   await persistSelection()
-
-  if (previousModelId !== modelId)
-    trackModelSwitched(previousModelId || 'none', modelId)
 }
 
 async function handleDeleteProvider(providerId: string) {
@@ -113,7 +107,6 @@ async function updateTopPEnabled(value: boolean) {
               :title="metadata.localizedName || 'Unknown'"
               :description="metadata.localizedDescription"
               @update:model-value="persistSelection"
-              @click="trackProviderClick(metadata.id, 'consciousness')"
             >
               <template #topRight>
                 <button

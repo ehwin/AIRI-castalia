@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { OnboardingDialog, OnboardingStepAnalyticsNotice, StartupOverlay, ToasterRoot } from '@proj-airi/stage-ui/components'
+import { OnboardingDialog, StartupOverlay, ToasterRoot } from '@proj-airi/stage-ui/components'
 import { useInferencePreload } from '@proj-airi/stage-ui/composables'
 import { useStartupResourceTimeout } from '@proj-airi/stage-ui/composables/use-startup-resource-timeout'
 import { usePiniaSynced } from '@proj-airi/stage-ui/libs/pinia'
-import { initializeAnalytics, isAnalyticsAvailableInBuild } from '@proj-airi/stage-ui/libs/product-signals'
 import { useCharacterOrchestratorStore } from '@proj-airi/stage-ui/stores/character'
 import { useChatStore } from '@proj-airi/stage-ui/stores/chat'
 import { useDisplayModelsStore } from '@proj-airi/stage-ui/stores/display-models'
@@ -107,12 +106,6 @@ router.beforeEach((to, from) => {
     : from.meta.transition
 })
 
-const onboardingExtraSteps = computed(() => {
-  return isAnalyticsAvailableInBuild()
-    ? [{ id: 'analytics-notice', component: OnboardingStepAnalyticsNotice }]
-    : []
-})
-
 watch(settings.language, () => {
   i18n.locale.value = settings.language.value
 })
@@ -127,7 +120,6 @@ watch(settings.themeColorsHueDynamic, () => {
 
 async function loadStartup() {
   try {
-    initializeAnalytics()
     await startup.run('modelIndex', () => displayModelsStore.initialize())
     await startup.run('card', () => cardStore.initialize())
     await startup.run('chat', () => chatStore.initialize(syncedPinia))
@@ -221,7 +213,6 @@ function openOnboardingAfterStartup() {
       v-model="showingSetup"
       :scale-background="false"
       :instant-open="startupOnboarding"
-      :extra-steps="onboardingExtraSteps"
       @configured="onboardingStore.markSetupCompleted()"
       @skipped="onboardingStore.markSetupSkipped()"
     />

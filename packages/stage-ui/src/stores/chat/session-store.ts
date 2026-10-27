@@ -11,7 +11,6 @@ import { computed, ref, toRaw, watch } from 'vue'
 
 import { chatSessionsRepo } from '../../database/repos/chat-sessions.repo'
 import { chatAssetIdsOf, inlineChatAssets } from '../../libs/chat-assets'
-import { captureAnalyticsEvent } from '../../libs/product-signals'
 import { useAiriCardStore } from '../modules/airi-card'
 import { mergeLoadedSessionMessages } from './session-message-merge'
 
@@ -471,12 +470,6 @@ export const useChatSessionStore = defineStore('chat-session', () => {
     if (options?.setActive !== false)
       activeSessionId.value = sessionId
 
-    captureAnalyticsEvent('conversation_created', {
-      conversation_id: sessionId,
-      source: options?.messages?.length ? 'fork' : 'new_session',
-      character_id: characterId,
-    })
-
     return sessionId
   }
 
@@ -492,17 +485,6 @@ export const useChatSessionStore = defineStore('chat-session', () => {
     const meta = sessionMetas.value[sessionId]
     if (!meta)
       return
-
-    // Snapshot count before the in-memory wipe below zeroes it out.
-    const messageCount = (sessionMessages.value[sessionId] ?? []).length
-    captureAnalyticsEvent('chat_session_deleted', {
-      session_id: sessionId,
-      message_count: messageCount,
-    })
-    captureAnalyticsEvent('conversation_deleted', {
-      conversation_id: sessionId,
-      message_count: messageCount,
-    })
 
     const wasActive = activeSessionId.value === sessionId
     const characterId = meta.characterId

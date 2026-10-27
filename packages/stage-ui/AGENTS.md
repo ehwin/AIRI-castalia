@@ -29,14 +29,10 @@ and `apps/stage-tamagotchi`. It holds no window code and no native calls.
 | Electron screen and window helpers | `src/composables/` | 5605 |
 | Tool definitions given to the model | `src/tools/` | 1559 |
 | Local persistence (IDB) | `src/database/repos/` | — |
-| Analytics milestones | `src/libs/product-signals/` | — |
 | Settings stores (stage model, audio) | `src/stores/settings/` | 676 |
 
 ## Rules for changes here
 
-- `src/stores/chat.ts` is in the refactor guard's frozen list. A change needs
-  `node tools/refactor-guard/guard.mjs check --ack` and an entry in
-  `patches/divergence.json`.
 - A `synced` Pinia store carries cross-window state. Read
   `.agents/skills/enforce-rules-for-pinia-synced/SKILL.md` before adding one.
 - `memory.indexFor()` must stay synchronous: `stores/chat.ts` composes it into the

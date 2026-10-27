@@ -5,7 +5,7 @@ import type { ChatHistoryItem } from '@proj-airi/stage-ui/types/chat'
 import { useThreeViewControl } from '@proj-airi/stage-ui-three'
 import { CharacterSwitcherDrawer, ChatBackgroundTasks, ChatHistory, HearingConfig, HearingStatus, VoiceDrafts } from '@proj-airi/stage-ui/components'
 import { ChatImageAttachmentPreview, ChatProviderSetupCallout, ChatReplyPreview, ChatSessionsDrawer, useChatComposer, useChatImages, VoiceComposer } from '@proj-airi/stage-ui/components/scenarios/chat'
-import { useAnalytics, useAudioAnalyzer } from '@proj-airi/stage-ui/composables'
+import { useAudioAnalyzer } from '@proj-airi/stage-ui/composables'
 import { useAudioContext } from '@proj-airi/stage-ui/stores/audio'
 import { useChatStore } from '@proj-airi/stage-ui/stores/chat'
 import { useChatSessionStore } from '@proj-airi/stage-ui/stores/chat/session-store'
@@ -49,7 +49,6 @@ const isActiveSessionSending = computed(() => (
   || isReceivingRemoteStream.value
 ))
 const visibleStreamingMessage = streamingMessage
-const { trackChatMessageDeleted } = useAnalytics()
 const { rerunToolCall } = useChatToolCallRerun()
 const composer = useChatComposer<ChatImageAttachment>({
   activeSessionId,
@@ -93,10 +92,6 @@ async function handleDeleteMessage(payload: { message: ChatHistoryItem, index: n
     sessionId: activeSessionId.value,
     messageId: message?.id,
     index,
-  })
-  trackChatMessageDeleted({
-    source: 'history',
-    message_role: message?.role ?? 'unknown',
   })
   clearReplyForMessage(message)
 }

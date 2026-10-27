@@ -41,7 +41,6 @@ function mountControlsIsland(options: { transitions?: boolean } = {}) {
         },
       },
       plugins: [pinia, createI18n({ legacy: false, locale: 'en', messages: { en } })],
-      directives: { 'track-button': {} },
       stubs: { transition: !options.transitions },
     },
   })

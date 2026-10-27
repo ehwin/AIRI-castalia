@@ -21,7 +21,7 @@ import { parseGlossary } from './schema'
  */
 const TBX_NAMESPACE = 'urn:iso:std:iso:30042:ed-2'
 
-/** The source language of the glossary. Crowdin owns every other language. */
+/** The source language of the glossary. The exporter writes this language only. */
 const SOURCE_LANGUAGE = 'en'
 
 /**
@@ -128,8 +128,8 @@ function buildConceptEntry(concept: Concept): Element {
  * Renders the glossary as a TBX-Basic document.
  *
  * The result is a complete XML document with the declaration, so a caller writes it to disk
- * unchanged. It carries the English terms only; Crowdin owns every other language, and
- * uploading target terms would overwrite the work of a translator.
+ * unchanged. It carries the English terms only. A target term stays in its locale file, so an
+ * import cannot overwrite the work of a translator.
  *
  * @param concepts Validated concepts, in the order they appear in `terms.yaml`.
  * @param source A description of where the data came from, recorded in the TBX header.

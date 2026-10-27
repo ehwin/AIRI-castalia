@@ -26,9 +26,6 @@ import { isWindows } from 'std-env'
 import {
   autoUpdater as autoUpdaterEventa,
   electronAutoUpdaterStateChanged,
-  electronGetUpdaterPreferences,
-  electronSetUpdaterPreferences,
-
 } from '../../../shared/eventa'
 import { MockAutoUpdater } from './mock-auto-updater'
 
@@ -252,8 +249,6 @@ export interface AutoUpdater {
   checkForUpdates: () => Promise<void>
   downloadUpdate: () => Promise<void>
   quitAndInstall: () => Promise<void>
-  getPreferredUpdateLane: () => UpdateLane | undefined
-  setPreferredUpdateLane: (lane: UpdateLane | undefined) => Promise<void>
   subscribe: (callback: (state: AutoUpdaterState) => void) => () => void
 }
 
@@ -266,8 +261,6 @@ export interface AutoUpdaterOptions {
   enabled?: boolean
   /** Reads the release channel persisted by the application configuration. */
   getStoredUpdateLane?: () => UpdateLane | undefined
-  /** Persists a release-channel change requested through updater IPC. */
-  setStoredUpdateLane?: (lane: UpdateLane | undefined) => void
 }
 
 /**
@@ -296,25 +289,17 @@ function isPrereleaseVersion(version: string) {
 /**
  * Preserves the updater IPC contract when the storefront owns application updates.
  *
- * No method reaches Electron Updater or a release feed, while preference reads and
- * subscriptions remain available to existing renderer consumers.
+ * No method reaches Electron Updater or a release feed. State stays `disabled`, and a
+ * subscriber receives it immediately.
  */
-function createDisabledAutoUpdater(options: AutoUpdaterOptions): AutoUpdater {
+function createDisabledAutoUpdater(): AutoUpdater {
   const state: AutoUpdaterState = { status: 'disabled' }
-  let storedPreferredLane = options.getStoredUpdateLane?.()
 
   return {
     state,
     async checkForUpdates() {},
     async downloadUpdate() {},
     async quitAndInstall() {},
-    getPreferredUpdateLane() {
-      return storedPreferredLane
-    },
-    async setPreferredUpdateLane(lane) {
-      storedPreferredLane = lane
-      options.setStoredUpdateLane?.(lane)
-    },
     subscribe(callback) {
       callback(state)
       return () => {}
@@ -324,7 +309,7 @@ function createDisabledAutoUpdater(options: AutoUpdaterOptions): AutoUpdater {
 
 export function setupAutoUpdater(options: AutoUpdaterOptions = {}): AutoUpdater {
   if (options.enabled === false)
-    return createDisabledAutoUpdater(options)
+    return createDisabledAutoUpdater()
 
   const semaphore = new Semaphore(1)
   const appVersion = app.getVersion()
@@ -332,7 +317,7 @@ export function setupAutoUpdater(options: AutoUpdaterOptions = {}): AutoUpdater 
   const log = useLogg('auto-updater').useGlobalConfig()
   const autoUpdater = fromImported()
   const feedUrlOverride = getUpdateServerOverride()
-  let storedPreferredLane = options.getStoredUpdateLane?.()
+  const storedPreferredLane = options.getStoredUpdateLane?.()
   const releaseChannelName = getReleaseChannelName()
   let activeFeedUrlOverride = feedUrlOverride
   let resolvedReleaseTag: string | undefined
@@ -410,16 +395,6 @@ export function setupAutoUpdater(options: AutoUpdaterOptions = {}): AutoUpdater 
     autoUpdater.channel = releaseChannelName
     autoUpdater.setFeedURL?.({ provider: 'generic', url })
     log.warn(`[auto-updater] applied generic feed override (${reason}): ${url}`)
-  }
-
-  function resetPreparedFeedForLaneChange() {
-    if (feedUrlOverride)
-      return
-
-    activeFeedUrlOverride = undefined
-    resolvedReleaseTag = undefined
-    prepareFeedPromise = undefined
-    autoUpdater.channel = undefined
   }
 
   async function resolveGitHubReleaseTagForLane(lane: UpdateLane) {
@@ -576,20 +551,6 @@ export function setupAutoUpdater(options: AutoUpdaterOptions = {}): AutoUpdater 
         semaphore.release()
       }
     },
-    getPreferredUpdateLane() {
-      return storedPreferredLane
-    },
-    async setPreferredUpdateLane(lane) {
-      if (storedPreferredLane === lane)
-        return
-
-      storedPreferredLane = lane
-      options.setStoredUpdateLane?.(lane)
-      resetPreparedFeedForLaneChange()
-      // Keep UI state consistent with the newly selected lane.
-      // A fresh check runs right after channel update from renderer.
-      broadcast({ status: 'idle' })
-    },
     subscribe(callback) {
       hooks.add(callback)
 
@@ -634,15 +595,6 @@ export function createAutoUpdaterService(params: { context: ReturnType<typeof cr
     defineInvokeHandler(context, autoUpdaterEventa.downloadUpdate, async () => {
       await service.downloadUpdate()
       return service.state
-    }),
-    defineInvokeHandler(context, electronGetUpdaterPreferences, async () => ({
-      channel: service.getPreferredUpdateLane(),
-    })),
-    defineInvokeHandler(context, electronSetUpdaterPreferences, async (payload) => {
-      await service.setPreferredUpdateLane(payload?.channel)
-      return {
-        channel: service.getPreferredUpdateLane(),
-      }
     }),
     defineInvokeHandler(context, autoUpdaterEventa.quitAndInstall, async () => {
       await service.quitAndInstall()

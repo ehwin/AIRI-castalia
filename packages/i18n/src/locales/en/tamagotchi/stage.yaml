@@ -114,17 +114,6 @@ about:
     documentation: Documentations
     github: GitHub
   update:
-    lane:
-      label: Update lane
-      description: Choose channel release to follow
-      placeholder: Choose update lane
-    channels:
-      auto: Auto
-      stable: Stable
-      alpha: Alpha
-      beta: Beta
-      nightly: Nightly
-      canary: Canary
     status:
       downloading: Downloading update...
       error-prefix: Error

@@ -107,17 +107,6 @@ about:
     home: 首页
     documentation: 文档
   update:
-    lane:
-      label: 更新频道
-      description: 选择更新频道
-      placeholder: 选择更新频道
-    channels:
-      auto: 自动
-      stable: 稳定版
-      alpha: Alpha 测试版
-      beta: Beta 测试版
-      nightly: 每夜构建
-      canary: 尝鲜版
     status:
       downloading: 正在下载更新......
       error-prefix: 错误

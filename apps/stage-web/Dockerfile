@@ -2,9 +2,6 @@ FROM node:24-trixie AS build-stage
 
 WORKDIR /app
 
-ARG VITE_ENABLE_ANALYTICS=false
-ENV VITE_ENABLE_ANALYTICS=${VITE_ENABLE_ANALYTICS}
-
 RUN apt update && apt install -y ca-certificates curl
 RUN update-ca-certificates
 RUN apt update && apt install -y build-essential python3 python3-setuptools curl

@@ -3,7 +3,6 @@ import type { DataSettingsStatusEmits } from '@proj-airi/stage-pages/pages/setti
 
 import { useElectronEventaInvoke } from '@proj-airi/electron-vueuse'
 import { createDataSettingsStatusHelpers } from '@proj-airi/stage-pages/pages/settings/data/status'
-import { useAnalytics } from '@proj-airi/stage-ui/composables'
 import { useDataMaintenance } from '@proj-airi/stage-ui/composables/use-data-maintenance'
 import { Button, DoubleCheckButton } from '@proj-airi/ui'
 import { useI18n } from 'vue-i18n'
@@ -12,7 +11,6 @@ import { electronCenterMainWindow } from '../../../../../shared/eventa'
 
 const emit = defineEmits<DataSettingsStatusEmits>()
 const { t } = useI18n()
-const { trackDataAction } = useAnalytics()
 const { resetDesktopApplicationState } = useDataMaintenance()
 const { emitStatus, handleActionError } = createDataSettingsStatusHelpers(emit)
 const centerMainWindow = useElectronEventaInvoke(electronCenterMainWindow)
@@ -23,7 +21,6 @@ const centerMainWindow = useElectronEventaInvoke(electronCenterMainWindow)
 async function resetDesktopState() {
   try {
     await resetDesktopApplicationState()
-    trackDataAction({ action: 'desktop_state_reset' })
     emitStatus(t('settings.pages.data.status.desktop_reset'))
   }
   catch (error) {

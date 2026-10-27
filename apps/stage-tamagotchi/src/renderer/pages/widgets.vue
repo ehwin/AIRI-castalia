@@ -2,7 +2,6 @@
 import type { WidgetsIframeRequestPayload, WidgetsIframeRequestResultPayload, WidgetSnapshot, WidgetWindowSize } from '../../shared/eventa'
 
 import { useElectronEventaContext, useElectronEventaInvoke } from '@proj-airi/electron-vueuse'
-import { useAnalytics } from '@proj-airi/stage-ui/composables'
 import { computed, defineAsyncComponent, defineComponent, h, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
@@ -74,15 +73,12 @@ async function requestSnapshot(id: string) {
   }
 }
 
-const { trackWidgetOpened } = useAnalytics()
-
 watch(widgetId, (id) => {
   widget.value = null
   pendingIframeRequests.value = []
   loading.value = false
   if (!id)
     return
-  trackWidgetOpened({ widget_id: id })
   requestSnapshot(id)
 }, { immediate: true })
 

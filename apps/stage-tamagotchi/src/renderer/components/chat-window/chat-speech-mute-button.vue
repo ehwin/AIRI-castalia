@@ -18,7 +18,7 @@ const getOutputPlaybackState = defineInvoke(getSpeechBusContext(), speechOutputG
 const { speechMuted, toggleSpeechMuted } = useStopSpeakingButton({
   resolveSpeakingState: async () => {
     // A BroadcastChannel round trip is normally immediate. Bound the
-    // analytics-only lookup so a reloading output renderer cannot stall mute.
+    // playback-state lookup so a reloading output renderer cannot stall mute.
     const state = await getOutputPlaybackState(undefined, {
       signal: AbortSignal.timeout(1000),
     })

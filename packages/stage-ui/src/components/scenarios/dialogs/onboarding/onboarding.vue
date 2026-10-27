@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { ProviderMode } from '../../../../composables/use-analytics'
 import type { ProviderMetadata } from '../../../../libs/providers/metadata'
 import type {
   OnboardingStep,
@@ -11,14 +10,13 @@ import type {
 
 import { isCustomProvidersDisabled } from '@proj-airi/stage-shared'
 import { storeToRefs } from 'pinia'
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 
 import StepModelSelection from './step-model-selection.vue'
 import StepProviderConfiguration from './step-provider-configuration.vue'
 import StepProviderSelection from './step-provider-selection.vue'
 import StepWelcome from './step-welcome.vue'
 
-import { useAnalytics } from '../../../../composables/use-analytics'
 import { useConsciousnessStore } from '../../../../stores/modules/consciousness'
 import { useProviderConfigStore } from '../../../../stores/providers/config'
 import { useProviderStore } from '../../../../stores/providers/provider'
@@ -37,7 +35,6 @@ const emit = defineEmits<Emits>()
 const step = ref(0)
 const direction = ref<'next' | 'previous'>('next')
 const pendingProviderConfig = ref<ProviderConfigData | null>(null)
-const { trackOnboardingCompleted, trackOnboardingStarted, trackOnboardingStepCompleted } = useAnalytics()
 
 const providersStore = useProviderStore()
 
@@ -62,10 +59,6 @@ const selectedProviderId = ref('')
 // Computed selected provider
 const selectedProvider = computed(() => {
   return allChatProvidersMetadata.value.find(p => p.id === selectedProviderId.value) || null
-})
-
-const selectedProviderType = computed<ProviderMode>(() => {
-  return selectedProviderId.value ? 'custom' : 'unknown'
 })
 
 // Reset validation state when provider changes
@@ -172,12 +165,6 @@ const isLastStep = computed(() => step.value === allSteps.value.length - 1)
 const currentStepProps = computed(() => currentStep.value?.props?.() ?? {})
 
 async function handleSave() {
-  trackOnboardingStepCompleted(currentStep.value?.id ?? 'unknown')
-  trackOnboardingCompleted({
-    selected_provider_type: selectedProviderType.value,
-    selected_provider_id: selectedProviderId.value || undefined,
-    selected_use_case: 'unknown',
-  })
   emit('configured')
 }
 
@@ -200,7 +187,6 @@ async function navigateNext() {
     return
   }
 
-  trackOnboardingStepCompleted(currentStep.value.id)
   direction.value = 'next'
   step.value++
 }
@@ -215,10 +201,6 @@ async function navigatePrevious() {
   direction.value = 'previous'
   step.value--
 }
-
-onMounted(() => {
-  trackOnboardingStarted({ entry: 'app_start' })
-})
 </script>
 
 <template>

@@ -4,7 +4,6 @@ import { themeColorFromValue, useThemeColor } from '@proj-airi/stage-layouts/com
 import { ToasterRoot } from '@proj-airi/stage-ui/components'
 import { useInferencePreload } from '@proj-airi/stage-ui/composables'
 import { usePiniaSynced } from '@proj-airi/stage-ui/libs/pinia'
-import { initializeAnalytics } from '@proj-airi/stage-ui/libs/product-signals'
 import { useChatStore } from '@proj-airi/stage-ui/stores/chat'
 import { useDisplayModelsStore } from '@proj-airi/stage-ui/stores/display-models'
 import { useContextBridgeStore } from '@proj-airi/stage-ui/stores/mods/api/context-bridge'
@@ -119,7 +118,6 @@ function createFullStageRuntime() {
 
   return {
     async initialize() {
-      initializeAnalytics()
       await displayModelsStore.initialize()
       await cardStore.initialize()
 

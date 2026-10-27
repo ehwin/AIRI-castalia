@@ -208,7 +208,6 @@ in the editor; importing or saving an unrelated card field does not change it.
 Each chat session belongs to one character. A send reads the provider, model, and system prompt of that character, not the selected card.
 Selecting another card while a turn waits in the queue does not change the turn.
 Before each model request, the turn reads its character's settings again. A tool that edits the character changes the next request.
-Each request rebuilds the analytics correlation headers for its provider.
 Tool and content-array compatibility failures belong to the model of the failing request, not the first model of the turn.
 Session resets and autonomous artistry hooks also use the session character.
 Each concurrent turn owns its IO trace. `activeTurnSpan` points to the most recently started turn that is still running.
@@ -235,30 +234,6 @@ A spoken turn is one IO trace, from the wake word to playback:
 
 A typed turn starts its trace at `Interaction turn`.
 
-## Button analytics
-
-Register the shared plugin once in each Vue application:
-
-```ts
-import { trackButtonPlugin } from '@proj-airi/stage-ui/directives/track-button'
-
-createApp(App)
-  .use(trackButtonPlugin)
-  .mount('#app')
-```
-
-Buttons that represent a product-analysis click intent can then declare a
-typed event without wrapping their business handler:
-
-```vue
-<Button
-  v-track-button="{ name: 'update_check_clicked', channel: selectedChannel }"
-  @click="checkForUpdates()"
-/>
-```
-
-Keep async outcomes, confirmed state changes, impressions, and lifecycle events
-in their owning business flows instead of attaching them to the initial click.
 
 ## Histoire (UI storyboard)
 

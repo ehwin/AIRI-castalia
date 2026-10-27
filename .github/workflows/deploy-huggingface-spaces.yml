@@ -33,7 +33,6 @@ jobs:
         env:
           TARGET_HUGGINGFACE_SPACE: 'true'
           VITE_APP_TARGET_HUGGINGFACE_SPACE: 'true'
-          VITE_ENABLE_ANALYTICS: 'true'
 
       - id: airi_diff
         working-directory: ./apps/stage-web/dist

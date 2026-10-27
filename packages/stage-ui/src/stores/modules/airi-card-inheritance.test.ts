@@ -64,8 +64,8 @@ describe('card inheritance with real module stores', () => {
     consciousness.activeModel = 'global-model'
     const cards = useAiriCardStore()
     await cards.initialize()
-    const explicit = await cards.addCard(card('card-provider', 'card-model'), 'import')
-    const inherited = await cards.addCard(card(), 'import')
+    const explicit = await cards.addCard(card('card-provider', 'card-model'))
+    const inherited = await cards.addCard(card())
     await cards.activateCard(explicit)
     expect(consciousness.activeModel).toBe('card-model')
     await cards.activateCard(inherited)
@@ -82,7 +82,7 @@ describe('card inheritance with real module stores', () => {
     await cards.initialize()
     const uploaded = card()
     uploaded.extensions.airi.modules.vision.provider = 'another-provider'
-    const id = await cards.addCard(uploaded, 'import')
+    const id = await cards.addCard(uploaded)
     await cards.activateCard(id)
     expect(vision.activeProvider).toBe('another-provider')
     expect(vision.activeModel).toBe('')
@@ -112,7 +112,7 @@ describe('card inheritance with real module stores', () => {
     consciousness.activeModel = 'global-model'
     const cards = useAiriCardStore()
     await cards.initialize()
-    const id = await cards.addCard(card('card-provider', 'card-model'), 'import')
+    const id = await cards.addCard(card('card-provider', 'card-model'))
     await cards.activateCard(id)
     await cards.updateCard(id, card())
     expect(consciousness.activeProvider).toBe('global-provider')
@@ -125,7 +125,7 @@ describe('card inheritance with real module stores', () => {
     consciousness.activeModel = 'global-model'
     const cards = useAiriCardStore()
     await cards.initialize()
-    const id = await cards.addCard(card('global-provider'), 'import')
+    const id = await cards.addCard(card('global-provider'))
     await cards.activateCard(id)
     expect(consciousness.activeModel).toBe('global-model')
     expect(cards.activeCard?.extensions.airi.modules.consciousness.model).toBe('')
@@ -137,7 +137,7 @@ describe('card inheritance with real module stores', () => {
     consciousness.activeModel = 'global-model'
     const cards = useAiriCardStore()
     await cards.initialize()
-    const id = await cards.addCard({ name: 'Portable card', version: '1.0.0', description: '' }, 'import')
+    const id = await cards.addCard({ name: 'Portable card', version: '1.0.0', description: '' })
     expect(cards.getCard(id)?.extensions.airi.modules.consciousness).toEqual({ provider: '', model: '' })
   })
 
@@ -157,7 +157,7 @@ describe('card inheritance with real module stores', () => {
         },
       },
     }
-    const id = await cards.addCard({ ...uploaded, extensions }, 'import')
+    const id = await cards.addCard({ ...uploaded, extensions })
     expect(cards.getCard(id)?.extensions).toMatchObject(extensions)
   })
 
@@ -167,7 +167,7 @@ describe('card inheritance with real module stores', () => {
     consciousness.activeModel = 'global-model'
     const cards = useAiriCardStore()
     await cards.initialize()
-    const id = await cards.addCard(card('removed-provider', 'card-model'), 'import')
+    const id = await cards.addCard(card('removed-provider', 'card-model'))
     await cards.activateCard(id)
     await cards.clearProviderSelections('removed-provider')
     expect(cards.moduleDefaults?.consciousness).toEqual({ provider: '', model: '' })
@@ -186,7 +186,7 @@ describe('card inheritance with real module stores', () => {
     await cards.initialize()
     const uploaded = card()
     uploaded.extensions.airi.modules.speech.model = 'card-model'
-    const id = await cards.addCard(uploaded, 'import')
+    const id = await cards.addCard(uploaded)
     await cards.activateCard(id)
     expect(speech.activeSpeechModel).toBe('card-model')
     expect(speech.activeSpeechVoiceId).toBe('')
@@ -204,7 +204,7 @@ describe('card inheritance with real module stores', () => {
     await cards.initialize()
     const uploaded = card()
     uploaded.extensions.airi.modules.artistry = { enabled: true, provider: 'replicate', model: '' }
-    const id = await cards.addCard(uploaded, 'import')
+    const id = await cards.addCard(uploaded)
     await cards.activateCard(id)
     expect(artistry.activeProvider).toBe('replicate')
     expect(artistry.activeModel).toBe('')
@@ -223,7 +223,7 @@ describe('card inheritance with real module stores', () => {
     consciousness.activeModel = 'global-model'
     const cards = useAiriCardStore(leader)
     await cards.initialize()
-    const id = await cards.addCard(card('card-provider', 'card-model'), 'import')
+    const id = await cards.addCard(card('card-provider', 'card-model'))
     await cards.activateCard(id)
     const snapshot = structuredClone({
       cards: toRaw(cards.cards),

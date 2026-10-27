@@ -63,7 +63,7 @@ it.each(['completed', 'unmounted', 'replaced'])('isolates card preview responses
         version: '1.0',
         description: '',
         extensions: { airi: { modules: { speech: { provider: 'microsoft-speech', model, voice_id: '' } } } },
-      }, 'scratch')
+      })
     }
     cardId.value = await draft('preview-model')
     voice = 'preview'

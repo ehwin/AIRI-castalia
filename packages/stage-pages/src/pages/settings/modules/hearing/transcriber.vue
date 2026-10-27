@@ -4,7 +4,7 @@ import type { VoicePluginHandle } from '@proj-airi/core-agent'
 import { errorMessageFrom } from '@moeru/std'
 import { encodeWav } from '@proj-airi/audio/encoding'
 import { Alert, ErrorContainer, LevelMeter, MicrophonePicker, RadioCardManySelect, RadioCardSimple, TestDummyMarker, ThresholdMeter, TimeSeriesChart } from '@proj-airi/stage-ui/components'
-import { useAnalytics, useHearingPlaygroundSegments } from '@proj-airi/stage-ui/composables'
+import { useHearingPlaygroundSegments } from '@proj-airi/stage-ui/composables'
 import { useVoiceController } from '@proj-airi/stage-ui/composables/audio/voice-controller'
 import { hearingProviderViewContextKey } from '@proj-airi/stage-ui/libs'
 import { createVoiceActivityPlugin } from '@proj-airi/stage-ui/libs/voice/voice-activity-plugin'
@@ -39,7 +39,6 @@ const providersStore = useProviderStore()
 const providerStore = useProviderConfigStore()
 const { moduleTranscriptionProvidersMetadata } = storeToRefs(providersStore)
 
-const { trackProviderClick } = useAnalytics()
 const settingsAudioDeviceStore = useSettingsAudioDevice()
 const { audioInputOptions, permission, selectedAudioInput } = storeToRefs(settingsAudioDeviceStore)
 const supportsStreamInput = computed(() => providersStore.getTranscriptionFeatures(activeTranscriptionProvider.value).supportsStreamInput)
@@ -386,7 +385,6 @@ onUnmounted(() => {
                 :value="metadata.id"
                 :title="metadata.localizedName || 'Unknown'"
                 :description="metadata.localizedDescription"
-                @click="trackProviderClick(metadata.id, 'hearing')"
               />
               <RouterLink
                 to="/settings/providers#transcription"

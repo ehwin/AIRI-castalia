@@ -19,14 +19,6 @@ vi.mock('../../database/repos/chat-sessions.repo', () => ({
   },
 }))
 
-vi.mock('../../libs/product-signals', () => ({
-  captureAnalyticsEvent: vi.fn(),
-  enableAnalytics: vi.fn(() => false),
-  getAnalytics: vi.fn(),
-  getAnalyticsPrivacyPolicyUrl: vi.fn(),
-  isAnalyticsAvailableInBuild: vi.fn(() => false),
-}))
-
 const { useChatSessionStore } = await import('./session-store')
 
 const syncedContexts: Array<{

@@ -55,11 +55,6 @@ const themeIcons = {
   dark: 'i-solar:moon-outline',
   auto: 'i-lucide:contrast',
 } as const
-const themeActions = {
-  light: 'switch_to_dark_mode',
-  dark: 'switch_to_system_mode',
-  auto: 'switch_to_light_mode',
-} as const
 const themeLabel = computed(() => ({
   light: t('tamagotchi.stage.controls-island.switch-to-dark-mode'),
   dark: t('tamagotchi.stage.controls-island.switch-to-system-mode'),
@@ -363,7 +358,6 @@ function resetMainWindowPosition() {
                   <div :class="['grid grid-cols-3 gap-2']">
                     <ControlButtonTooltip disable-hoverable-content>
                       <ControlButton
-                        v-track-button="{ name: 'controls_island_action', action: 'toggle_settings' }"
                         :button-style="adjustStyleClasses.button"
                         :aria-label="t('tamagotchi.stage.controls-island.open-settings')"
                         @click="openSettings({ route: '/settings' })"
@@ -384,7 +378,6 @@ function resetMainWindowPosition() {
                       >
                         <template #default="{ toggle }">
                           <ControlButton
-                            v-track-button="{ name: 'controls_island_action', action: 'toggle_profile_picker' }"
                             :button-style="adjustStyleClasses.button"
                             :aria-label="t('tamagotchi.stage.controls-island.switch-profile')"
                             @click="toggle"
@@ -400,7 +393,6 @@ function resetMainWindowPosition() {
 
                     <ControlButtonTooltip disable-hoverable-content>
                       <ControlButton
-                        v-track-button="{ name: 'controls_island_action', action: 'refresh_window' }"
                         :button-style="adjustStyleClasses.button"
                         :aria-label="t('tamagotchi.stage.controls-island.refresh')"
                         @click="refreshWindow"
@@ -414,7 +406,6 @@ function resetMainWindowPosition() {
 
                     <ControlButtonTooltip disable-hoverable-content>
                       <ControlButton
-                        v-track-button="{ name: 'controls_island_action', action: 'center_main_window' }"
                         :button-style="adjustStyleClasses.button"
                         :aria-label="t('tamagotchi.stage.controls-island.center-main-window')"
                         @click="resetMainWindowPosition"
@@ -428,10 +419,6 @@ function resetMainWindowPosition() {
 
                     <ControlButtonTooltip disable-hoverable-content>
                       <ControlButton
-                        v-track-button="{
-                          name: 'controls_island_action',
-                          action: themeActions[themeMode],
-                        }"
                         :button-style="adjustStyleClasses.button"
                         :aria-label="themeLabel"
                         @click="switchToNextTheme"
@@ -447,10 +434,6 @@ function resetMainWindowPosition() {
 
                     <ControlButtonTooltip disable-hoverable-content>
                       <ControlButton
-                        v-track-button="{
-                          name: 'controls_island_action',
-                          action: alwaysOnTop ? 'unpin_from_top' : 'pin_on_top',
-                        }"
                         :button-style="adjustStyleClasses.button"
                         :aria-label="alwaysOnTop ? t('tamagotchi.stage.controls-island.unpin-from-top') : t('tamagotchi.stage.controls-island.pin-on-top')"
                         @click="toggleAlwaysOnTop"
@@ -482,7 +465,6 @@ function resetMainWindowPosition() {
 
                     <ControlButtonTooltip disable-hoverable-content>
                       <ControlButton
-                        v-track-button="{ name: 'controls_island_action', action: 'close_app' }"
                         :button-style="adjustStyleClasses.button"
                         :aria-label="t('tamagotchi.stage.controls-island.close')"
                         :class="['hover:bg-red-500 hover:text-white']"
@@ -505,10 +487,6 @@ function resetMainWindowPosition() {
         <div ref="mainControls" data-testid="main-controls" :class="['shrink-0', mainControlsLayoutClasses]">
           <ControlButtonTooltip side="inward">
             <ControlButton
-              v-track-button="{
-                name: 'controls_island_action',
-                action: expanded ? 'collapse_controls' : 'expand_controls',
-              }"
               :button-style="adjustStyleClasses.button"
               :aria-expanded="expanded"
               :aria-controls="menuId"

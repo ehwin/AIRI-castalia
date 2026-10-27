@@ -108,7 +108,6 @@ function mountControlsIsland(dock: ControlsIslandDock, size: typeof sizes[number
         },
       },
       plugins: [pinia, i18n],
-      directives: { 'track-button': {} },
     },
   })
   useSettings(pinia).controlsIslandIconSize = size

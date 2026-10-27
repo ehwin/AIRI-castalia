@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url'
 
 import { parseDocument } from 'yaml'
 
-/** The locale that owns every key. Crowdin translates it into the other locales. */
+/** The locale that owns every key. The other locale is maintained by hand. */
 const SOURCE_LOCALE = 'en'
 
 /**
@@ -122,7 +122,7 @@ async function loadLocale(root: string, locale: string, issues: LocaleIssue[]): 
  * Lists the placeholders of a message in sorted order.
  *
  * Use when:
- * - A tool compares a translation with its English source, for example the enforce-rules-for-i18n skill.
+ * - A tool compares a translation with its English source.
  */
 export function placeholders(text: string) {
   return [...text.matchAll(PLACEHOLDER)].map(match => match[0].replace(/\s+/g, '')).sort()
@@ -140,10 +140,10 @@ function shareWords(a: string, b: string) {
 /**
  * Finds the strings that a translation batch put on the wrong key.
  *
- * Crowdin can attach a batch of translations to the wrong run of strings. The moved text
+ * A batch of translations can attach to the wrong run of strings. The moved text
  * then repeats the translation of the key it came from, while the English of the two keys
  * has nothing in common. Only strings that changed against the base are checked, so a
- * repeated word that was already accepted does not come back on every sync.
+ * repeated word that was already accepted does not come back on every run.
  */
 function findMovedTranslations(
   locale: string,
@@ -210,8 +210,8 @@ export async function checkLocales(options: {
   /**
    * Level of a key or placeholder problem that comes only from an English change: the
    * translation is the same as on the base, but its English gained a placeholder or lost
-   * the key. A pull request that edits English uses `warning`, because Crowdin owns the
-   * other locales and the next sync clears the outdated translation. The sync uses `error`.
+   * the key. A pull request that edits English uses `warning`, because the translation
+   * arrives in a later change. The full check uses `error`.
    *
    * @default 'error'
    */
@@ -279,7 +279,7 @@ export async function checkLocales(options: {
  * Only a working translation counts. The export removes these on purpose:
  * - a base value that equals the base English, which is an untranslated placeholder;
  * - a base value whose placeholders differ from its English, which an English change made
- *   outdated and Crowdin cleared.
+ *   outdated, so the translation was cleared.
  * A string whose English changed or was removed can also lose its translation.
  */
 function findRemovedTranslations(

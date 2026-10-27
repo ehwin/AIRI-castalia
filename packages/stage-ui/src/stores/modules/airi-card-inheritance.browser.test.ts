@@ -129,7 +129,7 @@ describe('persisted and replicated card defaults', () => {
           },
         },
       },
-    }, 'import')
+    })
     await leader.cards.activateCard(explicit)
     await expect.poll(() => follower.consciousness.activeModel).toBe('card-model')
     await leader.cards.activateCard('default')

@@ -3,7 +3,6 @@ import type { AiriCard } from '@proj-airi/stage-ui/stores/modules/airi-card'
 
 import DOMPurify from 'dompurify'
 
-import { useAnalytics } from '@proj-airi/stage-ui/composables'
 import { useDownload } from '@proj-airi/stage-ui/composables/download'
 import { getAiriCardEditorModuleSettings } from '@proj-airi/stage-ui/services/airi-card-editor'
 import { exportAiriCardPackage } from '@proj-airi/stage-ui/services/airi-card-import-export'
@@ -30,7 +29,6 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const { trackSceneBackgroundSet } = useAnalytics()
 const cardStore = useAiriCardStore()
 const backgroundStore = useBackgroundStore()
 const displayModelsStore = useDisplayModelsStore()
@@ -161,7 +159,6 @@ const activeBackgroundId = computed({
       ...selectedCard.value,
       extensions,
     })
-    trackSceneBackgroundSet({ source: 'card_gallery', cleared: value === 'none' })
   },
 })
 

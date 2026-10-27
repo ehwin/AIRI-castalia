@@ -10,7 +10,6 @@ import { useElectronEventaInvoke } from '@proj-airi/electron-vueuse'
 import { useChatInterruption } from '@proj-airi/stage-layouts/composables/use-chat-interruption'
 import { ChatBackgroundTasks, ChatHistory, JournalPreviewModal } from '@proj-airi/stage-ui/components'
 import { ChatImageAttachmentPreview, ChatProviderSetupCallout, ChatReplyPreview, ChatSendButton, useChatComposer, useChatImages, VoiceInputButton } from '@proj-airi/stage-ui/components/scenarios/chat'
-import { useAnalytics } from '@proj-airi/stage-ui/composables/use-analytics'
 import { useBackgroundStore } from '@proj-airi/stage-ui/stores/background'
 import { useChatStore } from '@proj-airi/stage-ui/stores/chat'
 import { useChatSessionStore } from '@proj-airi/stage-ui/stores/chat/session-store'
@@ -142,10 +141,6 @@ const toolCallWidgets = {
   [COMPUTER_USE_TOOL_NAME]: computerUseToolCallWidget,
   [COMPUTER_USE_READ_IMAGE_TOOL_NAME]: computerUseReadImageToolCallWidget,
 } satisfies ChatToolCallWidgetRegistry
-const {
-  trackChatMessageDeleted,
-  trackChatMessageRetried,
-} = useAnalytics()
 const latestImageEntries = computed(() => {
   if (!activeCardId.value)
     return []
@@ -241,10 +236,6 @@ async function handleDeleteMessage(payload: { message: ChatHistoryItem, index: n
     sessionId: chatSession.activeSessionId,
     index,
   })
-  trackChatMessageDeleted({
-    source: 'history',
-    message_role: message?.role ?? 'unknown',
-  })
   clearReplyForMessage(message)
 }
 
@@ -271,9 +262,6 @@ async function handleRetryMessage(index: number) {
     sessionId: chatSession.activeSessionId,
     index,
     tools: computerUseEnabled.value ? [...widgetToolReferences, ...computerUseToolReferences] : widgetToolReferences,
-  })
-  trackChatMessageRetried({
-    source: 'history',
   })
 }
 

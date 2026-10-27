@@ -11,7 +11,7 @@ import { checkLocales } from './check-locales'
 
 const roots: string[] = []
 
-/** The command line the Crowdin workflow runs, so the summary is read as it is written there. */
+/** The script the test runs, so the summary is read as it is written there. */
 const script = fileURLToPath(new URL('check-locales.ts', import.meta.url))
 
 /** Writes `{ 'en/settings.yaml': '...' }` style files into a new locales directory. */
@@ -155,7 +155,7 @@ describe('checkLocales', () => {
 
     // The pull request that edits English does not have to edit Japanese.
     const pullRequest = await checkLocales({ root: englishChange, baseRoot: before, sourceChanges: 'warning' })
-    // Crowdin clears the outdated translation, and the sync may drop it from main.
+    // The outdated translation is cleared in a later change, and the sync may drop it from main.
     const sync = await checkLocales({ root: syncExport, baseRoot: englishChange })
 
     expect(pullRequest).toEqual([expect.objectContaining({ level: 'warning', key: 'animation.title' })])
@@ -314,7 +314,7 @@ describe('checkLocales', () => {
   it('escapes a pipe in the summary so the row keeps its five columns (PR #2904)', async () => {
     // ROOT CAUSE:
     //
-    // The Crowdin workflow appends this table to the step summary, and the warning
+    // The script writes this table into the file that `--summary` names, and the warning
     // shows a literal pipe. An unescaped pipe in that message ended the cell early, so
     // the row grew a column.
     //

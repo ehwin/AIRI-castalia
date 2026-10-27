@@ -184,7 +184,7 @@ async function confirmCreate() {
   const newId = await cardStore.addCard({
     ...structuredClone(toRaw(current)),
     name,
-  }, 'duplicate')
+  })
 
   await cardStore.activateCard(newId)
   cancelCreate()

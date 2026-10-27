@@ -128,13 +128,6 @@ export const electronGetServerChannelQrPayload = defineInvokeEventa<ServerChanne
 
 export type ElectronUpdaterChannel = 'latest' | 'stable' | 'alpha' | 'beta' | 'nightly' | 'canary'
 
-export interface ElectronUpdaterPreferences {
-  channel?: ElectronUpdaterChannel
-}
-
-export const electronGetUpdaterPreferences = defineInvokeEventa<ElectronUpdaterPreferences>('eventa:invoke:electron:auto-updater:get-preferences')
-export const electronSetUpdaterPreferences = defineInvokeEventa<ElectronUpdaterPreferences, ElectronUpdaterPreferences>('eventa:invoke:electron:auto-updater:set-preferences')
-
 export * from './plugin/assets'
 export * from './plugin/capabilities'
 export * from './plugin/host'

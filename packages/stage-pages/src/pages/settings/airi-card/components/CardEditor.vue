@@ -7,7 +7,6 @@ import type { Ref } from 'vue'
 
 import { errorMessageFrom } from '@moeru/std'
 import { isCustomProvidersDisabled } from '@proj-airi/stage-shared'
-import { useAnalytics } from '@proj-airi/stage-ui/composables'
 import { DEFAULT_ARTISTRY_WIDGET_INSTRUCTION } from '@proj-airi/stage-ui/constants/prompts/artistry-instruction'
 import { applyAiriCardEditorModules, getAiriCardEditorModuleSettings, safeParseAiriCardDraft } from '@proj-airi/stage-ui/services/airi-card-editor'
 import { resolveModuleSelection } from '@proj-airi/stage-ui/services/airi-card-modules'
@@ -64,7 +63,6 @@ const emit = defineEmits<{
 const dirty = defineModel<boolean>('dirty', { default: false })
 
 const { t } = useI18n()
-const { trackCardEdited } = useAnalytics()
 const cardStore = useAiriCardStore()
 const consciousnessStore = useConsciousnessStore()
 const visionStore = useVisionStore()
@@ -687,10 +685,9 @@ async function handleSave(activate: boolean) {
         return
       }
       savedCardId = props.cardId
-      trackCardEdited({ card_id: props.cardId })
     }
     else {
-      savedCardId = await cardStore.addCard(cardWithModules, 'scratch', selectedDisplayModelId.value)
+      savedCardId = await cardStore.addCard(cardWithModules, selectedDisplayModelId.value)
     }
 
     if (activate)

@@ -497,7 +497,6 @@ packages/stage-ui/src/components/scenarios/dialogs/model-selector/reports/live2d
 packages/stage-ui/src/components/scenarios/dialogs/model-selector/tachieReportModal.vue,component,,,@proj-airi/ui:Button,,,
 packages/stage-ui/src/components/scenarios/dialogs/onboarding/onboarding-dialog.vue,component,,,,packages/stage-ui/src/components/scenarios/dialogs/onboarding/onboarding.vue,,
 packages/stage-ui/src/components/scenarios/dialogs/onboarding/onboarding.vue,component,,,,,,
-packages/stage-ui/src/components/scenarios/dialogs/onboarding/step-analytics-notice.vue,component,,,@proj-airi/ui:Button | @proj-airi/ui:Callout,,button:21,
 packages/stage-ui/src/components/scenarios/dialogs/onboarding/step-model-selection.vue,component,,,@proj-airi/ui:Button,packages/stage-ui/src/components/misc/alert.vue | packages/stage-ui/src/components/menu/radio-card-many-select.vue,button:36,
 packages/stage-ui/src/components/scenarios/dialogs/onboarding/step-provider-configuration.vue,component,,,@proj-airi/ui:Button | @proj-airi/ui:Callout | @proj-airi/ui:FieldCheckbox | @proj-airi/ui:FieldInput | @proj-airi/ui:ScrollableArea,packages/stage-ui/src/components/misc/alert.vue | packages/stage-ui/src/components/scenarios/providers/provider-account-id-input.vue,button:237 | button:323,
 packages/stage-ui/src/components/scenarios/dialogs/onboarding/step-provider-selection.vue,component,,,@proj-airi/ui:Button | @proj-airi/ui:ScrollableArea,packages/stage-ui/src/components/menu/radio-card-detail.vue,button:35,

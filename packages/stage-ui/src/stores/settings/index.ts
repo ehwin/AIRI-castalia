@@ -1,7 +1,6 @@
 import { useTachie } from '@proj-airi/stage-ui-tachie'
 import { defineStore, storeToRefs } from 'pinia'
 
-import { useSettingsAnalytics } from './analytics'
 import { useSettingsControlsIsland } from './controls-island'
 import { useSettingsDeveloper } from './developer'
 import { useSettingsGeneral } from './general'
@@ -9,8 +8,6 @@ import { useSettingsSpine } from './spine'
 import { useSettingsStageModel } from './stage-model'
 import { useSettingsTheme } from './theme'
 
-export * from './analytics'
-// Export sub-stores
 export * from './audio-device'
 export * from './beat-sync'
 export * from './controls-island'
@@ -31,7 +28,6 @@ export { DEFAULT_THEME_COLORS_HUE } from './theme'
  */
 export const useSettings = defineStore('settings', () => {
   const general = useSettingsGeneral()
-  const analytics = useSettingsAnalytics()
   const stageModel = useSettingsStageModel()
   const spine = useSettingsSpine()
   const theme = useSettingsTheme()
@@ -41,7 +37,6 @@ export const useSettings = defineStore('settings', () => {
 
   async function resetState() {
     await stageModel.resetState()
-    analytics.resetState()
     general.resetState()
     spine.resetState()
     tachie.resetState()
@@ -52,7 +47,6 @@ export const useSettings = defineStore('settings', () => {
 
   // Extract refs from sub-stores to maintain proper reactivity
   const generalRefs = storeToRefs(general)
-  const analyticsRefs = storeToRefs(analytics)
   const stageModelRefs = storeToRefs(stageModel)
   const spineRefs = storeToRefs(spine)
   const themeRefs = storeToRefs(theme)
@@ -65,7 +59,6 @@ export const useSettings = defineStore('settings', () => {
     usePageSpecificTransitions: generalRefs.usePageSpecificTransitions,
     language: generalRefs.language,
     streamerMode: generalRefs.streamerMode,
-    analyticsEnabled: analyticsRefs.analyticsEnabled,
     websocketSecureEnabled: generalRefs.websocketSecureEnabled,
 
     // Stage model settings

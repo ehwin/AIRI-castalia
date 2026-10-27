@@ -21,7 +21,6 @@ import { defineStore, storeToRefs } from 'pinia'
 import { computed, shallowRef, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { getConversationAnalyticsSurface } from '../composables'
 import { useAiriRuntimePrompt } from '../composables/use-airi-runtime-prompt'
 import { registerTurnSpan, startSpan, takeComposerVoiceParent, takeVoiceTurnParent } from '../composables/use-io-tracer'
 import { useChatVision } from '../composables/vision/use-chat-vision'
@@ -29,12 +28,6 @@ import { useVisionInference } from '../composables/vision/use-vision-inference'
 import { chatAssetIdFrom, inlineConversationAssets, storeChatAttachments } from '../libs/chat-assets'
 import { extractMessageText } from '../libs/chat-sync'
 import { syncedRoles } from '../libs/pinia/synced-context'
-import { createChatAnalyticsHooks, getProviderMode } from '../libs/product-signals/events/chat'
-import {
-  AIRI_CHAT_APP_SURFACE_HEADER,
-  AIRI_CHAT_ROUND_ID_HEADER,
-  AIRI_CHAT_SESSION_ID_HEADER,
-} from '../libs/product-signals/headers'
 import { getSpeechBusContext, voiceGenerationEnded } from '../services/speech/bus'
 import { createCastaliaStateTools } from '../tools/castalia'
 import { composeDrawCardPrompt, createDrawCardTool, DRAW_CARD_TOOL_NAME, drawCardContent } from '../tools/draw-card'
@@ -364,9 +357,6 @@ export const useChatStore = defineStore('chat', () => {
    */
   const ownedTurnSpans = new Map<string, { span: ReturnType<typeof startSpan>, unregister: () => void }>()
   let stopLeadershipListener: (() => void) | undefined
-  const analyticsHooks = createChatAnalyticsHooks({
-    getSessionMessages: sessionId => chatSession.getSessionMessages(sessionId),
-  })
 
   /**
    * Initializes chat state and binds local consumers to synchronized leadership.
@@ -692,17 +682,6 @@ export const useChatStore = defineStore('chat', () => {
       ? openTurnSpan({ sessionId: correlation.conversationId, turnId: correlation.turnId })
       : undefined
 
-    // Analytics correlation goes only to the official provider. A resolved step can change the provider, so each request rebuilds it.
-    function requestHeaders(providerId: string | undefined) {
-      const headers = { ...options?.headers }
-      if (getProviderMode(providerId ?? activeProvider.value) === 'official' && options?.requestCorrelation) {
-        headers[AIRI_CHAT_SESSION_ID_HEADER] = options.requestCorrelation.conversationId
-        headers[AIRI_CHAT_ROUND_ID_HEADER] = options.requestCorrelation.turnId
-        headers[AIRI_CHAT_APP_SURFACE_HEADER] = getConversationAnalyticsSurface()
-      }
-      return headers
-    }
-
     // Stored messages reference their images and recordings. The provider request carries the bytes.
     context = await inlineConversationAssets(context)
 
@@ -865,13 +844,7 @@ export const useChatStore = defineStore('chat', () => {
         ...options,
         tools: withRunTools(options?.tools, options?.requestCorrelation),
         prepareStringContent: prepareTextOnlyAudioContext,
-        headers: requestHeaders(options?.providerId),
-        resolveStep: resolveStep
-          ? async () => {
-            const step = await resolveStep()
-            return { ...step, headers: requestHeaders(step.providerId) }
-          }
-          : undefined,
+        resolveStep,
         // Audio projection follows the model of each request. A tool step can switch between audio and text models.
         prepareConversation: async (conversation, target) => {
           if (conversation === providerContext && isInitialTarget(target))
@@ -1034,26 +1007,8 @@ export const useChatStore = defineStore('chat', () => {
       settleOwnedTurnSpan(event)
       getSpeechBusContext().emit(voiceGenerationEnded, event)
     },
-    ...analyticsHooks,
-    // A background task is not owner activity, so its rounds stay out of product signals.
-    onMessageRound: event => isTaskSession(event.conversationId) ? undefined : analyticsHooks.onMessageRound?.(event),
-    onMessageRoundFailed: event => isTaskSession(event.conversationId) ? undefined : analyticsHooks.onMessageRoundFailed?.(event),
     onLifecycle: record => contextObservability.recordLifecycle(record),
     onPromptProjection: payload => contextObservability.capturePromptProjection(payload),
-    onUserMessageAppended: ({ sessionId, message, messageText, source, model, provider, roundId, turnIndex }) => {
-      if (isTaskSession(sessionId))
-        return
-      analyticsHooks.onUserMessageAppended?.({
-        sessionId,
-        message,
-        messageText,
-        source,
-        model,
-        provider,
-        roundId,
-        turnIndex,
-      })
-    },
     onAssistantMessageAppended: ({ message }) => {
       // Each finished call of a saved reply becomes the latest call on the card of its tool.
       for (const slice of message.slices) {

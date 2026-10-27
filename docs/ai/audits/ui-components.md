@@ -120,7 +120,6 @@ The following table contains every stage-ui component without direct coverage. C
 | [scenarios/dialogs/model-selector/tachieReportModal.vue](../../../packages/stage-ui/src/components/scenarios/dialogs/model-selector/tachieReportModal.vue) | Needs a dedicated scenario and fixture |
 | [scenarios/dialogs/onboarding/onboarding-dialog.vue](../../../packages/stage-ui/src/components/scenarios/dialogs/onboarding/onboarding-dialog.vue) | Needs a dedicated scenario and fixture |
 | [scenarios/dialogs/onboarding/onboarding.vue](../../../packages/stage-ui/src/components/scenarios/dialogs/onboarding/onboarding.vue) | Needs a dedicated scenario and fixture |
-| [scenarios/dialogs/onboarding/step-analytics-notice.vue](../../../packages/stage-ui/src/components/scenarios/dialogs/onboarding/step-analytics-notice.vue) | Needs a dedicated scenario and fixture |
 | [scenarios/dialogs/onboarding/step-model-selection.vue](../../../packages/stage-ui/src/components/scenarios/dialogs/onboarding/step-model-selection.vue) | Needs a dedicated scenario and fixture |
 | [scenarios/dialogs/onboarding/step-provider-configuration.vue](../../../packages/stage-ui/src/components/scenarios/dialogs/onboarding/step-provider-configuration.vue) | Needs a dedicated scenario and fixture |
 | [scenarios/dialogs/onboarding/step-provider-selection.vue](../../../packages/stage-ui/src/components/scenarios/dialogs/onboarding/step-provider-selection.vue) | Needs a dedicated scenario and fixture |

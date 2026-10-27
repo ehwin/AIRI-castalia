@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { useHostOnboarding } from '@proj-airi/stage-host-context'
-import { OnboardingScreen, OnboardingStepAnalyticsNotice } from '@proj-airi/stage-ui/components'
-import { isAnalyticsAvailableInBuild } from '@proj-airi/stage-ui/libs/product-signals'
+import { OnboardingScreen } from '@proj-airi/stage-ui/components'
 import { useOnboardingStore } from '@proj-airi/stage-ui/stores/onboarding'
 import { useTheme } from '@proj-airi/ui'
 import { computed } from 'vue'
@@ -11,11 +10,6 @@ const { isDark } = useTheme()
 const { close: closeWindow } = useHostOnboarding()
 
 const bgClass = computed(() => isDark.value ? 'bg-[#0f0f0f]' : 'bg-white')
-const extraSteps = computed(() => {
-  return isAnalyticsAvailableInBuild()
-    ? [{ id: 'analytics-notice', component: OnboardingStepAnalyticsNotice }]
-    : []
-})
 
 async function closeOnboardingWindow() {
   try {
@@ -45,7 +39,7 @@ async function handleConfigured() {
   >
     <div class="min-h-8 w-full flex-shrink-0 select-none" :class="bgClass" />
     <div class="mx-8 mb-8 mt-2 min-h-0 flex flex-1 flex-col">
-      <OnboardingScreen :extra-steps="extraSteps" @skipped="handleSkipped" @configured="handleConfigured" />
+      <OnboardingScreen @skipped="handleSkipped" @configured="handleConfigured" />
     </div>
   </div>
 </template>

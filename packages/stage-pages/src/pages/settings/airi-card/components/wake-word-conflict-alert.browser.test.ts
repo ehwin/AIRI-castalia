@@ -39,8 +39,8 @@ describe('character cards wake word alert', () => {
     })
     const cards = useAiriCardStore(pinia)
     const wakeWords = useWakeWordsStore(pinia)
-    const aria = await cards.addCard({ name: 'Aria', version: '1.0.0' }, 'scratch')
-    const luna = await cards.addCard({ name: 'Luna', version: '1.0.0' }, 'scratch')
+    const aria = await cards.addCard({ name: 'Aria', version: '1.0.0' })
+    const luna = await cards.addCard({ name: 'Luna', version: '1.0.0' })
     await wakeWords.setWords(aria, [{ text: 'Hey AIRI', modelId: kwsModel.id, pronunciations: [SHARED] }], model)
     await wakeWords.setWords(luna, [{ text: 'Hey AIRI', modelId: kwsModel.id, pronunciations: [SHARED] }], model)
 

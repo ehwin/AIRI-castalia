@@ -85,20 +85,6 @@ controls-island:
     auto: 自动（响应式）
     large: 大（默认）
     small: 小
-analytics:
-  notice:
-    title: 使用数据及崩溃分析
-    description: >-
-      AIRI 开发者将会收集脱敏的匿名使用数据，以及崩溃及错误细节，以帮助我们了解应用程序是如何使用和提高稳定性的，不会收集任何个人数据。
-    privacyPrefix: 阅读
-    privacyLink: 隐私政策
-    onboardingHint: 您可以稍后在「设置」>「系统」>「通用」中关闭使用数据及崩溃分析。
-    settingsHint: 您可以随时关闭使用数据及崩溃分析。
-  toggle:
-    title: 允许收集使用数据及崩溃分析
-    description: 关闭任何非必要使用数据及崩溃分析的采集与上传
-  disabled:
-    title: 此开发版本的使用数据及崩溃分析功能已禁用
 model-select:
   panel-callout:
     support-status-header: 我们同时支持 2D 和 3D 模型

@@ -8,7 +8,6 @@ import type { HearingTranscriberTraceOptions } from '../../libs/audio/hearing-tr
 import type { AIRIStreamTranscriptionResult } from '../../libs/providers/stream-transcription'
 import type { HearingTranscriptionResult } from '../../libs/providers/transcription-types'
 
-import { errorMessageFrom } from '@moeru/std'
 import { toMediaStream } from '@proj-airi/audio/browser'
 import { encodeWav, Pcm16Encoder } from '@proj-airi/audio/encoding'
 import { streamWebSpeechAPITranscription } from '@proj-airi/provider-inference'
@@ -18,7 +17,6 @@ import { generateTranscription } from '@xsai/generate-transcription'
 import { defineStore, storeToRefs } from 'pinia'
 import { computed, ref, toRaw, watch } from 'vue'
 
-import { useAnalytics } from '../../composables/use-analytics'
 import { createHearingTranscriber } from '../../libs/audio/hearing-transcriber'
 import { APPLE_SPEECH_TRANSCRIPTION_PROVIDER_ID, executeAppleSpeechStream } from '../../libs/providers/providers/apple-speech'
 import { executeSherpawStream, SHERPAW_TRANSCRIPTION_PROVIDER_ID } from '../../libs/providers/providers/sherpaw'
@@ -26,33 +24,6 @@ import { streamTranscription } from '../../libs/providers/stream-transcription'
 import { useAudioContext } from '../audio'
 import { useProviderConfigStore } from '../providers/config'
 import { useProviderStore } from '../providers/provider'
-
-type TranscriptionAnalyticsErrorCode = 'permission_denied' | 'device_unavailable' | 'input_unavailable' | 'provider_error' | 'unknown'
-
-/**
- * Normalizes transcription failures into bounded analytics error codes.
- */
-function transcriptionAnalyticsErrorCode(err: unknown): TranscriptionAnalyticsErrorCode {
-  if (err instanceof DOMException) {
-    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError')
-      return 'permission_denied'
-
-    if (err.name === 'NotFoundError' || err.name === 'NotReadableError')
-      return 'device_unavailable'
-  }
-
-  const message = (errorMessageFrom(err) ?? '').toLowerCase()
-  if (message.includes('permission') || message.includes('notallowed'))
-    return 'permission_denied'
-
-  if (message.includes('microphone') || message.includes('audio track') || message.includes('device'))
-    return 'device_unavailable'
-
-  if (message.includes('file input') || message.includes('compatible input'))
-    return 'input_unavailable'
-
-  return message ? 'provider_error' : 'unknown'
-}
 
 export interface StreamTranscriptionFileInputOptions extends Omit<XSAIStreamTranscriptionOptions, 'file' | 'fileName'> {
   file: Blob
@@ -312,12 +283,6 @@ export const useHearingStore = defineStore('hearing-store', () => {
   const providersStore = useProviderStore()
   const providerStore = useProviderConfigStore()
   const { allAudioTranscriptionProvidersMetadata } = storeToRefs(providersStore)
-  const {
-    trackMicrophonePermissionDenied,
-    trackSttFailed,
-    trackSttSucceeded,
-    trackVoiceInputStarted,
-  } = useAnalytics()
 
   // Pinia synchronization owns live cross-window state. localStorage only
   // loads and saves durable values for this synchronized store.
@@ -436,124 +401,90 @@ export const useHearingStore = defineStore('hearing-store', () => {
     const features = providersStore.getTranscriptionFeatures(providerId)
     const streamExecutor = resolveStreamTranscriptionExecutor(providerId)
 
-    const sttStartedAt = performance.now()
-    trackVoiceInputStarted({ stt_provider_id: providerId })
+    if (features.supportsStreamOutput && streamExecutor) {
+      const request = { ...provider.transcription(model, options?.providerOptions), abortSignal: options?.signal }
 
-    function emitSucceeded(charCount: number, stream: boolean) {
-      trackSttSucceeded({
-        provider: providerId,
-        latency_ms: Math.round(performance.now() - sttStartedAt),
-        char_count: charCount,
-        stream,
-      })
-    }
-    function emitFailed(err: unknown) {
-      const errorCode = transcriptionAnalyticsErrorCode(err)
-      trackSttFailed({ provider: providerId, error_code: errorCode })
-      if (errorCode === 'permission_denied') {
-        trackMicrophonePermissionDenied({
-          stt_provider_id: providerId,
-          error_code: errorCode,
-        })
+      // Recorder files contain encoded media. Sherpaw accepts only the raw PCM16 stream from the live pipeline.
+      if (providerId === SHERPAW_TRANSCRIPTION_PROVIDER_ID && normalizedInput.file && !normalizedInput.inputAudioStream) {
+        throw new Error('Sherpaw requires live microphone input. Recorded file input is not supported.')
+      }
+
+      // Stream branches: the executor returns once the stream starts.
+      // The character count is only known by the downstream consumer of
+      // the stream, which lives outside this store.
+      if (features.supportsStreamInput && normalizedInput.inputAudioStream) {
+        const streamResult = streamExecutor({
+          ...request,
+          inputAudioStream: normalizedInput.inputAudioStream,
+        } as Parameters<typeof streamExecutor>[0])
+        return {
+          mode: 'stream',
+          ...streamResult,
+        }
+      }
+
+      if (!features.supportsStreamInput && normalizedInput.file) {
+        const streamResult = streamExecutor({
+          ...request,
+          file: normalizedInput.file,
+        } as Parameters<typeof streamExecutor>[0])
+        return {
+          mode: 'stream',
+          ...streamResult,
+        }
+      }
+
+      if (features.supportsStreamInput && !normalizedInput.inputAudioStream && normalizedInput.file) {
+        const streamResult = streamExecutor({
+          ...request,
+          file: normalizedInput.file,
+        } as Parameters<typeof streamExecutor>[0])
+        return {
+          mode: 'stream',
+          ...streamResult,
+        }
+      }
+
+      if (!features.supportsGenerate || !normalizedInput.file) {
+        throw new Error('No compatible input provided for streaming transcription.')
       }
     }
 
-    try {
-      if (features.supportsStreamOutput && streamExecutor) {
-        const request = { ...provider.transcription(model, options?.providerOptions), abortSignal: options?.signal }
+    if (!normalizedInput.file) {
+      throw new Error('File input is required for transcription.')
+    }
 
-        // Recorder files contain encoded media. Sherpaw accepts only the raw PCM16 stream from the live pipeline.
-        if (providerId === SHERPAW_TRANSCRIPTION_PROVIDER_ID && normalizedInput.file && !normalizedInput.inputAudioStream) {
-          throw new Error('Sherpaw requires live microphone input. Recorded file input is not supported.')
-        }
+    const threshold = options?.confidenceThreshold ?? confidenceThreshold.value
+    const useVerboseJson = !format && threshold > CONFIDENCE_THRESHOLD_DISABLED
+    const response = await generateTranscription({
+      ...provider.transcription(model, options?.providerOptions),
+      abortSignal: options?.signal,
+      file: normalizedInput.file,
+      fileName: resolveTranscriptionFileName(normalizedInput.file, normalizedInput.fileName),
+      responseFormat: useVerboseJson ? 'verbose_json' : format,
+    })
 
-        // Stream branches: emit succeeded with char_count=0 once the
-        // executor returns successfully — char count is only known by
-        // the downstream consumer of the stream, which lives outside
-        // this store. Latency here = "time to start of stream".
-        if (features.supportsStreamInput && normalizedInput.inputAudioStream) {
-          const streamResult = streamExecutor({
-            ...request,
-            inputAudioStream: normalizedInput.inputAudioStream,
-          } as Parameters<typeof streamExecutor>[0])
-          emitSucceeded(0, true)
-          return {
-            mode: 'stream',
-            ...streamResult,
-          }
-        }
-
-        if (!features.supportsStreamInput && normalizedInput.file) {
-          const streamResult = streamExecutor({
-            ...request,
-            file: normalizedInput.file,
-          } as Parameters<typeof streamExecutor>[0])
-          emitSucceeded(0, true)
-          return {
-            mode: 'stream',
-            ...streamResult,
-          }
-        }
-
-        if (features.supportsStreamInput && !normalizedInput.inputAudioStream && normalizedInput.file) {
-          const streamResult = streamExecutor({
-            ...request,
-            file: normalizedInput.file,
-          } as Parameters<typeof streamExecutor>[0])
-          emitSucceeded(0, true)
-          return {
-            mode: 'stream',
-            ...streamResult,
-          }
-        }
-
-        if (!features.supportsGenerate || !normalizedInput.file) {
-          throw new Error('No compatible input provided for streaming transcription.')
+    if (useVerboseJson) {
+      if (response.segments) {
+        verboseJsonNotSupported.value = false
+        const filteredText = filterTranscriptionByConfidence(response.segments, threshold)
+        return {
+          mode: 'generate',
+          ...response,
+          text: filteredText,
         }
       }
-
-      if (!normalizedInput.file) {
-        throw new Error('File input is required for transcription.')
-      }
-
-      const threshold = options?.confidenceThreshold ?? confidenceThreshold.value
-      const useVerboseJson = !format && threshold > CONFIDENCE_THRESHOLD_DISABLED
-      const response = await generateTranscription({
-        ...provider.transcription(model, options?.providerOptions),
-        abortSignal: options?.signal,
-        file: normalizedInput.file,
-        fileName: resolveTranscriptionFileName(normalizedInput.file, normalizedInput.fileName),
-        responseFormat: useVerboseJson ? 'verbose_json' : format,
-      })
-
-      if (useVerboseJson) {
-        if (response.segments) {
-          verboseJsonNotSupported.value = false
-          const filteredText = filterTranscriptionByConfidence(response.segments, threshold)
-          emitSucceeded(filteredText.length, false)
-          return {
-            mode: 'generate',
-            ...response,
-            text: filteredText,
-          }
-        }
-        else {
-          verboseJsonNotSupported.value = true
-          console.warn('[Hearing] Confidence filter is enabled but the provider did not return verbose_json segments. Filtering has no effect.')
-        }
-      }
-
-      const fallbackText = normalizeGeneratedTranscriptionText(response)
-      emitSucceeded(fallbackText.length, false)
-      return {
-        mode: 'generate',
-        ...response,
-        text: fallbackText,
+      else {
+        verboseJsonNotSupported.value = true
+        console.warn('[Hearing] Confidence filter is enabled but the provider did not return verbose_json segments. Filtering has no effect.')
       }
     }
-    catch (err) {
-      emitFailed(err)
-      throw err
+
+    const fallbackText = normalizeGeneratedTranscriptionText(response)
+    return {
+      mode: 'generate',
+      ...response,
+      text: fallbackText,
     }
   }
 

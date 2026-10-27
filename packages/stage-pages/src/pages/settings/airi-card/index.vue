@@ -82,7 +82,7 @@ watch(inputFiles, async (newFiles) => {
     return
 
   try {
-    await addCard(await importAiriCardPackage({ file, displayModelsStore }), 'import')
+    await addCard(await importAiriCardPackage({ file, displayModelsStore }))
     toast(t('settings.pages.card.imported'))
   }
   catch (error) {

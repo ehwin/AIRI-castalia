@@ -24,7 +24,6 @@ import { useI18n } from 'vue-i18n'
 
 import { DEFAULT_ARTISTRY_WIDGET_SPAWNING_PROMPT } from '../../constants/prompts/character-defaults'
 import { formatLive2DActPrompt } from '../../constants/prompts/live2d-act'
-import { captureAnalyticsEvent } from '../../libs/product-signals'
 import { wakeWordSchema } from '../../libs/voice/wake-words'
 import { resolveModuleSelection } from '../../services/airi-card-modules'
 import { createAvatarModelReference } from '../../services/avatar-model'
@@ -226,13 +225,7 @@ export const useAiriCardStore = defineStore('airi-card', () => {
     await speech.selectProviderModel(modules.speech.provider, modules.speech.model, modules.speech.voice_id)
   }
 
-  /**
-   * `source` feeds the `card_created` analytics event: `scratch` = built in
-   * the creation dialog, `import` = ccv3 JSON upload, `duplicate` = cloned
-   * from an existing card (profile switcher). Required so a new call site
-   * can't silently degrade creation attribution.
-   */
-  const addCard = async (card: AiriCard | Card | ccv3.CharacterCardV3, source: 'scratch' | 'import' | 'duplicate', displayModelId?: string) => {
+  const addCard = async (card: AiriCard | Card | ccv3.CharacterCardV3, displayModelId?: string) => {
     const newCardId = nanoid()
     const newCard = newAiriCard(toRaw(card))
     cards.value.set(newCardId, newCard)
@@ -240,7 +233,6 @@ export const useAiriCardStore = defineStore('airi-card', () => {
     if (displayModelId)
       await setCharacterDefaultAvatarModelFromDisplayModel(newCardId, displayModelId)
 
-    captureAnalyticsEvent('card_created', { card_id: newCardId, source })
     return newCardId
   }
 
@@ -261,7 +253,6 @@ export const useAiriCardStore = defineStore('airi-card', () => {
       await applyActiveCardSettings()
     }
 
-    captureAnalyticsEvent('character_deleted', { character_id: id })
     return true
   }
 

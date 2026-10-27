@@ -1,12 +1,13 @@
 import * as v from 'valibot'
 
 /**
- * Part of speech, spelled the way Crowdin spells it.
+ * Part of speech, spelled the way the Crowdin dialect spells it.
  *
  * NOTICE:
- * TBX-Basic writes this value as `properNoun` (DC-0396), and Crowdin writes it as "proper
- * noun" with a space. Crowdin reads what we upload, so Crowdin wins. Confirmed against a
- * glossary exported from project 816610, where every proper noun reads "proper noun".
+ * TBX-Basic writes this value as `properNoun` (DC-0396), and the Crowdin dialect writes it as
+ * "proper noun" with a space. An importer reads the dialect, so the exporter writes the spaced
+ * form. Confirmed against a glossary exported from project 816610, where every proper noun
+ * reads "proper noun".
  */
 const PartOfSpeechSchema = v.picklist([
   'adjective',
@@ -81,8 +82,8 @@ const TermSchema = v.object({
  */
 const ConceptSchema = v.object({
   /**
-   * Stable identifier in kebab case. A change here creates a new concept in Crowdin rather
-   * than updating the existing one, so it must survive a rename of the terms.
+   * Stable identifier in kebab case. A rename of the terms must keep it, because a changed
+   * id reads as a new concept rather than an update of the existing one.
    */
   id: v.pipe(v.string(), v.regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'id must be kebab case')),
   subject: v.pipe(v.string(), v.nonEmpty()),

@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { VoiceType } from '@proj-airi/stage-ui/composables'
 import type { SpeechProviderWithExtraOptions } from '@xsai-ext/providers/utils'
 
 import { errorMessageFrom } from '@moeru/std'
@@ -11,7 +10,6 @@ import {
   TestDummyMarker,
   VoiceCardManySelect,
 } from '@proj-airi/stage-ui/components'
-import { useAnalytics } from '@proj-airi/stage-ui/composables'
 import { useAiriCardStore } from '@proj-airi/stage-ui/stores'
 import { useSpeechStore } from '@proj-airi/stage-ui/stores/modules/speech'
 import { useProviderConfigStore } from '@proj-airi/stage-ui/stores/providers/config'
@@ -52,13 +50,6 @@ const {
   ssmlEnabled,
   availableVoices,
 } = storeToRefs(speechStore)
-
-const {
-  trackProviderClick,
-  trackTtsProviderSelected,
-  trackVoicePreviewPlayed,
-  trackVoiceSelected,
-} = useAnalytics()
 
 const voiceSearchQuery = ref('')
 const useSSML = ref(false)
@@ -137,45 +128,9 @@ const displayedSpeechVoiceId = computed({
 
 const currentSpeechVoiceId = computed(() => activeSpeechVoiceId.value || '')
 
-/**
- * Resolves the current TTS model id for low-cardinality analytics payloads.
- */
-function currentTtsModelId() {
-  return activeSpeechModel.value || 'unknown'
-}
-
-/**
- * Builds bounded voice analytics fields for catalog and manual voices.
- */
-function voiceAnalyticsPayload(
-  voiceId: string,
-  providerId = activeSpeechProvider.value,
-): {
-  voice_id: string
-  voice_type: VoiceType
-} {
-  const isCatalogVoice = availableVoices.value[providerId]?.some(voice => voice.id === voiceId) ?? false
-
-  return {
-    voice_id: isCatalogVoice ? voiceId : 'custom',
-    voice_type: 'custom_configured',
-  }
-}
-
-/**
- * Tracks explicit voice selection from catalog or custom input controls.
- */
-async function selectSpeechVoice(voiceId: string | undefined) {
+/** Persists the selection after the voice control reports a change. */
+async function selectSpeechVoice() {
   await persistSelection()
-  if (!voiceId)
-    return
-
-  trackVoiceSelected({
-    tts_provider_id: activeSpeechProvider.value || 'unknown',
-    tts_model_id: currentTtsModelId(),
-    ...voiceAnalyticsPayload(voiceId),
-    source: 'settings',
-  })
 }
 
 /** Persists the selection only after the leader commits its provider and model. */
@@ -183,14 +138,6 @@ async function selectSpeechSource(sourceId: string) {
   const selection = await speechStore.selectProviderModel(sourceId, '')
   if (!selection)
     return
-  const providerId = providerStore.providers[sourceId]?.definitionId || sourceId
-  // Use this command's receipt: another selection can reach the store before
-  // this caller resumes, but must not relabel this analytics event.
-  trackTtsProviderSelected({
-    tts_provider_id: providerId,
-    tts_model_id: selection.model || 'unknown',
-    source: 'settings',
-  })
   await persistSelection()
 }
 
@@ -302,11 +249,6 @@ async function generateTestSpeech() {
     return
   }
 
-  const previewVoice = voice
-  const previewModel = model
-  const previewProvider = activeSpeechProvider.value || 'unknown'
-  const previewAnalytics = voiceAnalyticsPayload(previewVoice.id, previewProvider)
-
   isGenerating.value = true
   errorMessage.value = ''
 
@@ -348,14 +290,6 @@ async function generateTestSpeech() {
     setTimeout(() => {
       if (audioPlayer.value) {
         void audioPlayer.value.play()
-          .then(() => {
-            trackVoicePreviewPlayed({
-              tts_provider_id: previewProvider,
-              tts_model_id: previewModel,
-              ...previewAnalytics,
-              source: 'manual_preview',
-            })
-          })
           .catch(() => {})
       }
     }, 100)
@@ -408,13 +342,6 @@ function updateCustomVoiceName(value: string | undefined) {
   }
 }
 
-/**
- * Tracks a manual voice after the input value is committed by the user.
- */
-function commitCustomVoiceSelection() {
-  selectSpeechVoice(activeSpeechVoiceId.value)
-}
-
 /** Routes manual model edits through the same leader commit as listed models. */
 async function updateCustomModelName(value: string | undefined) {
   errorMessage.value = ''
@@ -464,7 +391,6 @@ async function handleDeleteProvider(providerId: string) {
               :value="source.id"
               :title="source.title"
               :description="source.description"
-              @click="trackProviderClick(source.providerId || source.id, 'speech')"
             >
               <template #topRight>
                 <button
@@ -718,7 +644,7 @@ async function handleDeleteProvider(providerId: string) {
               label="Voice Name"
               description="Enter the voice name for your custom voice"
               placeholder="Enter voice name (e.g., 'alloy', 'echo')"
-              @change="commitCustomVoiceSelection"
+              @change="selectSpeechVoice()"
               @update:model-value="updateCustomVoiceName"
             />
 

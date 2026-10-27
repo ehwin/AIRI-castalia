@@ -1,19 +1,19 @@
 # AIRI terminology glossary — English source of truth.
 #
-# A generator turns this file into TBX version 3 and sends it to the Crowdin glossary, where
-# the editor marks each term and offers the approved translation.
+# A generator turns this file into TBX version 3. This fork runs no translation platform,
+# so the export is a format-compatible artifact with no consumer.
 #
 # Every field maps to one TBX element and carries the TBX name. schema.ts holds the mapping.
 # packages/i18n/AGENTS.md, under "Glossary", says when a term belongs here and when it does not.
 #
-# This repository owns English. Crowdin owns the other 8 languages, and the translated terms
-# arrive in packages/i18n/glossary/translations/ through a pull request.
+# This repository owns English. The other locales are maintained by hand, and a translated
+# term arrives as a change to this file.
 
 # ---------------------------------------------------------------------------------------
 # Names from the documentation
 #
-# These concepts were already in the Crowdin glossary, added by hand. They live here so that
-# this file describes the whole glossary and an upload cannot destroy them.
+# These concepts came from the upstream translation glossary, added by hand. They live here
+# so that this file describes the whole glossary and an upload cannot destroy them.
 # ---------------------------------------------------------------------------------------
 
 - id: neuro-sama

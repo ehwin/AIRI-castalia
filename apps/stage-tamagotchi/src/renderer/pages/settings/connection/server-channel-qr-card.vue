@@ -3,7 +3,6 @@ import type { ServerChannelQrPayload } from '@proj-airi/stage-shared/server-chan
 
 import { errorMessageFrom } from '@moeru/std'
 import { useElectronEventaInvoke } from '@proj-airi/electron-vueuse'
-import { useAnalytics } from '@proj-airi/stage-ui/composables'
 import { Callout, Collapsible, GhostButton } from '@proj-airi/ui'
 import { storeToRefs } from 'pinia'
 import { renderSVG } from 'uqr'
@@ -14,13 +13,10 @@ import { electronGetServerChannelQrPayload } from '../../../../shared/eventa'
 import { useServerChannelSettingsStore } from '../../../stores/settings/server-channel'
 
 const { t } = useI18n()
-const { trackDevicePairingQrShown } = useAnalytics()
 const getServerChannelQrPayload = useElectronEventaInvoke(electronGetServerChannelQrPayload)
 
 function handleToggleExpanded(visible: boolean, setVisible: (value: boolean) => void) {
   setVisible(visible)
-  if (visible)
-    trackDevicePairingQrShown()
 }
 const { appliedConfig } = storeToRefs(useServerChannelSettingsStore())
 

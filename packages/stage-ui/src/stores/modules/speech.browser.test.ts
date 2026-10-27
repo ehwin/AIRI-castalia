@@ -120,7 +120,7 @@ describe('speech synchronization', () => {
       version: '1.0',
       description: '',
       extensions: { airi: { modules: { speech: { provider, model: 'model-b', voice_id: 'saved' } } } },
-    }, 'scratch')
+    })
     pause = true
     try {
       await cards.activateCard(id)

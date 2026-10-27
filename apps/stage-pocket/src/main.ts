@@ -9,9 +9,7 @@ import { Keyboard } from '@capacitor/keyboard'
 import { autoAnimatePlugin } from '@formkit/auto-animate/vue'
 import { errorMessageFrom } from '@moeru/std'
 import { isEnvTruthy } from '@proj-airi/stage-shared'
-import { trackButtonPlugin } from '@proj-airi/stage-ui/directives/track-button'
 import { setupSynced } from '@proj-airi/stage-ui/libs/pinia'
-import { configureAnalyticsAdapter } from '@proj-airi/stage-ui/libs/product-signals'
 import { MotionPlugin } from '@vueuse/motion'
 import { createPinia } from 'pinia'
 import { setupLayouts } from 'virtual:generated-layouts'
@@ -30,11 +28,6 @@ import 'splitpanes/dist/splitpanes.css'
 import 'vue-sonner/style.css'
 import './styles/main.css'
 import 'uno.css'
-
-configureAnalyticsAdapter(async (options) => {
-  const { createOpenpanelAdapter } = await import('@proj-airi/stage-ui/libs/product-signals/openpanel')
-  return createOpenpanelAdapter(options)
-})
 
 if (Capacitor.isNativePlatform()) {
   if (Capacitor.getPlatform() === 'ios') {
@@ -79,7 +72,6 @@ createApp(App)
   .use(pinia)
   .use(i18n)
   .use(Tres)
-  .use(trackButtonPlugin)
   .mount('#app')
 
 if (import.meta.env.DEV && !import.meta.env.SSR) {
