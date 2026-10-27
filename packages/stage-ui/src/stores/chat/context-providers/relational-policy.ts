@@ -73,7 +73,9 @@ export function createRelationalPolicyContextProvider() {
       return undefined
 
     let turn = turns.get(sessionId)
-    if (turn?.messageId !== lastUser.id) {
+    // A new persona must not reuse the previous persona's turn, even when the
+    // renderer sends the same user message id again.
+    if (turn?.messageId !== lastUser.id || turn?.ownerId !== ownerId) {
       const policy = createRelationalPolicy({
         now: Date.now(),
         // The session cache only stands in for storage when the persona matches.

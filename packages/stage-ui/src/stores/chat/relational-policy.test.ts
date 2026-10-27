@@ -112,6 +112,19 @@ describe('relational policy persistence', () => {
     expect(switched?.text).toContain('Depth: 1 of 4')
   })
 
+  it('starts a new persona from depth 1 when the message id repeats', () => {
+    installFakeStorage()
+    const provider = createRelationalPolicyContextProvider()
+    provider('session-1', { id: 'a', text: '我害怕一个人待着' }, 'persona-A')
+    const deep = provider('session-1', { id: 'b', text: '我其实很喜欢猫' }, 'persona-A')
+    expect(Number(/Depth: (\d) of 4/.exec(deep?.text ?? '')?.[1])).toBeGreaterThan(1)
+
+    const switched = provider('session-1', { id: 'b', text: '我其实很喜欢猫' }, 'persona-B')
+
+    expect(switched?.text).toContain('Depth: 1 of 4')
+    expect(switched?.text).not.toBe(deep?.text)
+  })
+
   it('drops the oldest session once it tracks 64', () => {
     const store = installFakeStorage()
     const provider = createRelationalPolicyContextProvider()
