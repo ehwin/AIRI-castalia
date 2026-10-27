@@ -59,4 +59,4 @@ The stage answers only a client that announced a module. The server tells the st
 
 ## License
 
-[MIT](../../LICENSE)
+[AGPL-3.0-or-later](../../LICENSE)

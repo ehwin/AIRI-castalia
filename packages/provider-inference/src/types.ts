@@ -100,7 +100,7 @@ export interface StreamTranscriptionSnapshot {
 
 /** Validation lifecycle for one serializable provider configuration. */
 export type ProviderValidationStatus = 'unconfigured' | 'validating' | 'configured' | 'invalid' | 'bypassed'
-export type ProviderConfiguredBy = 'user' | 'authentication'
+export type ProviderConfiguredBy = 'user'
 
 /** Serializable configuration for one provider instance. */
 export interface InferenceServiceProvider {

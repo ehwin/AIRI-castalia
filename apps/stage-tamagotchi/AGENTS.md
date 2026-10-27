@@ -10,7 +10,7 @@ renderer to the OS. Business logic belongs in `packages/`, not here.
 
 - Main entry: `src/main/index.ts`
 - Renderer entry: `src/renderer/main.ts`, root component `src/renderer/App.vue`
-- IPC contracts: `src/shared/eventa/index.ts` (792) — every `invoke` pair lives here
+- IPC contracts: `src/shared/eventa/index.ts` (770) — every `invoke` pair lives here
 
 ## Address table
 
@@ -28,7 +28,6 @@ renderer to the OS. Business logic belongs in `packages/`, not here.
 | Computer use runtime | `services/airi/computer-use/` | 186 |
 | IO trace hub (timings) | `services/airi/io-trace-hub/` | 177 |
 | Local HTTP server | `services/airi/http-server/` | 116 |
-| Auth bridge | `services/airi/auth.ts` | 232 |
 
 ### Renderer — `src/renderer/`
 
@@ -39,7 +38,7 @@ renderer to the OS. Business logic belongs in `packages/`, not here.
 | Chat input area and controls | `components/InteractiveArea.vue` | 670 |
 | Screen ambient light, backdrops, window helpers | `composables/` | 3029 |
 | Fullscreen and runtime diagnostics | `stores/` | 1011 |
-| Bridge to trace and auth | `bridges/` | 277 |
+| Bridge to trace | `bridges/` | 202 |
 
 ### Shared and build
 

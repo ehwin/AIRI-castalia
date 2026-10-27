@@ -98,11 +98,21 @@ const live2dMotionControl = useLive2DMotionControl()
 const { exclusiveOwnerId: live2dMotionControlOwnerId } = storeToRefs(live2dMotionControl)
 const {
   forceViewTarget: live2dMagicForceViewTarget,
+  method: live2dMagicMethod,
+  arHmmStateCount: live2dMagicArHmmStateCount,
+  arHmmOrder: live2dMagicArHmmOrder,
+  arHmmNoiseScale: live2dMagicArHmmNoiseScale,
   profileId: live2dMagicProfileId,
   skipMouthOpen: live2dMagicSkipMouthOpen,
 } = storeToRefs(useLive2DMotionMagicSettings())
 const live2dMagicMotion = useLive2DMotionMagic({
   dataset: () => live2dMotionMagicProfiles[live2dMagicProfileId.value].dataset,
+  method: live2dMagicMethod,
+  arHmmSettings: () => ({
+    stateCount: live2dMagicArHmmStateCount.value,
+    order: live2dMagicArHmmOrder.value,
+    noiseScale: live2dMagicArHmmNoiseScale.value,
+  }),
   forceViewTarget: live2dMagicForceViewTarget,
   skipMouthOpen: live2dMagicSkipMouthOpen,
   disabled: () => live2dMotionControlOwnerId.value !== null,
@@ -112,14 +122,15 @@ const live2dMagicMotion = useLive2DMotionMagic({
 let live2dMagicActivationRequest = 0
 
 watch(
-  [stageModelRenderer, live2dMotionDriver, live2dMagicProfileId, () => props.paused, live2dMotionControlOwnerId],
-  async ([renderer, driver, , paused, controlOwnerId]) => {
+  [stageModelRenderer, live2dMotionDriver, live2dMagicProfileId, live2dMagicMethod, live2dMagicArHmmStateCount, live2dMagicArHmmOrder, () => props.paused, live2dMotionControlOwnerId],
+  async ([renderer, driver, , method, , , paused, controlOwnerId]) => {
     const request = ++live2dMagicActivationRequest
     if (renderer !== 'live2d' || driver !== 'magic' || paused || controlOwnerId !== null) {
       live2dMagicMotion.stop()
       return
     }
 
+    live2dMagicMotion.method.value = method
     if (live2dMagicMotion.status.value === 'idle')
       await live2dMagicMotion.initialize()
 

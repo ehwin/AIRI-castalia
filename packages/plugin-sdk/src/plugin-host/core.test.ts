@@ -1313,12 +1313,12 @@ describe('for FileSystemLoader', () => {
     expect(host.resolveEntrypointFor(runtimeEntryManifest, {
       cwd: '/tmp/extension',
       runtime: 'node',
-    })).toBe('/tmp/extension/node-entry.ts')
+    })).toBe(join('/tmp/extension', 'node-entry.ts'))
 
     expect(host.resolveEntrypointFor(defaultFallbackManifest, {
       cwd: '/tmp/extension',
       runtime: 'node',
-    })).toBe('/tmp/extension/default-entry.ts')
+    })).toBe(join('/tmp/extension', 'default-entry.ts'))
   })
 
   it('should reject a runtime that the extension does not support', () => {

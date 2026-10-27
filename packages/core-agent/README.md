@@ -81,6 +81,14 @@ The stream context carries `speaks`. Only a send that is neither `background` no
 
 With `getSystemPrompt`, each run reads the identity of its own session when it starts. Stored system messages are skipped.
 
+## Evidence-based self model
+
+`reviewSelfPrediction` compares one expected outcome with an observed outcome. It updates a smoothed evidence balance for one stable claim and records supporting or contradicting evidence. The balance is not a calibrated probability. The host supplies the outcome judgement and must not record an outcome before it observes one.
+
+`affectFromCastalia` projects Castalia's mood, energy, desire, and optional VAD snapshot into that evidence. The emotional snapshot stays attached to the event, so a temporary state does not become a permanent trait by itself. `toCastaliaSelfMemory` maps reviewed evidence to Castalia's existing `memory_save` fields with `subject: 'self'`, `memType: 'project'`, and the `self-model` tag. Hosts retrieve `self_model_evidence` through `memory_search`, then call `restoreSelfModel`. Castalia's `reflect_auto` remains available for its existing conversation reflection workflow. This module does not call it.
+
+Hosts call `renderSelfModelContext` with the assessments they retrieved for the current decision. The core package does not connect to Castalia or own memory storage.
+
 ## Recipes
 
 A recipe is a skill with `instructions` steps. `usableRecipes` keeps enabled and approved recipes.

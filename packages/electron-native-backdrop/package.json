@@ -4,7 +4,7 @@
   "version": "0.12.0",
   "private": true,
   "description": "Regional macOS desktop blur for transparent Electron windows",
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "exports": {
     ".": "./dist/index.mjs",
     "./types": "./dist/types.mjs",

@@ -19,7 +19,7 @@ import { useSpineStore } from '@proj-airi/stage-ui-spine/stores/spine'
 
 ## License
 
-- **Original code** (components, stores, composables, utilities): MIT License
+- **Original code** (components, stores, composables, utilities): GNU AGPL v3 or later
 - **Spine Runtimes** (`@esotericsoftware/spine-webgl`): [Spine Runtimes License Agreement](https://esotericsoftware.com/spine-runtimes-license)
 
 See [LICENSE.md](./LICENSE.md) for full details.

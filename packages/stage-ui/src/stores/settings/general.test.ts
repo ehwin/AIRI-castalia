@@ -54,14 +54,14 @@ describe('store settings-general', () => {
   })
 
   it('issue #1658: returns persisted language when localStorage has a value', () => {
-    // User previously selected Traditional Chinese
-    store['settings/language'] = 'zh-Hant'
+    // User picked English while the OS locale is Chinese
+    store['settings/language'] = 'en'
     vi.stubGlobal('navigator', { language: 'zh-CN' })
 
     const settingsStore = useSettingsGeneral()
     const resolvedLanguage = settingsStore.getLanguage()
 
     // Should respect the persisted language, not fallback to navigator.language
-    expect(resolvedLanguage).toBe('zh-Hant')
+    expect(resolvedLanguage).toBe('en')
   })
 })

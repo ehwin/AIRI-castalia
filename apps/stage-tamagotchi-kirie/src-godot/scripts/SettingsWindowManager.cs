@@ -11,7 +11,6 @@ internal sealed class SettingsWindowManager : IDisposable
     private readonly Window _mainWindow;
     private readonly KirieEventaJsonRegistry _registry;
     private readonly string _rendererUrl;
-    private readonly AuthService _auth;
     private readonly MicrophonePermissionService _microphonePermissions;
     private readonly WidgetWindowManager _widgets;
     private readonly DeveloperToolsService _developerTools;
@@ -26,7 +25,6 @@ internal sealed class SettingsWindowManager : IDisposable
         Window mainWindow,
         KirieEventaJsonRegistry registry,
         string rendererUrl,
-        AuthService auth,
         MicrophonePermissionService microphonePermissions,
         DeveloperToolsService developerTools,
         SpotlightHost spotlight,
@@ -36,7 +34,6 @@ internal sealed class SettingsWindowManager : IDisposable
         _mainWindow = mainWindow;
         _registry = registry;
         _rendererUrl = rendererUrl;
-        _auth = auth;
         _microphonePermissions = microphonePermissions;
         _widgets = widgets;
         _developerTools = developerTools;
@@ -83,7 +80,6 @@ internal sealed class SettingsWindowManager : IDisposable
                     _registry,
                     _rendererUrl,
                     route,
-                    _auth,
                     _microphonePermissions,
                     _developerTools,
                     _spotlight,

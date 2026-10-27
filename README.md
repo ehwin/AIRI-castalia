@@ -172,6 +172,12 @@
 >
 > <a href="https://crowdin.com/project/proj-airi" target="_blank" rel="nofollow"><img style="width: 140px; height: 40px;" src="https://badges.crowdin.net/badge/light/crowdin-on-dark.png" srcset="https://badges.crowdin.net/badge/light/crowdin-on-dark.png 1x, https://badges.crowdin.net/badge/light/crowdin-on-dark@2x.png 2x" alt="Crowdin | Agile localization for tech companies" width="140" height="40" /></a>
 
+## License
+
+Unless a file states another license, AIRI code is licensed under the GNU Affero
+General Public License, version 3 or any later version. Read [LICENSE](./LICENSE)
+and [NOTICE](./NOTICE) before you redistribute a build or a package.
+
 Have you dreamed about having a cyber living being (cyber waifu, digital pet) or digital companion that could play with and talk to you?
 
 With the power of modern large language models like [ChatGPT](https://chatgpt.com) and famous [Claude](https://claude.ai), asking a virtual being to roleplay and chat with us is already easy enough for everyone. Platforms like [Character.ai (a.k.a. c.ai)](https://character.ai) and [JanitorAI](https://janitorai.com/) as well as local playgrounds like [SillyTavern](https://github.com/SillyTavern/SillyTavern) are already good-enough solutions for a chat based or visual adventure game like experience.
@@ -425,14 +431,6 @@ flowchart LR
     Other[Telegram, Factorio, MCP, and others]
   end
 
-  subgraph Hosted[Hosted backend]
-    Edge[Caddy]
-    API[api-server]
-    Auth[auth-server]
-    Database[(PostgreSQL)]
-    Cache[(Redis)]
-  end
-
   Web --> StageUI
   Desktop --> StageUI
   Pocket --> StageUI
@@ -445,12 +443,6 @@ flowchart LR
   Discord --> SDK
   Minecraft --> SDK
   Other -. optional .-> SDK
-  Edge --> API
-  Edge --> Auth
-  API --> Database
-  API --> Cache
-  Auth --> Database
-  Auth --> Cache
 ```
 
 ## Similar Projects

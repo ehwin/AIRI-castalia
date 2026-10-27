@@ -49,6 +49,7 @@ export function memoryName(name: string) {
 export const useMemoryStore = defineStore('memory', () => {
   const enabled = useLocalStorageManualReset<boolean>('memory/enabled', true)
   const entries = useLocalStorageManualReset<MemoryEntry[]>('memory/entries', [])
+  const castaliaMigrationComplete = useLocalStorageManualReset<boolean>('memory/castalia-migration-complete', false)
 
   /** True once a remote answered, so a host can show where memories live. */
   const remoteAttached = ref(false)
@@ -73,7 +74,24 @@ export const useMemoryStore = defineStore('memory', () => {
     if (!remote)
       return false
     try {
-      entries.value = await remote.list()
+      const localEntries = entries.value
+      const durableEntries = await remote.list()
+      if (castaliaMigrationComplete.value) {
+        entries.value = durableEntries
+      }
+      else {
+        const merged = new Map(durableEntries.map(entry => [`${entry.name}\u0000${entry.persona ?? ''}`, entry]))
+        for (const entry of localEntries) {
+          const key = `${entry.name}\u0000${entry.persona ?? ''}`
+          const durable = merged.get(key)
+          if (!durable || entry.updatedAt > durable.updatedAt) {
+            merged.set(key, entry)
+            await remote.save(entry)
+          }
+        }
+        entries.value = [...merged.values()]
+        castaliaMigrationComplete.value = true
+      }
       return true
     }
     catch (cause) {
@@ -113,7 +131,9 @@ export const useMemoryStore = defineStore('memory', () => {
       return undefined
     const next: MemoryEntry = { name, description: entry.description.trim(), body: entry.body.trim(), persona: personaId, updatedAt: Date.now() }
     entries.value = [...entries.value.filter(existing => existing.name !== name || existing.persona !== personaId), next]
-    void remote?.save(next).catch((cause) => { console.warn('[memory] remote save failed:', cause) })
+    void remote?.save(next).catch((cause) => {
+      console.warn('[memory] remote save failed:', cause)
+    })
     return next
   }
 
@@ -126,15 +146,21 @@ export const useMemoryStore = defineStore('memory', () => {
     const moved: MemoryEntry = { ...general, updatedAt: Date.now() }
     entries.value = [...entries.value.filter(existing => existing !== source && (existing.name !== source.name || existing.persona)), moved]
     if (remote) {
-      void remote.forget({ name: source.name, persona: source.persona }).catch((cause) => { console.warn('[memory] remote forget failed:', cause) })
-      void remote.save(moved).catch((cause) => { console.warn('[memory] remote save failed:', cause) })
+      void remote.forget({ name: source.name, persona: source.persona }).catch((cause) => {
+        console.warn('[memory] remote forget failed:', cause)
+      })
+      void remote.save(moved).catch((cause) => {
+        console.warn('[memory] remote save failed:', cause)
+      })
     }
   }
 
   /** Removes one entry, from a tool or from Settings. */
   function remove(entry: Pick<MemoryEntry, 'name' | 'persona'>) {
     entries.value = entries.value.filter(existing => existing.name !== entry.name || existing.persona !== entry.persona)
-    void remote?.forget({ name: entry.name, persona: entry.persona }).catch((cause) => { console.warn('[memory] remote forget failed:', cause) })
+    void remote?.forget({ name: entry.name, persona: entry.persona }).catch((cause) => {
+      console.warn('[memory] remote forget failed:', cause)
+    })
   }
 
   /** Forgets an entry of the card by name. General memories belong to the owner, so a run cannot forget them. */
@@ -150,6 +176,7 @@ export const useMemoryStore = defineStore('memory', () => {
   function resetState() {
     enabled.reset()
     entries.reset()
+    castaliaMigrationComplete.reset()
   }
 
   return {

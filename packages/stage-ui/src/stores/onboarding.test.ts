@@ -7,19 +7,6 @@ import { nextTick } from 'vue'
 import { useOnboardingStore } from './onboarding'
 import { useProviderConfigStore } from './providers/config'
 
-vi.mock('./auth', async () => {
-  const { defineStore } = await import('pinia')
-
-  return {
-    useAuthStore: defineStore('auth', {
-      state: () => ({
-        isAuthenticated: false,
-        token: null,
-      }),
-    }),
-  }
-})
-
 vi.mock('./providers/config', async () => {
   const { defineStore } = await import('pinia')
 
@@ -89,20 +76,15 @@ describe('onboarding store', () => {
   // ROOT CAUSE:
   //
   // The standalone onboarding renderer previously depended on a localStorage
-  // event to discover that another renderer had completed authentication. Once
-  // storage stopped acting as a state bus, the BrowserWindow stayed open.
-  //
-  // The authenticated command now persists completion and publishes a
-  // monotonic close request through synchronized Pinia state.
-  it('publishes a close request after authentication', () => {
+  // event to discover that another renderer had completed setup. Once storage
+  // stopped acting as a state bus, the BrowserWindow stayed open.
+  it('persists completion and publishes it to other windows', () => {
     const store = useOnboardingStore()
 
-    store.closeAfterAuthentication()
+    store.markSetupCompleted()
 
     expect(store.hasCompletedSetup).toBe(true)
     expect(store.hasSkippedSetup).toBe(false)
-    expect(store.closeRequestId).toBe(1)
-    expect(store.$state).not.toHaveProperty('closeRequestId')
     expect(store.$state).not.toHaveProperty('hasCompletedSetup')
     expect(localStorage.getItem('onboarding/completed')).toBe('true')
     expect(localStorage.getItem('onboarding/skipped')).toBe('false')

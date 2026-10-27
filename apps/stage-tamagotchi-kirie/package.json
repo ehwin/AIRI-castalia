@@ -9,6 +9,7 @@
     "email": "airi@moeru.ai",
     "url": "https://github.com/moeru-ai"
   },
+  "license": "AGPL-3.0-or-later",
   "homepage": "https://airi.moeru.ai/docs/",
   "scripts": {
     "build": "kirie build",

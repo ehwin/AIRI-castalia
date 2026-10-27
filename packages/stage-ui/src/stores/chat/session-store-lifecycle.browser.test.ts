@@ -5,18 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { computed, createApp, defineComponent, h, nextTick } from 'vue'
 import { createI18n } from 'vue-i18n'
 
-import { useAuthStore } from '../auth'
 import { useAiriCardStore } from '../modules/airi-card'
 
 let pinia: ReturnType<typeof createPinia>
 
-// Change real store state while storage and network calls remain external test boundaries.
-const userIdRef = computed({
-  get: () => useAuthStore(pinia).userId,
-  set: (id: string) => {
-    useAuthStore(pinia).user = id === 'local' ? null : { id, name: id, email: `${id}@example.test`, emailVerified: true, createdAt: new Date(0), updatedAt: new Date(0) }
-  },
-})
 const activeCardIdRef = computed({
   get: () => useAiriCardStore(pinia).activeCardId,
   set: (id: string) => { useAiriCardStore(pinia).activeCardId = id },
@@ -37,18 +29,6 @@ const getSessionMock = vi.fn<(id: string) => Promise<ChatSessionRecord | null>>(
 const saveSessionMock = vi.fn<(id: string, rec: ChatSessionRecord) => Promise<void>>()
 const deleteSessionRepoMock = vi.fn<(id: string) => Promise<void>>()
 const releaseAssetsMock = vi.fn<(id: string, ids: Iterable<string>) => Promise<void>>()
-const getOutboxMock = vi.fn<(uid: string) => Promise<import('../../database/repos/chat-sessions.repo').ChatSendOutboxEntry[]>>()
-const dropOutboxForSessionMock = vi.fn<(uid: string, id: string) => Promise<void>>()
-const getTombstonesMock = vi.fn<(uid: string) => Promise<string[]>>()
-const removeTombstonesMock = vi.fn<(uid: string, ids: string[]) => Promise<void>>()
-const addTombstoneMock = vi.fn<(uid: string, id: string) => Promise<void>>()
-const deleteCloudChatMock = vi.fn<(id: string) => Promise<void>>()
-const listChatsMock = vi.fn()
-const pullMessagesMock = vi.fn()
-const connectCloudWsMock = vi.fn()
-let cloudWsStatus: 'idle' | 'open' = 'idle'
-let cloudStatusListener: ((status: 'idle' | 'open') => void) | undefined
-
 vi.mock('../../database/repos/chat-sessions.repo', () => ({
   chatSessionsRepo: {
     getIndex: (uid: string) => getIndexMock(uid),
@@ -57,51 +37,7 @@ vi.mock('../../database/repos/chat-sessions.repo', () => ({
     saveSession: (id: string, rec: ChatSessionRecord) => saveSessionMock(id, rec),
     deleteSession: (id: string) => deleteSessionRepoMock(id),
     releaseAssets: (id: string, ids: Iterable<string>) => releaseAssetsMock(id, ids),
-    getOutbox: (uid: string) => getOutboxMock(uid),
-    enqueueOutbox: vi.fn().mockResolvedValue(undefined),
-    dequeueOutbox: vi.fn().mockResolvedValue(undefined),
-    updateOutboxEntries: vi.fn().mockResolvedValue(undefined),
-    dropOutboxForSession: (uid: string, id: string) => dropOutboxForSessionMock(uid, id),
-    getTombstones: (uid: string) => getTombstonesMock(uid),
-    addTombstone: (uid: string, id: string) => addTombstoneMock(uid, id),
-    removeTombstones: (uid: string, ids: string[]) => removeTombstonesMock(uid, ids),
   },
-}))
-
-vi.mock('../../libs/auth', () => ({
-  getAuthToken: vi.fn().mockResolvedValue('test-token'),
-  triggerSignIn: vi.fn(),
-}))
-
-vi.mock('../../libs/auth-fetch', () => ({
-  authedFetch: vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) }),
-}))
-
-vi.mock('../../libs/server', () => ({
-  SERVER_URL: 'http://test',
-}))
-
-// Keep reconciliation and message merging real. Only cloud HTTP and WebSocket adapters are replaced.
-vi.mock('../../libs/chat-sync', async importOriginal => ({
-  ...await importOriginal<typeof import('../../libs/chat-sync')>(),
-  createCloudChatMapper: () => ({
-    listChats: () => listChatsMock(),
-    deleteChat: (id: string) => deleteCloudChatMock(id),
-    createChat: async (options: { id: string }) => ({ id: options.id, type: 'bot', title: null, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }),
-  }),
-  createChatWsClient: () => ({
-    status: () => cloudWsStatus,
-    connect: connectCloudWsMock,
-    disconnect: vi.fn(),
-    destroy: vi.fn(),
-    sendMessages: vi.fn().mockResolvedValue({ ok: true }),
-    pullMessages: (...args: unknown[]) => pullMessagesMock(...args),
-    onNewMessages: () => () => {},
-    onStatusChange: (listener: (status: 'idle' | 'open') => void) => {
-      cloudStatusListener = listener
-      return () => {}
-    },
-  }),
 }))
 
 const { useChatSessionStore } = await import('./session-store')
@@ -113,7 +49,6 @@ beforeEach(() => {
   setActivePinia(pinia)
   localStorage.clear()
   app = createApp(defineComponent({ setup() {
-    useAuthStore()
     useAiriCardStore().cards.set('default', {
       name: 'Test character',
       version: '1.0',
@@ -129,7 +64,6 @@ beforeEach(() => {
   container = document.createElement('div')
   document.body.append(container)
   app.mount(container)
-  userIdRef.value = 'local'
   activeCardIdRef.value = 'default'
   systemPromptRef.value = ''
 
@@ -139,17 +73,6 @@ beforeEach(() => {
   saveSessionMock.mockReset().mockResolvedValue(undefined)
   deleteSessionRepoMock.mockReset().mockResolvedValue(undefined)
   releaseAssetsMock.mockReset().mockResolvedValue(undefined)
-  getOutboxMock.mockReset().mockResolvedValue([])
-  dropOutboxForSessionMock.mockReset().mockResolvedValue(undefined)
-  getTombstonesMock.mockReset().mockResolvedValue([])
-  removeTombstonesMock.mockReset().mockResolvedValue(undefined)
-  addTombstoneMock.mockReset().mockResolvedValue(undefined)
-  deleteCloudChatMock.mockReset().mockResolvedValue(undefined)
-  listChatsMock.mockReset().mockResolvedValue([])
-  pullMessagesMock.mockReset().mockResolvedValue({ messages: [], seq: 0 })
-  connectCloudWsMock.mockReset()
-  cloudWsStatus = 'idle'
-  cloudStatusListener = undefined
 })
 
 afterEach(() => {
@@ -163,96 +86,6 @@ async function flushMicrotasks(rounds = 8) {
   for (let i = 0; i < rounds; i++)
     await Promise.resolve()
 }
-
-describe('chat-session-store · user swap during in-flight ensureActiveSessionForCharacter', () => {
-  // ROOT CAUSE: Account changes could reuse stale hydration work. The request now checks its account epoch after each await. Session loading also checks deletion before writeback.
-  it('runs a fresh hydrate for the new user and discards the stale write from the old user', async () => {
-    const aSessionMeta: ChatSessionMeta = {
-      sessionId: 'sess-A',
-      userId: 'A',
-      characterId: 'default',
-      createdAt: 1,
-      updatedAt: 1,
-    }
-    const aIndex: ChatSessionsIndex = {
-      userId: 'A',
-      characters: {
-        default: {
-          activeSessionId: 'sess-A',
-          sessions: { 'sess-A': aSessionMeta },
-        },
-      },
-    }
-    const bSessionMeta: ChatSessionMeta = {
-      sessionId: 'sess-B',
-      userId: 'B',
-      characterId: 'default',
-      createdAt: 2,
-      updatedAt: 2,
-    }
-    const bIndex: ChatSessionsIndex = {
-      userId: 'B',
-      characters: {
-        default: {
-          activeSessionId: 'sess-B',
-          sessions: { 'sess-B': bSessionMeta },
-        },
-      },
-    }
-
-    let resolveASessionGet: ((rec: ChatSessionRecord | null) => void) | undefined
-    getIndexMock.mockImplementation((uid: string) => {
-      if (uid === 'A')
-        return Promise.resolve(aIndex)
-      if (uid === 'B')
-        return Promise.resolve(bIndex)
-      return Promise.resolve(null)
-    })
-    getSessionMock.mockImplementation((id: string) => {
-      // A's session getSession is the slow await we use to hold the IIFE open
-      // until after the user swap fires.
-      if (id === 'sess-A') {
-        return new Promise<ChatSessionRecord | null>((resolve) => {
-          resolveASessionGet = resolve
-        })
-      }
-      if (id === 'sess-B')
-        return Promise.resolve({ meta: bSessionMeta, messages: [] })
-      return Promise.resolve(null)
-    })
-
-    userIdRef.value = 'A'
-    const store = useChatSessionStore()
-
-    // Kick off initialize; it will await ensureActiveSessionForCharacter, which
-    // will await loadSession('sess-A') → getSession('sess-A') (deferred).
-    const initPromise = store.initialize()
-    await flushMicrotasks()
-
-    // Sanity: A's getSession was reached and is parked.
-    expect(getSessionMock).toHaveBeenCalledWith('sess-A')
-    expect(resolveASessionGet).toBeDefined()
-
-    // The synchronized auth state changes while A's session read is in flight.
-    userIdRef.value = 'B'
-    await nextTick()
-    await flushMicrotasks()
-
-    // Resolve A's IDB read AFTER the swap. With the bug, A's IIFE writes
-    // sess-A back into the cleared sessionMetas.
-    resolveASessionGet!({ meta: aSessionMeta, messages: [] })
-    await initPromise.catch(() => {})
-    await flushMicrotasks()
-
-    // B's hydrate must have fired. Without the fix, the stale A promise blocks
-    // the identity action and B never loads.
-    expect(getIndexMock).toHaveBeenCalledWith('B')
-    expect(store.sessionMetas['sess-B']).toBeDefined()
-
-    // A's data must NOT have leaked into B's state.
-    expect(store.sessionMetas['sess-A']).toBeUndefined()
-  })
-})
 
 describe('chat-session-store · loadSession vs concurrent deleteSession', () => {
   // ROOT CAUSE: Deleting a session during IndexedDB loading could restore its old record. loadSession now checks whether the session still exists after reading storage.
@@ -275,7 +108,6 @@ describe('chat-session-store · loadSession vs concurrent deleteSession', () => 
       return Promise.resolve(null)
     })
 
-    userIdRef.value = 'local'
     const store = useChatSessionStore()
 
     // Inject sess-1 into sessionMetas without going through createSession
@@ -459,7 +291,6 @@ describe('chat-session-store · deletion and hydration failures', () => {
       .mockRejectedValueOnce(new Error('IndexedDB read failed'))
       .mockResolvedValueOnce(null)
 
-    userIdRef.value = 'local'
     const store = useChatSessionStore()
     store.applyRemoteSnapshot({
       activeSessionId: '',
@@ -475,266 +306,7 @@ describe('chat-session-store · deletion and hydration failures', () => {
   })
 })
 
-describe('chat-session-store · cloud placeholder hydration', () => {
-  // https://github.com/moeru-ai/airi/pull/2086#discussion_r3743502032
-  it('retries cloud hydration when the reconcile pull for an adopted placeholder fails for Issue #2085', async () => {
-    // ROOT CAUSE:
-    //
-    // Reconcile creates a system-only placeholder before its first cloud pull.
-    // If that pull fails, loadSession sees the message-map entry and marks the
-    // placeholder as loaded. Selecting the chat then skips every later pull.
-    const localMeta: ChatSessionMeta = {
-      sessionId: 'local-session',
-      userId: 'cloud-user',
-      characterId: 'default',
-      createdAt: 1,
-      updatedAt: 1,
-    }
-    const remoteChat = {
-      id: 'remote-session',
-      type: 'bot' as const,
-      title: null,
-      createdAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-01T00:00:00.000Z',
-      members: [],
-    }
-    userIdRef.value = 'cloud-user'
-    getIndexMock.mockResolvedValue({
-      userId: 'cloud-user',
-      characters: {
-        default: {
-          activeSessionId: localMeta.sessionId,
-          sessions: { [localMeta.sessionId]: localMeta },
-        },
-      },
-    })
-    getSessionMock.mockImplementation((sessionId) => {
-      if (sessionId === remoteChat.id) {
-        return Promise.resolve({
-          meta: {
-            sessionId: remoteChat.id,
-            userId: 'cloud-user',
-            characterId: 'default',
-            createdAt: Date.parse(remoteChat.createdAt),
-            updatedAt: Date.parse(remoteChat.updatedAt),
-            cloudChatId: remoteChat.id,
-          },
-          messages: [],
-        })
-      }
-      return Promise.resolve({ meta: localMeta, messages: [] })
-    })
-    listChatsMock.mockResolvedValue([remoteChat])
-    let remoteAttempts = 0
-    pullMessagesMock.mockImplementation(async ({ chatId }: { chatId: string }) => {
-      if (chatId === remoteChat.id && ++remoteAttempts === 1)
-        throw new Error('temporary cloud failure')
-      return { messages: [], seq: 0 }
-    })
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-
-    const store = useChatSessionStore()
-    await store.initialize()
-    expect(cloudStatusListener).toBeDefined()
-
-    cloudWsStatus = 'open'
-    cloudStatusListener?.('open')
-    await vi.waitFor(() => {
-      expect(store.cloudSyncReady).toBe(true)
-    })
-    expect(pullMessagesMock.mock.calls.filter(([request]) => request.chatId === remoteChat.id)).toHaveLength(1)
-
-    await store.setActiveSession(remoteChat.id)
-
-    expect(pullMessagesMock.mock.calls.filter(([request]) => request.chatId === remoteChat.id)).toHaveLength(2)
-  })
-})
-
-describe('chat-session-store · cloud character membership', () => {
-  function remoteChatOf(id: string, characterId: string) {
-    return {
-      id,
-      type: 'bot' as const,
-      title: null,
-      createdAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-01T00:00:00.000Z',
-      members: [
-        { memberType: 'user' as const, characterId: null },
-        { memberType: 'character' as const, characterId },
-      ],
-    }
-  }
-
-  async function reconcile() {
-    const store = useChatSessionStore()
-    await store.initialize()
-    cloudWsStatus = 'open'
-    cloudStatusListener?.('open')
-    await vi.waitFor(() => {
-      expect(store.cloudSyncReady).toBe(true)
-    })
-    return store
-  }
-
-  it('puts a received chat under the character of its member, also when the device does not have that character', async () => {
-    const localMeta: ChatSessionMeta = { sessionId: 'local-session', userId: 'cloud-user', characterId: 'default', createdAt: 1, updatedAt: 1, cloudChatId: 'local-session' }
-    userIdRef.value = 'cloud-user'
-    getIndexMock.mockResolvedValue({
-      userId: 'cloud-user',
-      characters: { default: { activeSessionId: localMeta.sessionId, sessions: { [localMeta.sessionId]: localMeta } } },
-    })
-    getSessionMock.mockResolvedValue({ meta: localMeta, messages: [] })
-    listChatsMock.mockResolvedValue([remoteChatOf('local-session', 'default'), remoteChatOf('luna-session', 'luna')])
-
-    const store = await reconcile()
-
-    expect(store.sessionMetas['luna-session'].characterId).toBe('luna')
-    const savedIndex = saveIndexMock.mock.calls.at(-1)![0]
-    expect(Object.keys(savedIndex.characters.luna.sessions)).toEqual(['luna-session'])
-    expect(Object.keys(savedIndex.characters.default.sessions)).toEqual(['local-session'])
-  })
-
-  it('moves a session from default to the character of its remote chat and keeps its messages', async () => {
-    // ROOT CAUSE:
-    //
-    // The chat list did not include the members, so the adopt step put every
-    // received chat under `default`. Those sessions stay under `default`.
-    //
-    // We fixed this by a comparison with the character member of the remote
-    // chat during each reconcile.
-    const misfiled: ChatSessionMeta = { sessionId: 'misfiled', userId: 'cloud-user', characterId: 'default', createdAt: 1, updatedAt: 1, cloudChatId: 'misfiled' }
-    const kept: ChatSessionMeta = { sessionId: 'kept', userId: 'cloud-user', characterId: 'default', createdAt: 2, updatedAt: 2, cloudChatId: 'kept' }
-    const misfiledMessages: ChatSessionRecord['messages'] = [{ id: 'message-1', role: 'user', content: 'Hello Luna' }]
-    userIdRef.value = 'cloud-user'
-    getIndexMock.mockResolvedValue({
-      userId: 'cloud-user',
-      characters: { default: { activeSessionId: kept.sessionId, sessions: { misfiled, kept } } },
-    })
-    getSessionMock.mockImplementation(sessionId => Promise.resolve(sessionId === 'misfiled'
-      ? { meta: misfiled, messages: misfiledMessages }
-      : { meta: kept, messages: [] }))
-    listChatsMock.mockResolvedValue([remoteChatOf('misfiled', 'luna'), remoteChatOf('kept', 'default')])
-
-    const store = await reconcile()
-
-    expect(store.sessionMetas.misfiled.characterId).toBe('luna')
-    expect(store.sessionMetas.kept.characterId).toBe('default')
-    expect(saveSessionMock).toHaveBeenCalledWith('misfiled', {
-      meta: { ...misfiled, characterId: 'luna' },
-      messages: misfiledMessages,
-    })
-    const savedIndex = saveIndexMock.mock.calls.at(-1)![0]
-    expect(Object.keys(savedIndex.characters.luna.sessions)).toEqual(['misfiled'])
-    expect(Object.keys(savedIndex.characters.default.sessions)).toEqual(['kept'])
-    expect(savedIndex.characters.default.activeSessionId).toBe('kept')
-  })
-
-  it('selects another session for the previous character when its active session moves', async () => {
-    const misfiled: ChatSessionMeta = { sessionId: 'misfiled', userId: 'cloud-user', characterId: 'default', createdAt: 1, updatedAt: 1, cloudChatId: 'misfiled' }
-    const kept: ChatSessionMeta = { sessionId: 'kept', userId: 'cloud-user', characterId: 'default', createdAt: 2, updatedAt: 2, cloudChatId: 'kept' }
-    userIdRef.value = 'cloud-user'
-    getIndexMock.mockResolvedValue({
-      userId: 'cloud-user',
-      characters: { default: { activeSessionId: misfiled.sessionId, sessions: { misfiled, kept } } },
-    })
-    getSessionMock.mockImplementation(sessionId => Promise.resolve({ meta: sessionId === 'misfiled' ? misfiled : kept, messages: [] }))
-    listChatsMock.mockResolvedValue([remoteChatOf('misfiled', 'luna'), remoteChatOf('kept', 'default')])
-
-    await reconcile()
-
-    const savedIndex = saveIndexMock.mock.calls.at(-1)![0]
-    expect(savedIndex.characters.default.activeSessionId).toBe('kept')
-  })
-})
-
-describe('chat-session-store · cloud deletion', () => {
-  it('tombstones an unmapped cloud session before an in-flight create can finish', async () => {
-    // ROOT CAUSE:
-    //
-    // A newly created cloud session can be deleted before POST /chats binds
-    // its cloud id. Without a tombstone for the deterministic session id, the
-    // completed remote create is adopted again by the next reconcile.
-    userIdRef.value = 'cloud-user'
-    const deleted: ChatSessionMeta = {
-      sessionId: 'pending-cloud-session',
-      userId: 'cloud-user',
-      characterId: 'default',
-      createdAt: 1,
-      updatedAt: 1,
-    }
-    const survivor: ChatSessionMeta = {
-      sessionId: 'surviving-session',
-      userId: 'cloud-user',
-      characterId: 'default',
-      createdAt: 2,
-      updatedAt: 2,
-    }
-    const store = useChatSessionStore()
-    store.applyRemoteSnapshot({
-      activeSessionId: 'surviving-session',
-      sessionMessages: { 'pending-cloud-session': [], 'surviving-session': [] },
-      sessionMetas: { 'pending-cloud-session': deleted, 'surviving-session': survivor },
-      index: {
-        userId: 'cloud-user',
-        characters: {
-          default: {
-            activeSessionId: 'pending-cloud-session',
-            sessions: { 'pending-cloud-session': deleted, 'surviving-session': survivor },
-          },
-        },
-      },
-    })
-
-    await store.deleteSession('pending-cloud-session')
-
-    expect(addTombstoneMock).toHaveBeenCalledWith('cloud-user', 'pending-cloud-session')
-    expect(deleteCloudChatMock).not.toHaveBeenCalled()
-  })
-})
-
 describe('chat-session-store · synchronized data actions', () => {
-  it('keeps synchronized session data when a follower receives authenticated user state', async () => {
-    // ROOT CAUSE: A follower cleared shared sessions after receiving auth state. The identity watcher now calls a synchronized action that retains matching session data.
-    const session: ChatSessionMeta = {
-      sessionId: 'session-a',
-      userId: 'cloud-user',
-      characterId: 'default',
-      createdAt: 1,
-      updatedAt: 1,
-    }
-    const store = useChatSessionStore()
-    store.applyRemoteSnapshot({
-      activeSessionId: 'session-a',
-      sessionMessages: {
-        'session-a': [{ id: 'message-a', role: 'user', content: 'Keep this message' }],
-      },
-      sessionMetas: { 'session-a': session },
-      index: {
-        userId: 'cloud-user',
-        characters: {
-          default: {
-            activeSessionId: 'session-a',
-            sessions: { 'session-a': session },
-          },
-        },
-      },
-    })
-    await nextTick()
-    await flushMicrotasks()
-    const messageIdsBeforeAuthHydration = store.sessionMessages['session-a'].map(message => message.id)
-    const metaBeforeAuthHydration = { ...store.sessionMetas['session-a'] }
-
-    userIdRef.value = 'cloud-user'
-    await nextTick()
-    await flushMicrotasks()
-
-    expect(store.sessionMessages['session-a'].map(message => message.id)).toEqual(messageIdsBeforeAuthHydration)
-    expect(store.sessionMetas['session-a']).toEqual(metaBeforeAuthHydration)
-    expect(store.activeSessionId).toBe('session-a')
-    expect(store.index?.userId).toBe('cloud-user')
-  })
-
-  // https://github.com/moeru-ai/airi/pull/2086#discussion_r3743242525
   it('initializes a new window selection from the synchronized index for Issue #2085', async () => {
     // ROOT CAUSE:
     //

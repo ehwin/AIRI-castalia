@@ -4,8 +4,6 @@ character-switcher:
   empty: No characters yet
   failed: Could not switch characters. Try again.
 mobile-tools:
-  sign-in: Sign in to AIRI
-  account-description: Account and preferences
   sound: Sound
   character-voice: Character voice
   title: Settings
@@ -212,7 +210,6 @@ chat:
     confirm-delete: Delete this conversation and its messages?
     cancel: Cancel
     empty: No conversations yet
-    cloud-badge: Synced to cloud
     new-chat-fallback: New chat
     delete: Delete conversation
 avatar-model-missing:
@@ -238,7 +235,6 @@ startup:
   continue-without-model: Continue Anyway
   model-timeout: The character model took too long to load. Check your connection and retry.
   resources:
-    auth: account settings
     modelIndex: model list
     card: character settings
     chat: chat history
@@ -297,14 +293,6 @@ profile-switcher:
   manage: Manage Profiles
 promo-banner:
   items:
-    signin:
-      watermark: Moon
-      fallbackLabel: Moon Gift
-      title: 7-Day Sign-In
-      eventName: Sign in to claim stardust, avatar frames, and launch gifts.
-      date: 03/28 - 04/10
-      reward: Up to 120 Stardust
-      cta: Sign In
     build:
       watermark: Build
       fallbackLabel: Build Bonus
@@ -313,22 +301,6 @@ promo-banner:
       date: 03/30 - 04/12
       reward: 5 Supply Vouchers + Upgrade Materials
       cta: View Tasks
-    spring:
-      watermark: Spring
-      fallbackLabel: Spring Draw
-      title: Capsule Carnival
-      eventName: Join the spring draw to unlock bubbles, charms, and themed furniture.
-      date: 04/01 - 04/18
-      reward: Half-Price First Pull + Rare Charm
-      cta: Draw Now
-    coupon:
-      watermark: Talk
-      fallbackLabel: Coupon
-      title: Top-Up Coupon
-      eventName: Finish chat interactions to claim coupons for expansion and voice packs.
-      date: 04/02 - 04/20
-      reward: Save 6 on 30 / Save 15 on 68
-      cta: Claim Coupon
     home:
       watermark: Home
       fallbackLabel: Room Theme
@@ -354,11 +326,6 @@ status:
   transcribing: Transcribing
   hearing-error: Could not transcribe audio
   no-transcript: Recognized speech will appear here.
-  signing-in: Finish signing in in your browser
-  confirming: Confirming sign-in
-  signed-in: Signed in
-  sign-in-error: Sign-in failed
-  sign-in-unconfirmed: Could not confirm your session. Please sign in again.
   dismiss: Dismiss
   configure-hearing: Select and configure a Hearing provider in Settings.
 
@@ -373,13 +340,3 @@ notifications:
   error: Notifications could not load.
   retry: Retry
   just-now: Just now
-  kinds:
-    flux-granted:
-      title: You received {amount} Flux
-    subscription-renewed:
-      title: '{plan} renewed'
-      body: Active until {periodEnd}.
-    subscription-payment-failed:
-      title: Renewal payment failed
-      body: We will retry on {retryAt}. Update your payment method to keep {plan}.
-      body-no-retry: Update your payment method to keep {plan}.

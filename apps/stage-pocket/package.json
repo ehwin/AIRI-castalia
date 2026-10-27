@@ -8,7 +8,7 @@
     "email": "airi@moeru.ai",
     "url": "https://github.com/moeru-ai"
   },
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "scripts": {
     "build": "vite build",
     "lint": "eslint .",

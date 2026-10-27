@@ -13,13 +13,15 @@ function createRemote(seed: MemoryEntry[] = []) {
   return { port, list, save, forget }
 }
 
-const entry = (name: string, body: string, persona = 'airi'): MemoryEntry => ({
-  name,
-  description: `${name} line`,
-  body,
-  persona,
-  updatedAt: 1,
-})
+function entry(name: string, body: string, persona = 'airi'): MemoryEntry {
+  return {
+    name,
+    description: `${name} line`,
+    body,
+    persona,
+    updatedAt: 1,
+  }
+}
 
 describe('memory store remote port', () => {
   beforeEach(() => {
@@ -34,16 +36,36 @@ describe('memory store remote port', () => {
     expect(memory.remoteAttached).toBe(false)
   })
 
-  it('replaces the cache with the remote state', async () => {
+  it('migrates local entries once and then treats Castalia storage as authoritative', async () => {
     const memory = useMemoryStore()
     memory.write({ name: 'stale', description: 'gone', body: 'gone' }, 'airi')
+    memory.write({ name: 'new-local', description: 'Local only', body: 'Migrate me.' }, 'airi')
 
-    const { port } = createRemote([entry('nickname', 'Yumeka')])
+    const { port, save, list } = createRemote([entry('nickname', 'Yumeka')])
     memory.attachRemote(port)
 
     await expect(memory.hydrate()).resolves.toBe(true)
+    expect(memory.entries.map(item => item.name)).toEqual(['new-local', 'nickname', 'stale'])
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ name: 'stale' }))
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ name: 'new-local' }))
+
+    list.mockResolvedValue([entry('nickname', 'Yumeka')])
+    await memory.hydrate()
     expect(memory.entries.map(item => item.name)).toEqual(['nickname'])
     expect(memory.remoteAttached).toBe(true)
+  })
+
+  it('migrates local-only entries and keeps the newer version of a shared key', async () => {
+    const memory = useMemoryStore()
+    const local = entry('nickname', 'local copy')
+    memory.write({ name: local.name, description: local.description, body: local.body }, local.persona!)
+    const durable = { ...entry('nickname', 'durable copy'), updatedAt: Date.now() + 1000 }
+    const { port, save } = createRemote([durable])
+    memory.attachRemote(port)
+
+    await expect(memory.hydrate()).resolves.toBe(true)
+    expect(memory.read('nickname', 'airi')?.body).toBe('durable copy')
+    expect(save).not.toHaveBeenCalled()
   })
 
   it('keeps the cache when the remote fails', async () => {

@@ -12,6 +12,10 @@ import { defineConfig } from 'vitest/config'
 
 import { sharedUnoConfig } from '../../uno.config'
 
+// UnoCSS globs need forward slashes. On Windows `import.meta.dirname` has
+// backslashes, which fast-glob reads as escapes, so no file matches.
+const projectDir = import.meta.dirname.replaceAll('\\', '/')
+
 export default defineConfig({
   root: import.meta.dirname,
   // Shared settings pages import these optional UI dependencies through the
@@ -44,8 +48,8 @@ export default defineConfig({
       // the initial CSS response instead of relying on Vite's HMR updates.
       content: {
         filesystem: [
-          `${import.meta.dirname}/src/**/*.vue`,
-          `${import.meta.dirname}/../ui/src/**/*.vue`,
+          `${projectDir}/src/**/*.vue`,
+          `${projectDir}/../ui/src/**/*.vue`,
         ],
       },
     }])),
@@ -71,6 +75,9 @@ export default defineConfig({
           name: 'browser',
           include: ['src/**/*.browser.test.ts'],
           exclude: ['**/node_modules/**'],
+          // Browser mode defaults to 15s. Files that mount Live2D need more
+          // headroom when many browser files run at once.
+          testTimeout: 30_000,
           browser: {
             enabled: true,
             headless: true,

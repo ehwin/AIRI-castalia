@@ -13,7 +13,6 @@ import SessionsDialog from './sessions-dialog.vue'
 import { useAnalytics } from '../../../../composables/use-analytics'
 import { useBreakpoints } from '../../../../composables/use-breakpoints'
 import { extractMessageText } from '../../../../libs/chat-sync'
-import { useAuthStore } from '../../../../stores/auth'
 import { useChatStore } from '../../../../stores/chat'
 import { useChatSessionStore } from '../../../../stores/chat/session-store'
 import { useAiriCardStore } from '../../../../stores/modules/airi-card'
@@ -35,19 +34,16 @@ const chatSession = useChatSessionStore()
 const chat = useChatStore()
 const { sessionMetas, sessionMessages, activeSessionId } = storeToRefs(chatSession)
 const { activeCardId } = storeToRefs(useAiriCardStore())
-const { userId } = storeToRefs(useAuthStore())
 const { activeModel } = storeToRefs(useConsciousnessStore())
 const { trackChatSessionSelected, trackChatSessionStarted } = useAnalytics()
 
-// Creating includes persistence and cloud reconciliation, so prevent a
-// second click from creating an orphan session while the first is pending.
+// Creating persists the session, so prevent a second click from creating an
+// orphan session while the first is pending.
 const isCreatingSession = ref(false)
 
-// Keep another account's sessions hidden while an account swap rehydrates.
-// Background recipe sessions are hidden too. Their results reach the conversation as notices.
+// Background recipe sessions are hidden. Their results reach the conversation as notices.
 const ownedSessions = computed(() => {
-  const effectiveUserId = userId.value || 'local'
-  return Object.values(sessionMetas.value).filter(meta => meta.userId === effectiveUserId && !meta.hidden)
+  return Object.values(sessionMetas.value).filter(meta => meta.userId === 'local' && !meta.hidden)
 })
 
 /**
@@ -105,7 +101,6 @@ async function selectSession(sessionId: string) {
     trackChatSessionSelected({
       source: 'sessions_drawer',
       message_count: (sessionMessages.value[sessionId] ?? []).filter(message => message.role !== 'system').length,
-      cloud_synced: !!selectedRow.meta.cloudChatId,
     })
   }
   await chatSession.setActiveSession(sessionId)

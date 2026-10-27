@@ -10,6 +10,10 @@ import { defineConfig } from 'vitest/config'
 
 import { sharedUnoConfig } from '../../uno.config'
 
+// UnoCSS globs need forward slashes. On Windows `import.meta.dirname` has
+// backslashes, which fast-glob reads as escapes, so no file matches.
+const projectDir = import.meta.dirname.replaceAll('\\', '/')
+
 export default defineConfig({
   root: import.meta.dirname,
   plugins: [
@@ -26,9 +30,9 @@ export default defineConfig({
       configFile: false,
       content: {
         filesystem: [
-          `${import.meta.dirname}/src/**/*.vue`,
-          `${import.meta.dirname}/../stage-ui/src/**/*.vue`,
-          `${import.meta.dirname}/../ui/src/**/*.vue`,
+          `${projectDir}/src/**/*.vue`,
+          `${projectDir}/../stage-ui/src/**/*.vue`,
+          `${projectDir}/../ui/src/**/*.vue`,
         ],
       },
     }),

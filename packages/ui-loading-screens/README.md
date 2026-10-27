@@ -31,4 +31,4 @@ Do not use startup progress for downloads without completion signals. Show a sep
 
 ## License
 
-[MIT](../../LICENSE)
+[AGPL-3.0-or-later](../../LICENSE)

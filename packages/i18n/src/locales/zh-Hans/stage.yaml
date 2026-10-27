@@ -4,8 +4,6 @@ character-switcher:
   empty: 暂无角色
   failed: 无法切换角色，请重试。
 mobile-tools:
-  sign-in: 登录 AIRI
-  account-description: 账户与偏好
   sound: 声音
   character-voice: 角色声音
   title: 设置
@@ -211,7 +209,6 @@ chat:
     confirm-delete: 删除此对话及其中的消息？
     cancel: 取消
     empty: 暂无对话
-    cloud-badge: 已同步到云
     new-chat-fallback: 新建对话
     delete: 删除对话
 avatar-model-missing:
@@ -237,7 +234,6 @@ startup:
   continue-without-model: 暂不加载角色
   model-timeout: 角色模型加载超时，请检查网络连接后重试。
   resources:
-    auth: 账户设置
     modelIndex: 模型列表
     card: 角色设置
     chat: 聊天记录
@@ -294,13 +290,6 @@ profile-switcher:
   manage: 管理角色卡
 promo-banner:
   items:
-    signin:
-      watermark: 月石
-      fallbackLabel: 月石礼包
-      title: 7日签到
-      eventName: 登录后可以申请星尘、头像框和登录礼物。
-      reward: 最多120个星尘
-      cta: 登录
     build:
       watermark: 建造
       fallbackLabel: 建造奖励
@@ -308,20 +297,6 @@ promo-banner:
       eventName: 完成建造任务即可获得奖励券和双倍材料。
       reward: 5 张补给券 + 升级材料
       cta: 查看任务
-    spring:
-      watermark: 春日
-      fallbackLabel: 春日抽奖
-      title: 扭蛋嘉年华
-      eventName: 参与春日抽奖，解锁气泡、挂饰和主题家具。
-      reward: 首抽半价 + 稀有挂饰
-      cta: 立即抽取
-    coupon:
-      watermark: 对话
-      fallbackLabel: 优惠券
-      title: 充值优惠券
-      eventName: 完成聊天互动即可领取扩展包和语音包优惠券。
-      reward: 满 30 减 6 / 满 68 减 15
-      cta: 领取优惠券
     home:
       watermark: 首页
       fallbackLabel: 房间主题
@@ -344,11 +319,6 @@ status:
   transcribing: 正在转写
   hearing-error: 语音转写出错了
   no-transcript: 识别到的内容会显示在这里。
-  signing-in: 请在浏览器中完成登录
-  confirming: 正在确认登录
-  signed-in: 登录成功
-  sign-in-error: 登录失败
-  sign-in-unconfirmed: 未能确认登录会话，请重新登录。
   dismiss: 关闭提示
   configure-hearing: 请先在设置中选择并配置听觉服务。
 notifications:
@@ -362,13 +332,3 @@ notifications:
   error: 通知加载失败。
   retry: 重试
   just-now: 刚刚
-  kinds:
-    flux-granted:
-      title: 获得 {amount} Flux
-    subscription-renewed:
-      title: '{plan} 已续费'
-      body: 有效期至 {periodEnd}。
-    subscription-payment-failed:
-      title: 续费扣款失败
-      body: 将于 {retryAt} 重试。请更新付款方式以继续使用 {plan}。
-      body-no-retry: 请更新付款方式以继续使用 {plan}。

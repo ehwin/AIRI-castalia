@@ -42,12 +42,14 @@ describe('filterTranscriptionByConfidence', () => {
 describe('resolveStreamTranscriptionExecutor', () => {
   /**
    * @example
-   * resolveStreamTranscriptionExecutor('official-provider-transcription')
+   * resolveStreamTranscriptionExecutor('aliyun-nls-transcription')
    */
-  it('routes the official transcription provider through the Aliyun streaming executor', () => {
-    const executor = resolveStreamTranscriptionExecutor('official-provider-transcription')
+  it('routes the Aliyun transcription provider through the streaming executor', () => {
+    expect(resolveStreamTranscriptionExecutor('aliyun-nls-transcription')).toBeDefined()
+  })
 
-    expect(executor).toBe(resolveStreamTranscriptionExecutor('aliyun-nls-transcription'))
+  it('returns no executor for an unknown provider', () => {
+    expect(resolveStreamTranscriptionExecutor('unknown-provider')).toBeUndefined()
   })
 })
 

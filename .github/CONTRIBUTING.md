@@ -329,6 +329,15 @@ Navigate to [moeru-ai/airi](https://github.com/moeru-ai/airi) page, click on the
 
 Review the changes, and click on the **Create pull request** button.
 
+## License
+
+AIRI code uses the GNU Affero General Public License, version 3 or any later
+version, unless a file states another license.
+
+Before a contribution is merged, the contributor must confirm that they own the
+contribution and permit its distribution under this license. Earlier releases
+keep the license that they carried when published.
+
 ## Unit Test merge requirement
 
 The `Unit Test` check must pass before a pull request merges into `main`.

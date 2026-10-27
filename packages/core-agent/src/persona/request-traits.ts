@@ -11,8 +11,8 @@ import type { RequestTraits } from './friction'
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value))
 
 /** Words that ask for rework rather than an answer. */
-const CHORE_WORDS = /\b(clean\s*up|reformat|reorder|proofread|sort|summari[sz]e|refactor|rename)\b/i
-const CHORE_WORDS_CJK = /(整理|格式化|重排|校对|排序|归纳|摘要|重构|改名)/
+const CHORE_WORDS = /\b(?:clean\s*up|reformat|reorder|proofread|sort|summari[sz]e|refactor|rename)\b/i
+const CHORE_WORDS_CJK = /整理|格式化|重排|校对|排序|归纳|摘要|重构|改名/
 
 /** Whether the request asks for rework rather than an answer. Only chores can be refused. */
 export interface RequestTraitsWithKind extends RequestTraits {
@@ -25,7 +25,7 @@ export function inferRequestTraits(text: string): RequestTraitsWithKind {
   const lines = trimmed.split('\n')
 
   // Pasted blocks carry indentation, tabs, or very long lines.
-  const indented = lines.filter(line => /^(\t| {2,})\S/.test(line)).length
+  const indented = lines.filter(line => /^(?:\t| {2,})\S/.test(line)).length
   const veryLong = lines.filter(line => line.length > 200).length
   const mess = clamp01(indented / Math.max(1, lines.length) + veryLong / Math.max(1, lines.length))
 

@@ -19,7 +19,7 @@ const props = {
   modelId: 'model',
 }
 
-async function renderItem(syncState?: 'synced' | 'pending' | 'refused', isActive = false, modelId = props.modelId) {
+async function renderItem(isActive = false, modelId = props.modelId) {
   const pinia = createPinia()
   useDisplayModelsStore(pinia).displayModels = [{
     id: 'model',
@@ -38,7 +38,7 @@ async function renderItem(syncState?: 'synced' | 'pending' | 'refused', isActive
   return {
     pinia,
     screen: await render(CardListItem, {
-      props: { ...props, syncState, isActive, modelId },
+      props: { ...props, isActive, modelId },
       global: {
         plugins: [
           pinia,
@@ -53,27 +53,8 @@ async function renderItem(syncState?: 'synced' | 'pending' | 'refused', isActive
 describe('card list item', () => {
   afterEach(() => cleanup())
 
-  it.each([
-    ['synced', 'Synced to your account'],
-    ['pending', 'Waiting to upload'],
-    ['refused', 'Not uploaded. Your account has no room for more cards, so this card stays on this device.'],
-  ] as const)('shows the %s state with its text', async (state, text) => {
-    const { screen, pinia } = await renderItem(state)
-
-    const icon = screen.container.querySelector(`[data-sync-state="${state}"]`)
-    expect(icon?.getAttribute('title')).toBe(text)
-    disposePinia(pinia)
-  })
-
-  it('shows no cloud state when the user is not signed in', async () => {
-    const { screen, pinia } = await renderItem()
-
-    expect(screen.container.querySelector('[data-sync-state]')).toBeNull()
-    disposePinia(pinia)
-  })
-
   it('shows the model cover and active badge', async () => {
-    const { screen, pinia } = await renderItem(undefined, true)
+    const { screen, pinia } = await renderItem(true)
 
     const image = screen.container.querySelector('img')
     expect(image?.getAttribute('src')).toBe('data:image/png;base64,preview')
@@ -82,7 +63,7 @@ describe('card list item', () => {
   })
 
   it('shows the ghost placeholder with an accessible name when no model is selected', async () => {
-    const { screen, pinia } = await renderItem(undefined, false, '')
+    const { screen, pinia } = await renderItem(false, '')
 
     const placeholder = screen.container.querySelector('[role="img"]')
     expect(placeholder?.getAttribute('aria-label')).toBe('No model selected')

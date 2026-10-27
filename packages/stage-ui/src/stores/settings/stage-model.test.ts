@@ -42,7 +42,7 @@ describe('settings stage model store', () => {
   // We fixed this by keeping the resource identity and disabling the renderer.
   it('disables the renderer when the selected Avatar Model resource is missing', async () => {
     const displayModelsStore = useDisplayModelsStore()
-    const ensureDisplayModelSpy = vi.spyOn(displayModelsStore, 'ensureDisplayModelAvailable').mockResolvedValue(undefined)
+    const getDisplayModelSpy = vi.spyOn(displayModelsStore, 'getDisplayModel').mockResolvedValue(undefined)
 
     const store = useSettingsStageModel()
     store.stageModelSelected = 'display-model-missing'
@@ -54,23 +54,21 @@ describe('settings stage model store', () => {
     expect(store.stageModelSelectedUrl).toBeUndefined()
     expect(store.stageModelRenderer).toBe('disabled')
     expect(store.stageModelUnavailable).toBe(true)
-    expect(ensureDisplayModelSpy).toHaveBeenCalledWith('display-model-missing')
+    expect(getDisplayModelSpy).toHaveBeenCalledWith('display-model-missing')
     expect(resetLegacyModelIdentity).not.toHaveBeenCalled()
   })
 
-  it('keeps a cloud model selected when its download fails', async () => {
+  it('disables the renderer when the selected Avatar Model is missing from the device', async () => {
     const displayModelsStore = useDisplayModelsStore()
-    vi.spyOn(displayModelsStore, 'ensureDisplayModelAvailable').mockRejectedValue(new Error('offline'))
-    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(displayModelsStore, 'getDisplayModel').mockResolvedValue(undefined)
 
     const store = useSettingsStageModel()
-    store.stageModelSelected = 'display-model-cloud'
+    store.stageModelSelected = 'display-model-gone'
 
     await store.initializeStageModel()
 
-    expect(store.stageModelSelected).toBe('display-model-cloud')
-    // The model still exists in the account, so the Stage does not ask for another model.
-    expect(store.stageModelUnavailable).toBe(false)
+    expect(store.stageModelSelected).toBe('display-model-gone')
+    expect(store.stageModelUnavailable).toBe(true)
   })
 
   it('routes Tachie archives to the Tachie renderer', async () => {
@@ -83,7 +81,7 @@ describe('settings stage model store', () => {
       importedAt: 1,
     }
     const displayModelsStore = useDisplayModelsStore()
-    vi.spyOn(displayModelsStore, 'ensureDisplayModelAvailable').mockResolvedValue(tachieModel)
+    vi.spyOn(displayModelsStore, 'getDisplayModel').mockResolvedValue(tachieModel)
 
     vi.stubGlobal('window', {})
     const store = useSettingsStageModel()
@@ -108,7 +106,7 @@ describe('settings stage model store', () => {
       importedAt: 1,
     }
     const displayModelsStore = useDisplayModelsStore()
-    vi.spyOn(displayModelsStore, 'ensureDisplayModelAvailable').mockResolvedValue(vrmModel)
+    vi.spyOn(displayModelsStore, 'getDisplayModel').mockResolvedValue(vrmModel)
 
     vi.stubGlobal('window', {})
     const store = useSettingsStageModel()

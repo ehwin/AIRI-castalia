@@ -8,7 +8,7 @@
     "email": "airi@moeru.ai",
     "url": "https://github.com/moeru-ai"
   },
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",
     "url": "https://github.com/moeru-ai/airi.git",
@@ -30,22 +30,6 @@
     "./locales/zh-Hans": {
       "types": "./dist/locales/zh-Hans/index.d.mts",
       "default": "./dist/locales/zh-Hans/index.mjs"
-    },
-    "./locales/es": {
-      "types": "./dist/locales/es/index.d.mts",
-      "default": "./dist/locales/es/index.mjs"
-    },
-    "./locales/ru": {
-      "types": "./dist/locales/ru/index.d.mts",
-      "default": "./dist/locales/ru/index.mjs"
-    },
-    "./locales/fr": {
-      "types": "./dist/locales/fr/index.d.mts",
-      "default": "./dist/locales/fr/index.mjs"
-    },
-    "./locales/vi": {
-      "types": "./dist/locales/vi/index.d.mts",
-      "default": "./dist/locales/vi/index.mjs"
     },
     "./locales/*.yaml": {
       "default": "./dist/locales/*.yaml"

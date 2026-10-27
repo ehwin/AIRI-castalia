@@ -2,34 +2,15 @@
 import { useElectronEventaInvoke } from '@proj-airi/electron-vueuse'
 import { OnboardingScreen, OnboardingStepAnalyticsNotice } from '@proj-airi/stage-ui/components'
 import { isAnalyticsAvailableInBuild } from '@proj-airi/stage-ui/libs/product-signals'
-import { useAuthStore } from '@proj-airi/stage-ui/stores/auth'
 import { useOnboardingStore } from '@proj-airi/stage-ui/stores/onboarding'
 import { useTheme } from '@proj-airi/ui'
-import { storeToRefs } from 'pinia'
 import { computed } from 'vue'
 
-import { electronAuthStartLogin, electronOnboardingClose } from '../../shared/eventa'
-import { useOnboardingAuthentication } from '../composables/use-onboarding-authentication'
-import { useAuthStatusStore } from '../stores/auth-status'
+import { electronOnboardingClose } from '../../shared/eventa'
 
-const authStore = useAuthStore()
-const { needsLogin, isAuthenticated } = storeToRefs(authStore)
 const onboardingStore = useOnboardingStore()
-const { closeRequestId } = storeToRefs(onboardingStore)
 const { isDark } = useTheme()
-const startLogin = useElectronEventaInvoke(electronAuthStartLogin)
 const closeWindow = useElectronEventaInvoke(electronOnboardingClose)
-const authStatus = useAuthStatusStore()
-const { closeOnboardingWindow } = useOnboardingAuthentication({
-  consumeLoginRequest: () => authStore.consumeLoginRequest(),
-  closeRequestId,
-  closeWindow,
-  isAuthenticated,
-  isConfirming: computed(() => authStatus.status?.state === 'confirming'),
-  needsLogin,
-  onCloseError: error => console.error('[Onboarding] Failed to close the onboarding window.', error),
-  startLogin,
-})
 
 const bgClass = computed(() => isDark.value ? 'bg-[#0f0f0f]' : 'bg-white')
 const extraSteps = computed(() => {
@@ -37,6 +18,15 @@ const extraSteps = computed(() => {
     ? [{ id: 'analytics-notice', component: OnboardingStepAnalyticsNotice }]
     : []
 })
+
+async function closeOnboardingWindow() {
+  try {
+    await closeWindow()
+  }
+  catch (error) {
+    console.error('[Onboarding] Failed to close the onboarding window.', error)
+  }
+}
 
 async function handleSkipped() {
   onboardingStore.markSetupSkipped()

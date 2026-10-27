@@ -365,7 +365,9 @@ async function startElectronFakemicRuntime<Session extends AudioTestSession>(run
   try {
     const launchEnvironment = Object.fromEntries(
       Object.entries({ ...env, ...runtime.env })
-        .filter((entry): entry is [string, string] => entry[1] !== undefined),
+        // ELECTRON_RUN_AS_NODE turns electron.exe into plain Node and breaks
+        // the Playwright loader. Drop the inherited setting.
+        .filter((entry): entry is [string, string] => entry[0] !== 'ELECTRON_RUN_AS_NODE' && entry[1] !== undefined),
     )
     if (temporaryUserData && userDataPath)
       launchEnvironment[temporaryUserData.env] = userDataPath

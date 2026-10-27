@@ -9,6 +9,7 @@ import type { LlmStreamOptions } from './ai/chat-llm/llm'
 
 import { errorMessageFrom } from '@moeru/std'
 import { SpanStatusCode } from '@opentelemetry/api'
+import { useCastaliaPluginStore } from '@proj-airi/castalia-plugin'
 import { IOAttributes, IOSpanNames } from '@proj-airi/stage-shared'
 import { createPinia, defineStore, disposePinia, setActivePinia } from 'pinia'
 import { createSyncedPiniaPlugin } from 'pinia-plugin-synced'
@@ -80,7 +81,6 @@ const ingestContextMessageMock = vi.fn()
 const getContextsSnapshotMock = vi.fn()
 const createRuntimePromptContextMock = vi.fn()
 const createMinecraftContextMock = vi.fn()
-const createUserAccountContextMock = vi.fn()
 const persistSessionMessagesMock = vi.fn()
 const forkSessionMock = vi.fn()
 const createSessionMock = vi.fn()
@@ -121,7 +121,6 @@ vi.mock('../composables/use-io-tracer', () => ({
 vi.mock('./chat/context-providers', () => ({
   createMinecraftContext: () => createMinecraftContextMock(),
   createRuntimePromptContext: (prompt: string) => createRuntimePromptContextMock(prompt),
-  createUserAccountContext: () => createUserAccountContextMock(),
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -346,7 +345,6 @@ describe('chat store contract', () => {
     ingestContextMessageMock.mockReset()
     getContextsSnapshotMock.mockReset()
     getContextsSnapshotMock.mockReturnValue({})
-    createUserAccountContextMock.mockReset().mockReturnValue(null)
     createRuntimePromptContextMock.mockReset()
     createRuntimePromptContextMock.mockReturnValue(undefined)
     createMinecraftContextMock.mockReset()
@@ -609,8 +607,8 @@ describe('chat store contract', () => {
     // The session character's wake word tool joins every turn. It is not a selectable stored tool.
     // Reply cards are on by default, so the owner's chat also gets the card tool and the icon search of cards.
     expect(resolvedToolNames).toEqual([
-      ['stage_widgets', 'configure_wake_words', 'builtIn_readMemory', 'builtIn_writeMemory', 'builtIn_forgetMemory', 'builtIn_useRecipe', 'builtIn_proposeRecipe', 'builtIn_drawCard', 'builtIn_searchIcons'],
-      ['stage_widgets', 'configure_wake_words', 'builtIn_readMemory', 'builtIn_writeMemory', 'builtIn_forgetMemory', 'builtIn_useRecipe', 'builtIn_proposeRecipe', 'builtIn_drawCard', 'builtIn_searchIcons'],
+      ['stage_widgets', 'configure_wake_words', 'builtIn_readMemory', 'builtIn_writeMemory', 'builtIn_forgetMemory', 'builtIn_castaliaRecordEmotion', 'builtIn_castaliaSetDesire', 'builtIn_castaliaAdjustEnergy', 'builtIn_useRecipe', 'builtIn_proposeRecipe', 'builtIn_drawCard', 'builtIn_searchIcons'],
+      ['stage_widgets', 'configure_wake_words', 'builtIn_readMemory', 'builtIn_writeMemory', 'builtIn_forgetMemory', 'builtIn_castaliaRecordEmotion', 'builtIn_castaliaSetDesire', 'builtIn_castaliaAdjustEnergy', 'builtIn_useRecipe', 'builtIn_proposeRecipe', 'builtIn_drawCard', 'builtIn_searchIcons'],
     ])
   })
 
@@ -686,6 +684,91 @@ describe('chat store contract', () => {
 
     expect(toolNames[1]).not.toContain('builtIn_writeMemory')
     expect(prompt).not.toContain('channel-rules')
+  })
+
+  it('binds Castalia self-state and state tools to the run persona, then removes both when disabled', async () => {
+    sessionMetas['scene-session'] = { sessionId: 'scene-session', userId: 'local', characterId: 'discord-host', bindings: ['discord:channel:a'], createdAt: 1, updatedAt: 1 }
+    const prompts: string[] = []
+    const toolNames: string[][] = []
+    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: GenerationProvider, context: Conversation, options: any) => {
+      const system = context.turns.find(turn => turn.type === 'system')
+      prompts.push(system?.type === 'system' && system.content[0]?.type === 'text' ? system.content[0].text : '')
+      const tools = typeof options.tools === 'function' ? await options.tools() : options.tools
+      toolNames.push(tools.map((tool: Tool) => tool.function.name))
+      await options.onStreamEvent({ type: 'finish' })
+    })
+    const castalia = useCastaliaPluginStore()
+    castalia.recordMood(6, 'I enjoyed solving this together.', 'discord-host')
+    castalia.recordEmotion({ valence: 0.6, arousal: 0.2, dominance: 0.4 }, 'Solving it felt satisfying.', 'discord-host')
+    castalia.setDesire('Learn how the song was made.', 'discord-host')
+
+    await useChatStore().send({ sessionId: 'scene-session', text: 'hello' })
+
+    expect(prompts[0]).toContain('Castalia self-state')
+    expect(prompts[0]).toContain('Current mood: 6')
+    expect(prompts[0]).toContain('Current desire: Learn how the song was made.')
+    expect(prompts[0]).toContain('Current VAD: valence 0.60, arousal 0.20, dominance 0.40.')
+    expect(toolNames[0]).toContain('builtIn_castaliaRecordEmotion')
+    expect(toolNames[0]).toContain('builtIn_castaliaSetDesire')
+
+    castalia.enabled = false
+    await useChatStore().send({ sessionId: 'scene-session', text: 'one more thing' })
+    expect(prompts[1]).not.toContain('Castalia self-state')
+    expect(toolNames[1]).not.toContain('builtIn_castaliaRecordEmotion')
+  })
+
+  it('ingests the relational policy of the pending user turn', async () => {
+    sessionMetas['scene-session'] = { sessionId: 'scene-session', userId: 'local', characterId: 'discord-host', bindings: ['discord:channel:a'], createdAt: 1, updatedAt: 1 }
+    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: GenerationProvider, _context: Conversation, options: any) => {
+      await options.onStreamEvent({ type: 'finish' })
+    })
+
+    await useChatStore().send({ sessionId: 'scene-session', text: '我真的不想活了' })
+
+    const envelopes = ingestContextMessageMock.mock.calls.map(call => call[0] as { contextId?: string, text?: string })
+    const policy = envelopes.find(envelope => envelope.contextId === 'relational-policy')
+    expect(policy?.text).toContain('safety first')
+  })
+
+  it('keys the relationship depth by persona card, not by session', async () => {
+    const storage = new Map<string, string>()
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => { storage.set(key, value) },
+        removeItem: (key: string) => { storage.delete(key) },
+        clear: () => { storage.clear() },
+      },
+      configurable: true,
+      writable: true,
+    })
+    try {
+      llmStreamMock.mockImplementation(async (_model: string, _chatProvider: GenerationProvider, _context: Conversation, options: any) => {
+        await options.onStreamEvent({ type: 'finish' })
+      })
+      const policyText = () => {
+        const envelopes = ingestContextMessageMock.mock.calls.map(call => call[0] as { contextId?: string, text?: string })
+        return envelopes.filter(envelope => envelope.contextId === 'relational-policy').at(-1)?.text ?? ''
+      }
+
+      // session-1 and session-forked are both alice. session-2 is bob.
+      await useChatStore().send({ sessionId: 'session-1', text: '我害怕一个人待着' })
+      await useChatStore().send({ sessionId: 'session-1', text: '我其实很喜欢猫' })
+
+      const stored = storage.get('castalia:relationship:alice')
+      expect(stored).toBeTruthy()
+      const stage = (JSON.parse(stored!) as { stage: number }).stage
+      expect(stage).toBeGreaterThan(1)
+
+      await useChatStore().send({ sessionId: 'session-forked', text: '今天天气不错' })
+      expect(policyText()).toContain(`Depth: ${stage} of 4`)
+
+      await useChatStore().send({ sessionId: 'session-2', text: '今天天气不错' })
+      expect(policyText()).toContain('Depth: 1 of 4')
+    }
+    finally {
+      Reflect.deleteProperty(globalThis, 'localStorage')
+    }
   })
 
   it('preserves image attachments when retrying a failed turn', async () => {
@@ -1181,13 +1264,12 @@ describe('chat store contract', () => {
   it('restarts chat consumers when this renderer becomes the leader', async () => {
     // ROOT CAUSE:
     //
-    // The application stopped observing chat leadership changes. If the Web
+    // The application stopped observing chat leadership changes. If the
     // leader closed, the promoted renderer kept the replicated session state
-    // but did not start a new cloud WebSocket.
+    // but did not restart its local session consumers.
     //
     // The chat store now owns the leadership subscription. It starts the
-    // session consumers after promotion and stops local consumers after
-    // demotion or disposal.
+    // session consumers after promotion and stops the subscription on disposal.
     let leadershipListener: ((isLeader: boolean) => void) | undefined
     const stopLeadershipListener = vi.fn()
     const syncedPinia: SyncedPiniaRuntime = {
@@ -1212,18 +1294,15 @@ describe('chat store contract', () => {
     await store.initialize(syncedPinia)
 
     expect(initializeSessionMock).toHaveBeenCalledOnce()
-    expect(disposeSessionMock).toHaveBeenCalledOnce()
     expect(ensureCurrentSessionMock).not.toHaveBeenCalled()
 
     leadershipListener?.(true)
     await vi.waitFor(() => expect(ensureCurrentSessionMock).toHaveBeenCalledOnce())
 
     leadershipListener?.(false)
-    expect(disposeSessionMock).toHaveBeenCalledTimes(2)
 
     store.dispose()
     expect(stopLeadershipListener).toHaveBeenCalledOnce()
-    expect(disposeSessionMock).toHaveBeenCalledTimes(3)
   })
 
   it('passes the current consciousness reasoning option to the chat provider', async () => {
@@ -1602,7 +1681,9 @@ describe('chat store contract', () => {
     // Datetime is no longer pushed through ingestContextMessage; it is now
     // applied at message-assembly time as per-message [HH:MM] prefixes. The
     // runtime-rule and Minecraft providers are disabled in this test.
-    expect(ingestContextMessageMock).not.toHaveBeenCalled()
+    expect(ingestContextMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ contextId: 'relational-policy' }),
+    )
     expect(persistSessionMessagesMock).toHaveBeenCalledWith('session-1')
     expect(hookOrder).toEqual([
       'before-compose',
@@ -1877,9 +1958,9 @@ describe('chat store contract', () => {
 
     expect(createRuntimePromptContextMock).toHaveBeenCalledWith(expect.stringContaining('base.prompt.emotion'))
     expect(createRuntimePromptContextMock).toHaveBeenCalledWith(expect.stringContaining('base.prompt.emoji'))
-    expect(ingestContextMessageMock).toHaveBeenCalledTimes(2)
+    expect(ingestContextMessageMock).toHaveBeenCalledTimes(3)
     expect(ingestContextMessageMock).toHaveBeenNthCalledWith(1, runtimePromptContext)
-    expect(ingestContextMessageMock).toHaveBeenNthCalledWith(2, minecraftContext)
+    expect(ingestContextMessageMock).toHaveBeenNthCalledWith(3, minecraftContext)
     expect(ingestContextMessageMock.mock.invocationCallOrder[0]).toBeLessThan(
       getContextsSnapshotMock.mock.invocationCallOrder[0],
     )
@@ -1911,37 +1992,6 @@ describe('chat store contract', () => {
     await store.send({ sessionId: 'scene-session', text: 'Hello from Discord' })
 
     expect(speaks).toEqual([true, false])
-  })
-
-  it('adds account context only to the signed-in request without retaining it in the registry', async () => {
-    const account = {
-      id: 'account',
-      contextId: 'system:user-account',
-      strategy: 'replace-self',
-      text: 'Account display name: "Alice". Edit it at /settings/account.',
-      createdAt: 123,
-    }
-    const registry = {}
-    // Registry reads return independent snapshots. Request overlays do not mutate the retained registry.
-    getContextsSnapshotMock.mockImplementation(() => structuredClone(registry))
-    createUserAccountContextMock.mockReturnValue(account)
-    const prompts: string[] = []
-    llmStreamMock.mockImplementation(async (_model: string, _provider: GenerationProvider, messages: Conversation, options: StreamOptions) => {
-      prompts.push(JSON.stringify(messages))
-      await options.onStreamEvent?.({ type: 'finish' })
-    })
-    const store = useChatStore()
-    await store.ingest('hello', { model: 'gpt-test', chatProvider: provider })
-    expect(prompts[0]).toContain('Alice')
-    expect(prompts[0]).toContain('/settings/account')
-    expect(registry).toEqual({})
-    expect(ingestContextMessageMock).not.toHaveBeenCalledWith(account)
-
-    createUserAccountContextMock.mockReturnValue(null)
-    await store.ingest('hello again', { model: 'gpt-test', chatProvider: provider })
-    expect(prompts[1]).not.toContain('system:user-account')
-    expect(prompts[1]).not.toContain('Alice')
-    expect(prompts[1]).not.toContain('/settings/account')
   })
 
   it('rejects cancelled queued sends before they start', async () => {

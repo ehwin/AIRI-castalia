@@ -28,6 +28,10 @@ describe('live2d MAGIC settings', () => {
     const settings = useLive2DMotionMagicSettings()
 
     expect(settings.profileId).toBe('speaking-excited')
+    expect(settings.method).toBe('var')
+    expect(settings.arHmmStateCount).toBe(5)
+    expect(settings.arHmmOrder).toBe(12)
+    expect(settings.arHmmNoiseScale).toBe(0.8)
     expect(settings.skipMouthOpen).toBe(true)
     expect(settings.forceViewTarget).toBe(true)
 
@@ -36,8 +40,27 @@ describe('live2d MAGIC settings', () => {
     settings.resetState()
 
     expect(settings.profileId).toBe('speaking-excited')
+    expect(settings.method).toBe('var')
+    expect(settings.arHmmStateCount).toBe(5)
+    expect(settings.arHmmOrder).toBe(12)
+    expect(settings.arHmmNoiseScale).toBe(0.8)
     expect(settings.skipMouthOpen).toBe(true)
     expect(settings.forceViewTarget).toBe(true)
+  })
+
+  it('normalizes invalid persisted method and AR-HMM settings', async () => {
+    persistedValues.set('settings/live2d/magic/method', 'unknown')
+    persistedValues.set('settings/live2d/magic/ar-hmm/state-count', 50)
+    persistedValues.set('settings/live2d/magic/ar-hmm/order', 0)
+    persistedValues.set('settings/live2d/magic/ar-hmm/noise-scale', -1)
+    const { useLive2DMotionMagicSettings } = await import('./settings')
+
+    const settings = useLive2DMotionMagicSettings()
+
+    expect(settings.method).toBe('var')
+    expect(settings.arHmmStateCount).toBe(12)
+    expect(settings.arHmmOrder).toBe(12)
+    expect(settings.arHmmNoiseScale).toBe(0)
   })
 
   it('loads the bundled idle-calm profile', async () => {

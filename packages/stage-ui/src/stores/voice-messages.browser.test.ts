@@ -13,6 +13,10 @@ import { useVoiceMessagesStore } from './voice-messages'
 
 const cleanups: (() => void)[] = []
 
+// Starting a fake microphone recording can take longer than the one second
+// poll default when the browser project runs many files at once.
+const pollTimeout = { timeout: 10_000 }
+
 afterEach(() => {
   cleanups.splice(0).reverse().forEach(cleanup => cleanup())
   localStorage.clear()
@@ -53,7 +57,7 @@ describe('voice messages host', () => {
     const command = defineInvoke(getSpeechBusContext(), voiceMessageCommand)
 
     await command({ type: 'record', id: 'message', sessionId: 'alice', replyToMessageId: 'reply-target' })
-    await expect.poll(() => latest()[0]?.phase).toBe('capturing')
+    await expect.poll(() => latest()[0]?.phase, pollTimeout).toBe('capturing')
     expect(store.isRecording).toBe(true)
 
     // The test has no chat session or provider, so the send fails after encoding. The host must keep the recording.
@@ -71,10 +75,10 @@ describe('voice messages host', () => {
     const command = defineInvoke(getSpeechBusContext(), voiceMessageCommand)
 
     await command({ type: 'record', id: 'message', sessionId: 'alice' })
-    await expect.poll(() => latest()[0]?.phase).toBe('capturing')
+    await expect.poll(() => latest()[0]?.phase, pollTimeout).toBe('capturing')
     await command({ type: 'finish', id: 'message' })
 
-    await expect.poll(() => latest()[0]?.phase).toBe('ready')
+    await expect.poll(() => latest()[0]?.phase, pollTimeout).toBe('ready')
     expect(latest()[0].error).toBeUndefined()
   })
 
@@ -82,13 +86,13 @@ describe('voice messages host', () => {
     const { store, latest } = connectHost()
     const command = defineInvoke(getSpeechBusContext(), voiceMessageCommand)
     await command({ type: 'record', id: 'message', sessionId: 'alice' })
-    await expect.poll(() => latest()[0]?.phase).toBe('capturing')
+    await expect.poll(() => latest()[0]?.phase, pollTimeout).toBe('capturing')
 
     const lease = new AbortController()
     cleanups.push(() => lease.abort())
     holdCaptureLease(lease.signal)
 
-    await expect.poll(() => latest()[0]?.phase).toBe('ready')
+    await expect.poll(() => latest()[0]?.phase, pollTimeout).toBe('ready')
     expect(store.isRecording).toBe(false)
   })
 
@@ -98,12 +102,12 @@ describe('voice messages host', () => {
     const lease = new AbortController()
     cleanups.push(() => lease.abort())
     holdCaptureLease(lease.signal)
-    await expect.poll(() => leases.held).toBe(true)
+    await expect.poll(() => leases.held, pollTimeout).toBe(true)
 
     expect(await command({ type: 'record', id: 'message', sessionId: 'alice' })).toEqual({ status: 'closed' })
 
     lease.abort()
-    await expect.poll(() => leases.held).toBe(false)
+    await expect.poll(() => leases.held, pollTimeout).toBe(false)
 
     expect(await command({ type: 'record', id: 'message', sessionId: 'alice' })).toEqual({ status: 'accepted' })
   })

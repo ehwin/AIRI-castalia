@@ -1,8 +1,8 @@
 import type { CreateCharacterPayload } from '../types/character'
 
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
-import { charactersService } from './characters'
+import { buildLocalCharacter } from './characters'
 
 const payload = {
   character: {
@@ -23,14 +23,14 @@ const payload = {
 describe('services characters', () => {
   /**
    * @example
-   * const character = charactersService.buildLocal('user-1', payload)
+   * const character = buildLocalCharacter(payload)
    */
-  it('builds a schema-valid local character with owner fields', () => {
-    const character = charactersService.buildLocal('user-1', payload)
+  it('builds a schema-valid character owned by this device', () => {
+    const character = buildLocalCharacter(payload)
 
     expect(character.id).toBeDefined()
-    expect(character.creatorId).toBe('user-1')
-    expect(character.ownerId).toBe('user-1')
+    expect(character.creatorId).toBe('local')
+    expect(character.ownerId).toBe('local')
     expect(character.characterId).toBe('airi')
     expect(character.likes).toEqual([])
     expect(character.bookmarks).toEqual([])
@@ -38,65 +38,17 @@ describe('services characters', () => {
 
   /**
    * @example
-   * await charactersService.fetchRemote(client, { all: true })
+   * const character = buildLocalCharacter({ ...payload, character: { ...payload.character, id: 'fixed' } })
    */
-  it('fetches remote characters and parses them', async () => {
-    const built = charactersService.buildLocal('user-1', payload)
-    const client = {
-      api: {
-        v1: {
-          characters: {
-            '$get': vi.fn(async () => ({ ok: true, json: async () => [built] })),
-            '$post': vi.fn(async () => ({ ok: true, json: async () => built })),
-            ':id': {
-              $delete: vi.fn(async () => ({ ok: true })),
-              $get: vi.fn(async () => ({ ok: true, json: async () => built })),
-              $patch: vi.fn(async () => ({ ok: true, json: async () => built })),
-              bookmark: {
-                $post: vi.fn(async () => ({ ok: true, json: async () => built })),
-              },
-              like: {
-                $post: vi.fn(async () => ({ ok: true, json: async () => built })),
-              },
-            },
-          },
-        },
-      },
-    }
+  it('keeps the payload id and gives each relation its own id', () => {
+    const character = buildLocalCharacter({
+      ...payload,
+      character: { ...payload.character, id: 'fixed' },
+      i18n: [{ language: 'en', name: 'Airi', description: 'An AI companion', tags: ['companion'] }],
+    })
 
-    await expect(charactersService.fetchRemote(client, { all: true })).resolves.toEqual([built])
-    expect(client.api.v1.characters.$get).toHaveBeenCalledWith({ query: { all: 'true' } }, undefined)
-  })
-
-  /**
-   * @example
-   * await expect(charactersService.fetchRemote(client, {}, { abortSignal })).rejects.toThrow()
-   */
-  it('throws before remote work when aborted', async () => {
-    const controller = new AbortController()
-    controller.abort()
-    const client = {
-      api: {
-        v1: {
-          characters: {
-            '$get': vi.fn(),
-            '$post': vi.fn(),
-            ':id': {
-              $delete: vi.fn(),
-              $get: vi.fn(),
-              $patch: vi.fn(),
-              bookmark: {
-                $post: vi.fn(),
-              },
-              like: {
-                $post: vi.fn(),
-              },
-            },
-          },
-        },
-      },
-    }
-
-    await expect(charactersService.fetchRemote(client, {}, { abortSignal: controller.signal })).rejects.toThrow()
+    expect(character.id).toBe('fixed')
+    expect(character.i18n?.[0].id).toBeDefined()
+    expect(character.i18n?.[0].characterId).toBe('fixed')
   })
 })

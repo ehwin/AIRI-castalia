@@ -103,14 +103,12 @@ describe('useAnalytics conversation product events', () => {
     analytics.trackChatSessionSelected({
       source: 'sessions_drawer',
       message_count: 4,
-      cloud_synced: true,
     })
 
     expect(analyticsMocks.captureMock).toHaveBeenCalledWith('chat_session_selected', {
       app_surface: 'mobile',
       source: 'sessions_drawer',
       message_count: 4,
-      cloud_synced: true,
     })
   })
 
@@ -213,105 +211,6 @@ describe('useAnalytics conversation product events', () => {
       voice_pack_id: 'pack-1',
       source: 'settings',
     })
-  })
-
-  /**
-   * @example
-   * analytics.trackOfficialTtsExposed({ source: 'post_first_chat', tts_provider_id: 'official-provider-speech', tts_model_id: 'stepfun/tts' })
-   * expect(captureAnalyticsEvent).toHaveBeenCalledWith('official_tts_exposed', expect.objectContaining({ source: 'post_first_chat' }))
-   */
-  it('emits official TTS activation funnel events', () => {
-    const analytics = useAnalytics()
-
-    analytics.trackOfficialTtsExposed({
-      tts_provider_id: 'official-provider-speech',
-      tts_model_id: 'stepfun/tts',
-      source: 'post_first_chat',
-    })
-    analytics.trackOfficialTtsPreviewStarted({
-      tts_provider_id: 'official-provider-speech',
-      tts_model_id: 'stepfun/tts',
-      voice_id: 'longxiaochun_v2',
-      voice_type: 'official_selected',
-      source: 'manual_preview',
-    })
-    analytics.trackOfficialTtsPreviewSucceeded({
-      tts_provider_id: 'official-provider-speech',
-      tts_model_id: 'stepfun/tts',
-      voice_id: 'longxiaochun_v2',
-      voice_type: 'official_selected',
-      source: 'manual_preview',
-      duration_ms: 320,
-    })
-    expect(analyticsMocks.captureMock).toHaveBeenNthCalledWith(1, 'official_tts_exposed', {
-      app_surface: 'web',
-      tts_provider_id: 'official-provider-speech',
-      tts_model_id: 'stepfun/tts',
-      source: 'post_first_chat',
-    })
-    expect(analyticsMocks.captureMock).toHaveBeenNthCalledWith(2, 'official_tts_preview_started', {
-      app_surface: 'web',
-      tts_provider_id: 'official-provider-speech',
-      tts_model_id: 'stepfun/tts',
-      voice_id: 'longxiaochun_v2',
-      voice_type: 'official_selected',
-      source: 'manual_preview',
-    })
-    expect(analyticsMocks.captureMock).toHaveBeenNthCalledWith(3, 'official_tts_preview_succeeded', {
-      app_surface: 'web',
-      tts_provider_id: 'official-provider-speech',
-      tts_model_id: 'stepfun/tts',
-      voice_id: 'longxiaochun_v2',
-      voice_type: 'official_selected',
-      source: 'manual_preview',
-      duration_ms: 320,
-    })
-  })
-
-  it('emits paywall exposure with balance bucket for monetization funnels', () => {
-    const analytics = useAnalytics()
-
-    analytics.trackPaywallSeen({
-      entry_surface: 'settings_flux',
-      reason: 'manual_topup',
-      flux_balance_bucket: '1_100',
-    })
-
-    expect(analyticsMocks.captureMock).toHaveBeenCalledWith('paywall_seen', {
-      app_surface: 'web',
-      entry_surface: 'settings_flux',
-      reason: 'manual_topup',
-      flux_balance_bucket: '1_100',
-    })
-  })
-
-  it('uses entry_surface across the pricing funnel without emitting surface', () => {
-    const analytics = useAnalytics()
-
-    analytics.trackPricingViewed('settings_flux', 'one_time')
-    analytics.trackPlanSelected('price-1', {
-      currency: 'USD',
-      entry_surface: 'settings_flux',
-    })
-    analytics.trackCheckoutStarted('price-1', {
-      currency: 'USD',
-      entry_surface: 'settings_flux',
-    })
-
-    expect(analyticsMocks.captureMock).toHaveBeenNthCalledWith(1, 'pricing_page_viewed', {
-      entry_surface: 'settings_flux',
-      plan_period: 'one_time',
-    })
-    expect(analyticsMocks.captureMock).toHaveBeenNthCalledWith(2, 'plan_selected', {
-      currency: 'USD',
-      entry_surface: 'settings_flux',
-      plan_id: 'price-1',
-    })
-    expect(analyticsMocks.captureMock).toHaveBeenNthCalledWith(3, 'checkout_started', {
-      currency: 'USD',
-      entry_surface: 'settings_flux',
-      plan_id: 'price-1',
-    }, { beforeNavigation: true })
   })
 
   /**
@@ -513,7 +412,6 @@ describe('useAnalytics conversation product events', () => {
       conversation_id: 'session-1',
       source: 'new_session',
       character_id: 'character-1',
-      cloud_synced: true,
     })
     analytics.trackConversationRenamed({
       conversation_id: 'session-1',
@@ -526,7 +424,6 @@ describe('useAnalytics conversation product events', () => {
     analytics.trackConversationDeleted({
       conversation_id: 'session-1',
       message_count: 6,
-      cloud_synced: true,
     })
     analytics.trackAttachmentUploaded({
       attachment_type: 'image',
@@ -556,7 +453,6 @@ describe('useAnalytics conversation product events', () => {
       conversation_id: 'session-1',
       source: 'new_session',
       character_id: 'character-1',
-      cloud_synced: true,
     })
     expect(analyticsMocks.captureMock).toHaveBeenNthCalledWith(2, 'conversation_renamed', {
       app_surface: 'web',
@@ -572,7 +468,6 @@ describe('useAnalytics conversation product events', () => {
       app_surface: 'web',
       conversation_id: 'session-1',
       message_count: 6,
-      cloud_synced: true,
     })
     expect(analyticsMocks.captureMock).toHaveBeenNthCalledWith(5, 'attachment_uploaded', {
       app_surface: 'web',
@@ -646,35 +541,6 @@ describe('useAnalytics conversation product events', () => {
       severity: 'minor',
       user_type: 'new_user',
       entrypoint: 'community_manual_tag',
-    })
-  })
-
-  it('emits account lifecycle events shared with the ui-server-auth surface', () => {
-    const analytics = useAnalytics()
-
-    analytics.trackPasswordChanged()
-    analytics.trackPasswordResetRequested()
-    analytics.trackOauthProviderLinkStarted({ provider: 'github' })
-    analytics.trackOauthProviderUnlinked({ provider: 'google' })
-    analytics.trackAccountDeletionRequested()
-    analytics.trackOauthCallbackFailed({ stage: 'missing_flow_state' })
-
-    expect(analyticsMocks.captureMock).toHaveBeenNthCalledWith(1, 'password_changed', { app_surface: 'web' })
-    expect(analyticsMocks.captureMock).toHaveBeenNthCalledWith(2, 'password_reset_requested', { app_surface: 'web' })
-    expect(analyticsMocks.captureMock).toHaveBeenNthCalledWith(
-      3,
-      'oauth_provider_link_started',
-      { app_surface: 'web', provider: 'github' },
-      { beforeNavigation: true },
-    )
-    expect(analyticsMocks.captureMock).toHaveBeenNthCalledWith(4, 'oauth_provider_unlinked', {
-      app_surface: 'web',
-      provider: 'google',
-    })
-    expect(analyticsMocks.captureMock).toHaveBeenNthCalledWith(5, 'account_deletion_requested', { app_surface: 'web' })
-    expect(analyticsMocks.captureMock).toHaveBeenNthCalledWith(6, 'oauth_callback_failed', {
-      app_surface: 'web',
-      stage: 'missing_flow_state',
     })
   })
 

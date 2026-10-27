@@ -29,6 +29,10 @@ export type Live2DMotionMagicStatus = 'idle' | 'initializing' | 'playing' | 'rea
 export interface UseLive2DMotionMagicOptions {
   /** Supplies a dataset that replaces the bundled dataset. */
   dataset?: MaybeRefOrGetter<Live2DMotionMagicDataset | null | undefined>
+  /** Selects the fitted model. Defaults to VAR for backwards compatibility. */
+  method?: MaybeRefOrGetter<Live2DMotionMagicMethod>
+  /** Persistent AR-HMM fit and generation settings used by the production stage. */
+  arHmmSettings?: MaybeRefOrGetter<Partial<{ stateCount: number, order: number, noiseScale: number }>>
   /** Prevents generated motion from controlling mouth opening. @default true */
   skipMouthOpen?: MaybeRefOrGetter<boolean>
   /** Keeps the generated eyes aimed at the forward view target. @default true */
@@ -81,7 +85,7 @@ function toTrainingSequence(dataset: Live2DMotionMagicDataset, sampleRateHz: num
 export function useLive2DMotionMagic(options: UseLive2DMotionMagicOptions) {
   const now = options.now ?? (() => performance.now())
   const random = options.random ?? Math.random
-  const method = shallowRef<Live2DMotionMagicMethod>('var')
+  const method = shallowRef<Live2DMotionMagicMethod>(toValue(options.method) ?? 'var')
   const status = shallowRef<Live2DMotionMagicStatus>('idle')
   const model = shallowRef<MagicModel>()
   const fitDurationMs = shallowRef(0)
@@ -101,6 +105,15 @@ export function useLive2DMotionMagic(options: UseLive2DMotionMagicOptions) {
     noiseScale: 0.8,
   })
   let initializeRequest = 0
+
+  watch(() => toValue(options.method), (value) => {
+    if (value)
+      method.value = value
+  }, { immediate: true })
+  watch(() => toValue(options.arHmmSettings), (value) => {
+    if (value)
+      Object.assign(arHmmSettings, value)
+  }, { deep: true, immediate: true })
 
   const driver = createDriver<number | undefined>({
     target: {

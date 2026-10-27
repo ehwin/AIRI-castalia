@@ -58,4 +58,4 @@ import type { WebSocketEvents } from '@proj-airi/server-shared'
 
 ## License
 
-[MIT](../../LICENSE)
+[AGPL-3.0-or-later](../../LICENSE)

@@ -4,7 +4,6 @@ import localforage from 'localforage'
 
 import { afterEach, expect, it } from 'vitest'
 
-import { sha256Hex } from '../../libs/file-transfer/transfer'
 import { DisplayModelFormat } from '../../stores/display-models'
 import { createDisplayModelsRepo } from './display-models.repo'
 
@@ -21,11 +20,10 @@ function bytes(size: number) {
 
 afterEach(async () => {
   await store.removeItem(id)
-  await store.removeItem(`transfer-task-${id}`)
 })
 
 it('reads a model that the previous release wrote, with the same bytes', async () => {
-  const content = bytes(1024 * 1024)
+  const content = bytes(64 * 1024)
   await store.setItem(id, {
     format: DisplayModelFormat.VRM,
     file: new File([content], 'avatar.vrm', { type: 'model/gltf-binary' }),
@@ -35,19 +33,15 @@ it('reads a model that the previous release wrote, with the same bytes', async (
   const [listed] = await createDisplayModelsRepo(store).list()
 
   expect(listed).toMatchObject({ id, type: 'file', name: 'avatar.vrm', format: DisplayModelFormat.VRM })
-  // Compare digests. `toEqual` checks a byte array one element at a time, and 4 MiB took 5 seconds in Node.
-  expect(listed.file.size).toBe(content.byteLength)
-  expect(await sha256Hex(listed.file)).toBe(await sha256Hex(new Blob([content])))
+  expect(new Uint8Array(await listed.file.arrayBuffer())).toEqual(content)
 })
 
-it('keeps a saved model and a pending upload across repository instances', async () => {
+it('keeps a saved model across repository instances', async () => {
   const model: DisplayModelFile = { id, format: DisplayModelFormat.Live2dZip, type: 'file', file: new File(['zip'], 'model.zip'), name: 'Renamed', importedAt: 1 }
   await createDisplayModelsRepo(store).save(model)
-  await createDisplayModelsRepo(store).saveUpload({ id, kind: 'upload', ownerId: 'owner', payload: null, status: 'queued' })
 
   const repo = createDisplayModelsRepo(store)
 
   expect(await repo.list()).toMatchObject([{ id, name: 'Renamed' }])
   expect(await (await repo.get(id))!.file.text()).toBe('zip')
-  expect(await repo.listUploads()).toMatchObject([{ id, kind: 'upload' }])
 })

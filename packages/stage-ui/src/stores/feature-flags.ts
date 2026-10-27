@@ -1,22 +1,15 @@
-import type { InferOutput } from 'valibot'
-
 import type { FeatureFlag } from '../libs/feature-flags'
 
-import { errorMessageFrom } from '@moeru/std'
 import { isStageTamagotchi } from '@proj-airi/stage-shared'
 import { useLocalStorageManualReset } from '@proj-airi/stage-shared/composables'
 import { defineStore } from 'pinia'
 import { parse } from 'valibot'
-import { computed, onScopeDispose, shallowRef, watch } from 'vue'
+import { computed } from 'vue'
 
-import { useCloudFetch } from '../composables/cloud'
-import { featureFlagPreferencesSchema, featureFlagResponseSchema, featureFlagVariantPreferencesSchema, offeredFeatureFlags, resolveFeatureFlag, resolveFeatureVariant } from '../libs/feature-flags'
-import { useAuthStore } from './auth'
+import { featureFlagPreferencesSchema, featureFlagVariantPreferencesSchema, offeredFeatureFlags, resolveFeatureFlag, resolveFeatureVariant } from '../libs/feature-flags'
 
-/** Owns device preferences and a non-persisted policy snapshot for the current account. */
+/** Owns the device preferences of the experiments. */
 export const useFeatureFlagsStore = defineStore('feature-flags', () => {
-  const auth = useAuthStore()
-  const cloudFetch = useCloudFetch()
   const offered = offeredFeatureFlags(isStageTamagotchi())
   const preferences = useLocalStorageManualReset<Record<string, boolean>>('settings/feature-flags', {}, {
     serializer: {
@@ -31,18 +24,9 @@ export const useFeatureFlagsStore = defineStore('feature-flags', () => {
       write: value => JSON.stringify(value),
     },
   })
-  const policies = shallowRef<InferOutput<typeof featureFlagResponseSchema>['flags']>([])
-  const loading = shallowRef(false)
-  const error = shallowRef<string>()
-  let requestVersion = 0
-  let request: AbortController | undefined
-
-  function preferenceKey(feature: FeatureFlag) {
-    return JSON.stringify([feature.key, feature.availability === 'cloud' ? auth.user?.id : null])
-  }
 
   function decision(feature: FeatureFlag) {
-    return resolveFeatureFlag(feature, preferences.value[preferenceKey(feature)], policies.value.find(policy => policy.key === feature.key), Boolean(auth.user?.id && auth.token))
+    return resolveFeatureFlag(feature, preferences.value[feature.key])
   }
 
   /** The variant of a feature: the saved one while the feature still offers it, otherwise the first one. */
@@ -61,23 +45,22 @@ export const useFeatureFlagsStore = defineStore('feature-flags', () => {
   const features = computed(() => offered.map(feature => ({
     ...feature,
     ...decision(feature),
-    preference: preferences.value[preferenceKey(feature)],
+    preference: preferences.value[feature.key],
     variant: variantOf(feature.key),
   })).filter(feature => feature.selectable))
 
   function setPreference(key: string, value: boolean | undefined) {
     const feature = offered.find(feature => feature.key === key)
-    if (!feature || !decision(feature).selectable)
+    if (!feature)
       return
-    const storageKey = preferenceKey(feature)
-    if (preferences.value[storageKey] === value)
+    if (preferences.value[key] === value)
       return
 
     const next = { ...preferences.value }
     if (value === undefined)
-      delete next[storageKey]
+      delete next[key]
     else
-      next[storageKey] = value
+      next[key] = value
     preferences.value = next
   }
 
@@ -90,48 +73,5 @@ export const useFeatureFlagsStore = defineStore('feature-flags', () => {
     return decision(feature).enabled
   }
 
-  async function refresh() {
-    const version = ++requestVersion
-    request?.abort()
-    request = new AbortController()
-    policies.value = []
-    loading.value = true
-    error.value = undefined
-    try {
-      const response = await cloudFetch('/v1/feature-flags', {
-        signal: AbortSignal.any([request.signal, AbortSignal.timeout(10_000)]),
-      })
-      if (!response.ok)
-        throw new Error(`Feature policy request failed (${response.status})`)
-      const result = parse(featureFlagResponseSchema, await response.json())
-      if (version === requestVersion)
-        policies.value = result.flags
-    }
-    catch (cause) {
-      if (version === requestVersion)
-        error.value = errorMessageFrom(cause) ?? 'Feature policy request failed'
-    }
-    finally {
-      if (version === requestVersion)
-        loading.value = false
-    }
-  }
-
-  watch([() => auth.sessionVersion, () => auth.user?.id, () => auth.token], () => {
-    requestVersion++
-    request?.abort()
-    policies.value = []
-    error.value = undefined
-  }, { flush: 'sync' })
-
-  watch([() => auth.sessionVersion, () => auth.user?.id, () => auth.token], () => {
-    void refresh()
-  }, { immediate: true })
-
-  onScopeDispose(() => {
-    requestVersion++
-    request?.abort()
-  })
-
-  return { features, loading, error, setPreference, isEnabled, variantOf, setVariant, refresh }
+  return { features, setPreference, isEnabled, variantOf, setVariant }
 })

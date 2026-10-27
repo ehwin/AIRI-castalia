@@ -424,10 +424,16 @@ function toGenerator(model: Parameters, options: GeneratorOptions): Generator<nu
     .slice(start, start + model.options.order)
     .map(frame => [...frame])
   let state = sampleCategorical(model.posteriorProbabilities[start], random)
+  let firstFrame = true
 
   function next(generateOptions?: GenerateOptions): Frame<number> {
     const noiseScale = generateOptions?.noiseScale ?? 1
-    state = sampleCategorical(model.transitionProbabilities[state], random)
+    // The posterior at `start` is the state of the first frame generated
+    // from this history. Apply the transition only after that frame so the
+    // generated state and its AR emission stay time-aligned.
+    if (!firstFrame)
+      state = sampleCategorical(model.transitionProbabilities[state], random)
+    firstFrame = false
     const stateModel = model.states[state]
     const feature = createAutoregressiveFeature(history, model.options.order, model.sourceModel.channelCount)
     const prediction = predictAutoregressiveValues(stateModel.coefficients, feature)

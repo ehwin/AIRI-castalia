@@ -8,7 +8,7 @@
     "email": "airi@moeru.ai",
     "url": "https://github.com/moeru-ai"
   },
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "scripts": {
     "build": "vite build",
     "dev": "vite --host",
@@ -64,7 +64,6 @@
     "@xsai/stream-transcription": "catalog:",
     "@xsai/utils-chat": "catalog:",
     "animejs": "catalog:",
-    "better-auth": "catalog:",
     "colorjs.io": "catalog:",
     "culori": "catalog:",
     "d3": "catalog:",
@@ -75,7 +74,6 @@
     "embla-carousel-vue": "catalog:",
     "es-toolkit": "catalog:",
     "gpuu": "catalog:",
-    "hono": "catalog:",
     "html2canvas": "catalog:",
     "jszip": "catalog:",
     "localforage": "catalog:",

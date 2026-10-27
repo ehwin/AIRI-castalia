@@ -65,7 +65,6 @@ The following table contains every stage-ui component without direct coverage. C
 | Component | Status |
 | --- | --- |
 | [animations/Replayable.vue](../../../packages/stage-ui/src/components/animations/Replayable.vue) | Needs a dedicated scenario and fixture |
-| [auth/SignInPanel.vue](../../../packages/stage-ui/src/components/auth/SignInPanel.vue) | Needs a dedicated scenario and fixture |
 | [data-pane/color-picker.vue](../../../packages/stage-ui/src/components/data-pane/color-picker.vue) | Composed in an existing story |
 | [data-pane/container.vue](../../../packages/stage-ui/src/components/data-pane/container.vue) | Needs a dedicated scenario and fixture |
 | [data-pane/pane.vue](../../../packages/stage-ui/src/components/data-pane/pane.vue) | Needs a dedicated scenario and fixture |
@@ -167,7 +166,7 @@ Regenerate the snapshot after concurrent component changes. The audit script rep
 
 ## Remaining work
 
-- Add fixtures for the remaining business stories. Authentication, providers, model renderers, and settings require their real runtime boundaries.
+- Add fixtures for the remaining business stories. Providers, model renderers, and settings require their real runtime boundaries.
 - Resolve the unused ComboboxOption export.
 - Migrate the reviewed control candidates in focused changes. Verify keyboard behavior, theme colors, and mobile hit areas.
 - Extend static analysis when auto-imported or dynamic components need complete coverage.

@@ -24,8 +24,6 @@ export type ProviderMode = 'official' | 'custom' | 'unknown'
 export type ChatActivationFailureStage = 'provider_config' | 'model_list' | 'message_send' | 'llm_response' | 'tts'
 export type VoiceType = 'official_default' | 'official_selected' | 'custom_configured' | 'voice_pack' | 'unknown'
 export type VoiceAnalyticsSource = 'settings' | 'onboarding' | 'chat_auto_tts' | 'manual_preview'
-export type OfficialTtsExposureSource = 'settings' | 'onboarding' | 'post_first_chat' | 'chat_controls'
-export type FluxBalanceBucket = 'zero' | '1_100' | '101_1000' | '1001_10000' | '10000_plus' | 'unknown'
 export type FeedbackSource = 'app' | 'discord' | 'qq' | 'github' | 'email' | 'other'
 export type FeedbackCategory = 'provider_config' | 'model_list' | 'chat_activation' | 'tts' | 'voice_input' | 'performance' | 'payment' | 'ui_ux' | 'crash' | 'update' | 'live2d' | 'desktop_window' | 'mobile' | 'unknown'
 export type FeedbackSeverity = 'blocker' | 'major' | 'minor' | 'suggestion'
@@ -38,20 +36,6 @@ export type AiUsageSource = 'reported' | 'estimated' | 'unavailable'
 /** Stable, low-cardinality actions emitted by the Electron controls island. */
 export type { ControlsIslandAction } from '../libs/product-signals/events/controls-island'
 
-/**
- * Full stage vocabulary of the cross-surface `oauth_callback_failed` event.
- * The web/PKCE stages fire from `pages/auth/callback.vue`; the electron
- * relay stages fire from ui-server-auth's `electron-callback.vue`, which
- * imports this type so the two emitters can't drift apart silently.
- */
-export type OauthCallbackFailureStage
-  = | 'provider_error'
-    | 'missing_code_or_state'
-    | 'missing_flow_state'
-    | 'token_exchange_failed'
-    | 'parse'
-    | 'relay_unreachable'
-
 interface ChatRoundCorrelationProperties {
   conversation_id: string
   round_id: string
@@ -62,12 +46,6 @@ interface TtsVoiceBaseProperties {
   tts_provider_id: string
   tts_model_id: string
   source: VoiceAnalyticsSource
-}
-
-interface OfficialTtsBaseProperties {
-  tts_provider_id: string
-  tts_model_id: string
-  source: OfficialTtsExposureSource
 }
 
 interface VoiceInputBaseProperties {
@@ -146,144 +124,6 @@ export function useAnalytics() {
       return
 
     analytics.recordFirstMessage()
-  }
-
-  /**
-   * Pricing funnel — step 1.
-   *
-   * Use when:
-   * - Any UI surface that shows Flux packages / subscription plans renders.
-   *   Current surfaces: `settings_flux` (in-app billing settings). Future
-   *   surfaces (a public pricing landing page, an upsell modal) just pass a
-   *   different `entry_surface` so the funnel split stays clean.
-   *
-   * Expects:
-   * - `entry_surface` is a stable identifier — don't rename without coordinating
-   *   OpenPanel funnel definitions in `docs/ai-context/metrics-ownership.md`.
-   */
-  function trackPricingViewed(entrySurface: string, planPeriod?: 'monthly' | 'annual' | 'one_time') {
-    if (!canCapture())
-      return
-    captureAnalyticsEvent('pricing_page_viewed', { entry_surface: entrySurface, ...(planPeriod && { plan_period: planPeriod }) })
-  }
-
-  /**
-   * Pricing funnel — step 2. Fires when the user picks a plan/package but
-   * hasn't yet kicked off the Stripe checkout redirect.
-   */
-  function trackPlanSelected(planId: string, properties: { entry_surface: string, price_minor_unit?: number, currency?: string }) {
-    if (!canCapture())
-      return
-    captureAnalyticsEvent('plan_selected', { plan_id: planId, ...properties })
-  }
-
-  /**
-   * Pricing funnel — step 3. Fires right before redirecting to Stripe
-   * checkout (i.e. the SPA has the `checkout_session_id` and is about to
-   * `window.location.href = data.url`).
-   *
-   * Expects:
-   * - Caller awaits or fire-and-forgets this call immediately before
-   *   `window.location.href = ...`. `beforeNavigation` lets the installed
-   *   adapter choose a delivery mechanism that survives document unload.
-   *
-   * The funnel terminator `payment_completed` is forwarded to OpenPanel
-   * server-side by the product-events service, keyed by the Better Auth
-   * user id.
-   */
-  function trackCheckoutStarted(planId: string, properties: { entry_surface: string, checkout_session_id?: string, price_minor_unit?: number, currency?: string }) {
-    if (!canCapture())
-      return
-    captureAnalyticsEvent(
-      'checkout_started',
-      { plan_id: planId, ...properties },
-      { beforeNavigation: true },
-    )
-  }
-
-  function trackPaywallSeen(properties: {
-    entry_surface: string
-    reason: 'manual_topup' | 'insufficient_balance' | 'checkout_recovery' | 'unknown'
-    flux_balance_bucket: FluxBalanceBucket
-  }) {
-    if (!canCapture())
-      return
-    captureAnalyticsEvent('paywall_seen', {
-      entry_surface: properties.entry_surface,
-      app_surface: getConversationAnalyticsSurface(),
-      reason: properties.reason,
-      flux_balance_bucket: properties.flux_balance_bucket,
-    })
-  }
-
-  /**
-   * OAuth/OIDC callback landing failed before a session existed. Stage
-   * values map 1:1 to the guard branches in `pages/auth/callback.vue` so
-   * the funnel can tell a provider-side denial from a lost PKCE state.
-   */
-  function trackOauthCallbackFailed(properties: {
-    stage: Extract<OauthCallbackFailureStage, 'provider_error' | 'missing_code_or_state' | 'missing_flow_state' | 'token_exchange_failed'>
-  }) {
-    if (!canCapture())
-      return
-    captureAnalyticsEvent('oauth_callback_failed', {
-      ...properties,
-      app_surface: getConversationAnalyticsSurface(),
-    })
-  }
-
-  // ─── Account lifecycle (same event names as apps/ui-server-auth's
-  // analytics module — both surfaces feed one OpenPanel series) ───────────
-
-  function trackPasswordChanged() {
-    if (!canCapture())
-      return
-    captureAnalyticsEvent('password_changed', { app_surface: getConversationAnalyticsSurface() })
-  }
-
-  function trackPasswordResetRequested() {
-    if (!canCapture())
-      return
-    captureAnalyticsEvent('password_reset_requested', { app_surface: getConversationAnalyticsSurface() })
-  }
-
-  function trackOauthProviderLinkStarted(properties: { provider: string }) {
-    if (!canCapture())
-      return
-    // The only caller (`useLinkedAccounts.link`) navigates to the OAuth
-    // consent page right after this hook — the batched queue would race
-    // the unload and drop the event, same as `trackCheckoutStarted`.
-    captureAnalyticsEvent(
-      'oauth_provider_link_started',
-      {
-        ...properties,
-        app_surface: getConversationAnalyticsSurface(),
-      },
-      { beforeNavigation: true },
-    )
-  }
-
-  function trackOauthProviderUnlinked(properties: { provider: string }) {
-    if (!canCapture())
-      return
-    captureAnalyticsEvent('oauth_provider_unlinked', {
-      ...properties,
-      app_surface: getConversationAnalyticsSurface(),
-    })
-  }
-
-  /** Records explicit deletion intent before the server accepts or rejects the request. */
-  function trackAccountDeletionRequested() {
-    if (!canCapture())
-      return
-    captureAnalyticsEvent('account_deletion_requested', { app_surface: getConversationAnalyticsSurface() })
-  }
-
-  /** Records server-confirmed deletion while honoring the same analytics consent as other events. */
-  function trackAccountDeletionCompleted() {
-    if (!canCapture())
-      return
-    captureAnalyticsEvent('account_deletion_completed', { app_surface: getConversationAnalyticsSurface() })
   }
 
   function trackOnboardingStarted(properties: { entry: ProductAnalyticsEntry }) {
@@ -446,7 +286,7 @@ export function useAnalytics() {
     })
   }
 
-  function trackChatSessionSelected(properties: { source: 'sessions_drawer', message_count: number, cloud_synced: boolean }) {
+  function trackChatSessionSelected(properties: { source: 'sessions_drawer', message_count: number }) {
     if (!canCapture())
       return
     captureAnalyticsEvent('chat_session_selected', {
@@ -486,7 +326,6 @@ export function useAnalytics() {
     conversation_id: string
     source: ConversationEventSource
     character_id?: string
-    cloud_synced: boolean
   }) {
     if (!canCapture())
       return
@@ -523,7 +362,6 @@ export function useAnalytics() {
   function trackConversationDeleted(properties: {
     conversation_id: string
     message_count: number
-    cloud_synced: boolean
   }) {
     if (!canCapture())
       return
@@ -686,15 +524,6 @@ export function useAnalytics() {
     })
   }
 
-  function trackOfficialTtsExposed(properties: OfficialTtsBaseProperties) {
-    if (!canCapture())
-      return
-    captureAnalyticsEvent('official_tts_exposed', {
-      ...properties,
-      app_surface: getConversationAnalyticsSurface(),
-    })
-  }
-
   function trackPresetUsed(properties: {
     preset_id: string
     preset_type: 'character' | 'stage_model' | 'voice' | 'background' | 'unknown'
@@ -703,35 +532,6 @@ export function useAnalytics() {
     if (!canCapture())
       return
     captureAnalyticsEvent('preset_used', {
-      ...properties,
-      app_surface: getConversationAnalyticsSurface(),
-    })
-  }
-
-  function trackOfficialTtsPreviewStarted(properties: Omit<TtsVoiceBaseProperties, 'source'> & {
-    voice_id: string
-    voice_type: VoiceType
-    voice_pack_id?: string
-    source: Extract<VoiceAnalyticsSource, 'manual_preview'>
-  }) {
-    if (!canCapture())
-      return
-    captureAnalyticsEvent('official_tts_preview_started', {
-      ...properties,
-      app_surface: getConversationAnalyticsSurface(),
-    })
-  }
-
-  function trackOfficialTtsPreviewSucceeded(properties: Omit<TtsVoiceBaseProperties, 'source'> & {
-    voice_id: string
-    voice_type: VoiceType
-    voice_pack_id?: string
-    source: Extract<VoiceAnalyticsSource, 'manual_preview'>
-    duration_ms: number
-  }) {
-    if (!canCapture())
-      return
-    captureAnalyticsEvent('official_tts_preview_succeeded', {
       ...properties,
       app_surface: getConversationAnalyticsSurface(),
     })
@@ -842,20 +642,6 @@ export function useAnalytics() {
     if (!canCapture())
       return
     captureAnalyticsEvent('onboarding_skipped', { at_step })
-  }
-
-  // ─── Monetization (client side) ──────────────────────────────────────
-
-  function trackFluxLowWarningShown(properties: { balance: number, threshold: number }) {
-    if (!canCapture())
-      return
-    captureAnalyticsEvent('flux_low_warning_shown', properties)
-  }
-
-  function trackFluxTopupClicked(properties: { balance: number, entry_surface: string }) {
-    if (!canCapture())
-      return
-    captureAnalyticsEvent('flux_topup_clicked', properties)
   }
 
   function trackQuotaLimitReached(properties: {
@@ -990,17 +776,6 @@ export function useAnalytics() {
     privacyPolicyUrl,
     trackProviderClick,
     trackFirstMessage,
-    trackPricingViewed,
-    trackPlanSelected,
-    trackCheckoutStarted,
-    trackPaywallSeen,
-    trackOauthCallbackFailed,
-    trackPasswordChanged,
-    trackPasswordResetRequested,
-    trackOauthProviderLinkStarted,
-    trackOauthProviderUnlinked,
-    trackAccountDeletionRequested,
-    trackAccountDeletionCompleted,
     trackOnboardingStarted,
     trackOnboardingCompleted,
     trackCharacterCreated,
@@ -1043,9 +818,6 @@ export function useAnalytics() {
     trackPresetUsed,
     trackSettingsChanged,
     trackSupportContacted,
-    trackOfficialTtsExposed,
-    trackOfficialTtsPreviewStarted,
-    trackOfficialTtsPreviewSucceeded,
 
     trackAutonomousGenerateText,
 
@@ -1060,8 +832,6 @@ export function useAnalytics() {
     trackOnboardingStepCompleted,
     trackOnboardingSkipped,
 
-    trackFluxLowWarningShown,
-    trackFluxTopupClicked,
     trackQuotaLimitReached,
     trackUpgradeClicked,
     trackFeatureUsed,

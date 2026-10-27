@@ -3,6 +3,7 @@
   "type": "module",
   "private": true,
   "description": "Expose remote and bundled Sherpaw speech models to Vite applications",
+  "license": "AGPL-3.0-or-later",
   "exports": {
     ".": {
       "types": "./dist/index.d.mts",

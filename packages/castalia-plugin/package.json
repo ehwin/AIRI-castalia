@@ -1,0 +1,29 @@
+{
+  "name": "@proj-airi/castalia-plugin",
+  "type": "module",
+  "version": "0.12.0",
+  "private": true,
+  "description": "Isolated Castalia Anima self-state and emotion plugin for AIRI",
+  "license": "AGPL-3.0-or-later",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./memory": {
+      "types": "./src/memory.ts",
+      "default": "./src/memory.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:run": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@vueuse/core": "catalog:",
+    "pinia": "catalog:",
+    "vue": "catalog:"
+  },
+  "devDependencies": {}
+}

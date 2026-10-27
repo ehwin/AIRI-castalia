@@ -46,4 +46,27 @@ describe('live2d MAGIC motion', () => {
 
     scope.stop()
   })
+
+  it('fits AR-HMM with the selected production settings', async () => {
+    const scope = effectScope()
+    const motion = scope.run(() => useLive2DMotionMagic({
+      dataset: createDataset(),
+      method: 'ar-hmm',
+      arHmmSettings: { stateCount: 3, order: 4, noiseScale: 0.6 },
+      publishPose: vi.fn(),
+      releasePose: vi.fn(),
+      now: () => 1,
+      random: () => 0.5,
+    }))!
+
+    await motion.initialize()
+
+    const model = motion.model.value
+    expect(model?.method).toBe('ar-hmm')
+    if (model?.method === 'ar-hmm') {
+      expect(model.diagnostics.stateCount).toBe(3)
+      expect(model.diagnostics.featureCount).toBe(1 + 4 * model.diagnostics.channelCount)
+    }
+    scope.stop()
+  })
 })

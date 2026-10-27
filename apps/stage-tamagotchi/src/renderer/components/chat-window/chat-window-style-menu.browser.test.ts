@@ -35,8 +35,6 @@ beforeEach(() => {
   // The experiments catalog offers the fullscreen mode only in the desktop app, and it reads the environment when the
   // store starts.
   vi.stubEnv('RUNTIME_ENVIRONMENT', 'electron')
-  // The experiments store asks the Cloud for account policies. The local experiments need none.
-  vi.stubGlobal('fetch', async () => Response.json({ flags: [] }))
   localStorage.clear()
   pinia = createPinia()
 })

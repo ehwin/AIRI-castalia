@@ -1,42 +1,22 @@
+/**
+ * The locales this build ships. Only the source locale and the one translated
+ * locale remain. A browser locale outside this map falls back to English.
+ */
 export const all = {
   'en': 'English',
-  'es': 'Español',
-  'fr': 'Français',
-  'ja': '日本語',
-  'ko': '한국어',
-  'ru': 'Русский',
-  'th': 'ไทย',
-  'vi': 'Tiếng Việt',
   'zh-Hans': '简体中文',
-  'zh-Hant': '繁體中文',
 }
 
 export const localeRemap: Record<string, string> = {
   'zh-CN': 'zh-Hans',
-  'zh-TW': 'zh-Hant',
-  'zh-HK': 'zh-Hant',
-  'zh-Hant': 'zh-Hant',
+  'zh-TW': 'zh-Hans',
+  'zh-HK': 'zh-Hans',
+  'zh-Hant': 'zh-Hans',
   'zh-Hans': 'zh-Hans',
   'en': 'en',
   'en-US': 'en',
   'en-GB': 'en',
   'en-AU': 'en',
-  'es': 'es',
-  'es-ES': 'es',
-  'es-MX': 'es',
-  'es-AR': 'es',
-  'fr': 'fr',
-  'fr-FR': 'fr',
-  'ja': 'ja',
-  'ja-JP': 'ja',
-  'ko': 'ko',
-  'ko-KR': 'ko',
-  'ru': 'ru',
-  'ru-RU': 'ru',
-  'th': 'th',
-  'th-TH': 'th',
-  'vi': 'vi',
-  'vi-VN': 'vi',
 }
 
 export function resolveSupportedLocale(

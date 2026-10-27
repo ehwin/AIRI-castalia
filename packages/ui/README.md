@@ -68,7 +68,7 @@ import { Button } from '@proj-airi/ui'
 
 ## License
 
-[MIT](../../LICENSE)
+[AGPL-3.0-or-later](../../LICENSE)
 
 ## Swipe actions
 

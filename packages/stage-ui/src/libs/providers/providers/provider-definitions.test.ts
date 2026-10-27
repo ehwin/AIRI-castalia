@@ -2,7 +2,7 @@ import type { ProviderTranslator } from '@proj-airi/provider-inference'
 
 import type { StageProviderId } from './registry'
 
-import { describe, expect, expectTypeOf, it } from 'vitest'
+import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { z } from 'zod'
 
 import { providerAliyunNlsTranscription } from './aliyun-nls'
@@ -43,7 +43,6 @@ describe('migrated provider definitions', () => {
 
   it('exposes a closed provider id union to stage-ui consumers', () => {
     expectTypeOf<'openai'>().toExtend<StageProviderId>()
-    expectTypeOf<'official-provider'>().toExtend<StageProviderId>()
     expectTypeOf<'apple-vision'>().toExtend<StageProviderId>()
     expectTypeOf<string>().not.toExtend<StageProviderId>()
   })
@@ -144,14 +143,22 @@ describe('migrated provider definitions', () => {
   })
 
   it('accepts each Sherpaw model and rejects unsupported model IDs', async () => {
-    const definition = getRequiredProvider('sherpaw-transcription')
-    const schema = await definition.createProviderConfig({ t: translate })
+    // The default language filter follows the interface language, so pin it:
+    // the assertion must not depend on the host locale (zh-CN yields "zh").
+    vi.stubGlobal('navigator', { language: 'en-US' })
+    try {
+      const definition = getRequiredProvider('sherpaw-transcription')
+      const schema = await definition.createProviderConfig({ t: translate })
 
-    expect(z.parse(schema, {})).toEqual({ model: 'paraformer-zh-en', modelLanguageFilter: 'en' })
-    for (const model of ['paraformer-zh-en', 'zipformer-multilingual', 'x-asr-zh-en-480ms-int8'])
-      expect(z.parse(schema, { model })).toEqual({ model, modelLanguageFilter: 'en' })
-    expect(z.safeParse(schema, { model: 'zipformer-zh-en' }).success).toBe(false)
-    expect(z.safeParse(schema, { model: 'unknown-model' }).success).toBe(false)
+      expect(z.parse(schema, {})).toEqual({ model: 'paraformer-zh-en', modelLanguageFilter: 'en' })
+      for (const model of ['paraformer-zh-en', 'zipformer-multilingual', 'x-asr-zh-en-480ms-int8'])
+        expect(z.parse(schema, { model })).toEqual({ model, modelLanguageFilter: 'en' })
+      expect(z.safeParse(schema, { model: 'zipformer-zh-en' }).success).toBe(false)
+      expect(z.safeParse(schema, { model: 'unknown-model' }).success).toBe(false)
+    }
+    finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('describes Web Speech API streaming support without runtime state', async () => {

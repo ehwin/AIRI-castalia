@@ -10,7 +10,7 @@ The images share the cyan hair, angular yellow clip, loop ahoge, sailor collar, 
 - [Official repository banner](https://github.com/moeru-ai/airi/blob/87230a0d4f33eefd2b976c41c4a989b0bf1046ce/docs/content/public/banner-light-1280x640.avif), used to cross-check the same character.
 
 Character design attribution remains with Project AIRI, Moeru AI, and their artists.
-These generated illustrations are contributed under the repository's MIT license.
+These generated illustrations are contributed under the repository's AGPL-3.0-or-later license.
 This contribution does not redistribute the original Live2D model or reference media.
 
 ## Generation

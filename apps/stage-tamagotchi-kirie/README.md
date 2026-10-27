@@ -45,7 +45,7 @@ Spotlight opens through its global shortcut and has no in-app entry point.
 
 ## Scope and limitations
 
-The desktop host supplies native windows, Spotlight, permissions, authentication, desktop operations, and shared browser storage.
+The desktop host supplies native windows, Spotlight, permissions, desktop operations, and shared browser storage.
 Model-specific rendering, assets, and media for Live2D, VRM, and MMD require separate verification.
 
 The following work remains deferred:
@@ -63,7 +63,7 @@ The workspace Node.js command is not a production sidecar.
 The plugin inspector reports unavailable until its host operations exist.
 
 System notification clicks and Windows behavior require native verification with the selected dependency versions.
-Physical input, multiple displays, mixed DPI, and authentication require separate platform checks.
+Physical input, multiple displays, and mixed DPI require separate platform checks.
 Linux system notifications remain outside the supported scope.
 
 ## Checks and build

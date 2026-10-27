@@ -9,7 +9,6 @@ public partial class SettingsWindow : Window
     private KirieEventaContextHandle? _eventa;
     private GdKiriePlatformHost? _platform;
     private WebViewPermissionHandler? _permissions;
-    private IDisposable? _authRegistration;
     private IDisposable? _microphonePermissionRegistration;
     private Action? _detachWidgets;
     private IDisposable? _developerToolsRegistration;
@@ -26,7 +25,6 @@ public partial class SettingsWindow : Window
         KirieEventaJsonRegistry registry,
         string rendererUrl,
         string initialRoute,
-        AuthService auth,
         MicrophonePermissionService microphonePermissions,
         DeveloperToolsService developerTools,
         SpotlightHost spotlight,
@@ -53,7 +51,6 @@ public partial class SettingsWindow : Window
         _eventa = _kirie.CreateEventaContext(registry);
         _platform = GdKiriePlatform.Attach(_eventa.Context, this);
         _detachWidgets = widgets.Attach(_eventa.Context);
-        _authRegistration = auth.Attach(_eventa.Context);
         _microphonePermissionRegistration = microphonePermissions.Attach(_eventa.Context);
         _developerToolsRegistration = developerTools.Attach(_eventa.Context);
         _spotlightShortcutRegistration = spotlight.Attach(_eventa.Context);
@@ -106,7 +103,6 @@ public partial class SettingsWindow : Window
         _spotlightShortcutRegistration?.Dispose();
         _developerToolsRegistration?.Dispose();
         _microphonePermissionRegistration?.Dispose();
-        _authRegistration?.Dispose();
         _detachWidgets?.Invoke();
         _permissions?.Dispose();
         _platform?.Dispose();

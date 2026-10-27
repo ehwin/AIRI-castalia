@@ -8,4 +8,4 @@ A set of UI transition animations for fade-in / fade-out of scenes.
 
 ## License
 
-[MIT](../../LICENSE)
+[AGPL-3.0-or-later](../../LICENSE)
