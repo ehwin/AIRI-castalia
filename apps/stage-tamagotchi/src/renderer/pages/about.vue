@@ -39,8 +39,10 @@ const {
 } = useAnalytics()
 
 const isDisabled = computed(() => updateState.value.status === 'disabled')
-// Only an install that a store or a package manager updates reports `disabled`. Flatpak and Nix are known only at runtime, so the Steam build flag is not enough.
-const isExternallyUpdated = computed(() => import.meta.env.VITE_DISTRIBUTION === 'steam' || isDisabled.value)
+// Every build of this tree reports `disabled`: the main process passes `enabled: false`, because
+// this fork has no release feed of its own. A Steam install is updated by Steam, not by the app.
+const isSteamDistribution = import.meta.env.VITE_DISTRIBUTION === 'steam'
+const isExternallyUpdated = computed(() => isSteamDistribution || isDisabled.value)
 const isLatestVersion = computed(() => {
   return updateState.value.status === 'not-available' && !isDisabled.value
 })
@@ -398,11 +400,13 @@ onMounted(() => {
                       ? t('tamagotchi.stage.about.update.actions.checking')
                       : isLatestVersion
                         ? t('tamagotchi.stage.about.update.actions.latest-version')
-                        : isDisabled
+                        : isDisabled && isSteamDistribution
                           ? t('tamagotchi.stage.about.update.actions.managed-by-store')
-                          : isError
-                            ? t('tamagotchi.stage.about.update.actions.retry-check')
-                            : t('tamagotchi.stage.about.update.actions.check-for-updates')"
+                          : isDisabled
+                            ? t('tamagotchi.stage.about.update.actions.not-provided')
+                            : isError
+                              ? t('tamagotchi.stage.about.update.actions.retry-check')
+                              : t('tamagotchi.stage.about.update.actions.check-for-updates')"
                     @click="checkForUpdates()"
                   />
                 </div>

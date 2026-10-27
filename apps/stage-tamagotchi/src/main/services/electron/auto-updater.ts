@@ -278,6 +278,10 @@ export interface AutoUpdaterOptions {
  *   Flatpak sets `FLATPAK_ID` in each sandbox. Flathub updates the app with `flatpak update`.
  * - The Nix package runs the app from the read-only Nix store, so the updater cannot replace it.
  *   The `nix/package.nix` launcher sets `AIRI_DISTRIBUTION=nix`. Nix updates the app with a new derivation.
+ *
+ * `src/main/index.ts` passes `enabled: false` for every install, because this fork has no release
+ * feed of its own. So nothing reads this function to decide the wiring. The list above describes the
+ * packaging paths. It does not gate them.
  */
 export function isExternallyUpdatedInstall() {
   return import.meta.env.VITE_DISTRIBUTION === 'steam'

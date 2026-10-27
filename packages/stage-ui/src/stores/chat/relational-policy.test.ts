@@ -125,6 +125,28 @@ describe('relational policy persistence', () => {
     expect(switched?.text).not.toBe(deep?.text)
   })
 
+  it('counts one signal per persona per user turn across a switch back', () => {
+    installFakeStorage()
+    const provider = createRelationalPolicyContextProvider()
+    const depthOf = (text?: string) => Number(/Depth: (\d) of 4/.exec(text ?? '')?.[1])
+
+    provider('session-1', { id: 'a', text: '我害怕一个人待着' }, 'persona-A')
+    provider('session-1', { id: 'b', text: '我其实很喜欢猫' }, 'persona-A')
+    provider('session-1', { id: 'b', text: '我其实很喜欢猫' }, 'persona-B')
+    provider('session-1', { id: 'b', text: '我其实很喜欢猫' }, 'persona-A')
+    const afterSwitch = provider('session-1', { id: 'c', text: '我其实很喜欢猫' }, 'persona-A')
+
+    // The same three turns without a switch. Persona-A must end where an
+    // undisturbed persona ends, because the switch back re-sent an id it
+    // already counted.
+    provider('session-2', { id: 'a', text: '我害怕一个人待着' }, 'persona-C')
+    provider('session-2', { id: 'b', text: '我其实很喜欢猫' }, 'persona-C')
+    const control = provider('session-2', { id: 'c', text: '我其实很喜欢猫' }, 'persona-C')
+
+    expect(depthOf(control?.text)).toBeGreaterThan(1)
+    expect(depthOf(afterSwitch?.text)).toBe(depthOf(control?.text))
+  })
+
   it('drops the oldest session once it tracks 64', () => {
     const store = installFakeStorage()
     const provider = createRelationalPolicyContextProvider()

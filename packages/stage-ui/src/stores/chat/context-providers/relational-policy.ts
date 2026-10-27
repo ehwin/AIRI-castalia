@@ -15,10 +15,17 @@ const MAX_TRACKED_TURNS = 64
 
 interface TrackedTurn {
   messageId: string
-  /** The persona this turn advanced. A turn never lends its depth to another. */
-  ownerId: string
   relationship: RelationshipState
   text: string
+}
+
+/**
+ * One cache slot per session and persona. The persona lives in the key, so a
+ * turn never lends its depth to another persona, and a switch back to a persona
+ * that already counted this user turn reuses its slot instead of counting again.
+ */
+function turnKey(sessionId: string, ownerId: string): string {
+  return `${sessionId}\u0000${ownerId}`
 }
 
 function isRelationshipState(value: unknown): value is RelationshipState {
@@ -58,8 +65,9 @@ function writeStoredRelationship(ownerId: string, relationship: RelationshipStat
  * Turns the relational policy into one context message per user turn.
  *
  * The policy changes every turn, so it stays out of the cacheable system prompt.
- * A user turn advances depth once. Later steps of the same turn reuse the text.
- * `ownerId` is the persona: its depth survives a reload and a new session.
+ * A user turn advances depth once per persona. Later steps of the same turn
+ * reuse the text. `ownerId` is the persona: its depth survives a reload and a
+ * new session.
  */
 export function createRelationalPolicyContextProvider() {
   const turns = new Map<string, TrackedTurn>()
@@ -72,26 +80,24 @@ export function createRelationalPolicyContextProvider() {
     if (!lastUser?.id || !lastUser.text)
       return undefined
 
-    let turn = turns.get(sessionId)
+    let turn = turns.get(turnKey(sessionId, ownerId))
     // A new persona must not reuse the previous persona's turn, even when the
-    // renderer sends the same user message id again.
-    if (turn?.messageId !== lastUser.id || turn?.ownerId !== ownerId) {
+    // renderer sends the same user message id again. The key carries the persona.
+    if (turn?.messageId !== lastUser.id) {
       const policy = createRelationalPolicy({
         now: Date.now(),
         // The session cache only stands in for storage when the persona matches.
         // Storage is per persona, so a switch inside one session starts fresh.
-        relationship: readStoredRelationship(ownerId)
-          ?? (turn?.ownerId === ownerId ? turn.relationship : undefined),
+        relationship: readStoredRelationship(ownerId) ?? turn?.relationship,
         ...inferRelationalSignals(lastUser.text),
         candidateHypotheses: [],
       })
       turn = {
         messageId: lastUser.id,
-        ownerId,
         relationship: policy.relationship,
         text: renderRelationalPolicyContext(policy),
       }
-      turns.set(sessionId, turn)
+      turns.set(turnKey(sessionId, ownerId), turn)
       if (turns.size > MAX_TRACKED_TURNS) {
         const oldest = turns.keys().next()
         if (!oldest.done)
