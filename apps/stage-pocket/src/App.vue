@@ -26,6 +26,7 @@ import { toast, Toaster } from 'vue-sonner'
 
 import OnboardingPermissionsStep from './components/onboarding/step-permissions.vue'
 
+import { installRemoteChat } from './modules/remote-chat'
 import { getHostWebSocketConnector } from './modules/websocket-bridge'
 
 const contextBridgeStore = useContextBridgeStore()
@@ -97,7 +98,12 @@ async function loadStartup() {
     await startup.run('modelIndex', () => displayModelsStore.initialize())
     await startup.run('card', () => cardStore.initialize())
     await startup.run('services', () => {
-      void serverChannelStore.initialize({ possibleEvents: ['ui:configure'], connector: getHostWebSocketConnector }).catch(error => console.error('Mods server initialization failed:', error))
+      void serverChannelStore.initialize({
+        possibleEvents: ['ui:configure', 'output:gen-ai:chat:message', 'output:gen-ai:chat:complete'],
+        connector: getHostWebSocketConnector,
+      }).catch(error => console.error('Mods server initialization failed:', error))
+      // Turns run on the desktop, so this device never answers one itself.
+      installRemoteChat()
       contextBridgeStore.initialize()
       characterOrchestratorStore.initialize(syncedPinia)
     })

@@ -72,6 +72,23 @@ interface ForkOptions {
   hidden?: boolean
 }
 
+/**
+ * Runs a chat turn on another device.
+ *
+ * A host installs one to forward every send to the remote instance. The local orchestrator stays out of the turn,
+ * so the two instances never answer the same message twice. A host that never installs one keeps the local path.
+ */
+export interface RemoteChatTransport {
+  send: (payload: ChatSendPayload) => Promise<ChatSendResult>
+}
+
+let remoteChatTransport: RemoteChatTransport | null = null
+
+/** Installs, or with `null` clears, the remote chat transport for every later send. */
+export function setRemoteChatTransport(transport: RemoteChatTransport | null) {
+  remoteChatTransport = transport
+}
+
 /** A serializable chat request that any application context can send to the leader. */
 export interface ChatSendPayload {
   /** Stable identity for transport retries and persistence acknowledgment. */
@@ -1373,6 +1390,17 @@ export const useChatStore = defineStore('chat', () => {
 
   /** Sends one serializable chat request through the elected leader. */
   async function send(payload: ChatSendPayload): Promise<ChatSendResult> {
+    // A remote turn owns its own history and memory on the host, so the local orchestrator must not run it too.
+    if (remoteChatTransport) {
+      try {
+        return await remoteChatTransport.send(payload)
+      }
+      catch (error) {
+        appendSendError(payload.sessionId, error)
+        throw error
+      }
+    }
+
     try {
       return await executeSend(payload)
     }
