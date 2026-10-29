@@ -22,6 +22,69 @@ function createInput(now: number, lastSpokeAt: number | null): AutonomyInput {
 }
 
 describe('speech ticker', () => {
+  it('does not spend the cooldown when the gate refuses the message', () => {
+    const speak = vi.fn()
+    const onGated = vi.fn()
+    const gate = vi.fn(() => ({ allow: false, reason: 'quiet-hours' }))
+    const ticker = createSpeechTicker({
+      decide: decideAlways(true),
+      policy: { ...AUTONOMY_POLICY_DEFAULTS, random: () => 0 },
+      now: () => 9000,
+      readInput: ({ now, lastSpokeAt }) => createInput(now, lastSpokeAt),
+      speak,
+      gate,
+      onGated,
+    })
+
+    ticker.tick()
+
+    expect(speak).not.toHaveBeenCalled()
+    expect(onGated).toHaveBeenCalledWith({ allow: false, reason: 'quiet-hours' })
+    // The refusal is not an utterance, so the next tick still sees no last time.
+    expect(ticker.lastSpokeAt()).toBeNull()
+  })
+
+  it('speaks on the next tick once the gate opens', () => {
+    const speak = vi.fn()
+    let open = false
+    const ticker = createSpeechTicker({
+      decide: decideAlways(true),
+      policy: { ...AUTONOMY_POLICY_DEFAULTS, random: () => 0 },
+      now: () => 9000,
+      readInput: ({ now, lastSpokeAt }) => createInput(now, lastSpokeAt),
+      speak,
+      gate: () => (open ? { allow: true, reason: 'allowed' } : { allow: false, reason: 'quiet-hours' }),
+    })
+
+    ticker.tick()
+    expect(speak).not.toHaveBeenCalled()
+
+    open = true
+    ticker.tick()
+    expect(speak).toHaveBeenCalledTimes(1)
+    expect(ticker.lastSpokeAt()).toBe(9000)
+  })
+
+  it('refuses when the gate throws, and keeps the loop alive', () => {
+    const speak = vi.fn()
+    const onGated = vi.fn()
+    const ticker = createSpeechTicker({
+      decide: decideAlways(true),
+      policy: { ...AUTONOMY_POLICY_DEFAULTS, random: () => 0 },
+      now: () => 9000,
+      readInput: ({ now, lastSpokeAt }) => createInput(now, lastSpokeAt),
+      speak,
+      gate: () => {
+        throw new Error('gate exploded')
+      },
+      onGated,
+    })
+
+    expect(() => ticker.tick()).not.toThrow()
+    expect(speak).not.toHaveBeenCalled()
+    expect(onGated).toHaveBeenCalledWith({ allow: false, reason: 'gate-error' })
+  })
+
   it('does nothing while no persona is ready', () => {
     const speak = vi.fn()
     const ticker = createSpeechTicker({

@@ -3,6 +3,14 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
 import { SELF_INITIATED_NOTICE, SELF_INITIATED_SOURCE, toAutonomyInput } from '../../libs/self-initiated-speech/adapter'
+import {
+  createOutboundState,
+  decideOutbound,
+  OUTBOUND_POLICY_DEFAULTS,
+  recordOutbound,
+  recordOwnerMessage,
+  setPaused,
+} from '../../libs/self-initiated-speech/outbound-gate'
 import { ACTIVE_SPEAK_POLICY, AUTONOMY_POLICY_DEFAULTS, SPEAK_POLICIES } from '../../libs/self-initiated-speech/speak-decision'
 import { createSpeechTicker } from '../../libs/self-initiated-speech/ticker'
 import { useChatStore } from '../chat'
@@ -24,6 +32,22 @@ export const useSelfInitiatedSpeechStore = defineStore('self-initiated-speech', 
 
   const running = ref(false)
   let ticker: ReturnType<typeof createSpeechTicker> | undefined
+  /** Traffic control for self-initiated messages: gap, quiet hours, cap, slowdown. */
+  let outbound = createOutboundState(Date.now())
+  /** The owner message time seen at the last tick, so a new one ends the unanswered run. */
+  let lastOwnerAt: number | null = null
+  /** Topic of the message the current tick would send. It comes from the tick's own read. */
+  let currentTopic = 'idle'
+  /** Why the last tick stayed silent. The diagnostics page reads it. */
+  const lastGateReason = ref<string | undefined>(undefined)
+  const paused = ref(false)
+  const gatedCount = ref(0)
+
+  /** Turns a desire into a topic key. The same unresolved desire is one topic. */
+  function topicOf(desire: string | null | undefined): string {
+    const key = String(desire ?? '').trim().toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '')
+    return key || 'idle'
+  }
 
   function start() {
     if (ticker) {
@@ -43,7 +67,8 @@ export const useSelfInitiatedSpeechStore = defineStore('self-initiated-speech', 
         }
 
         const snapshot = castalia.snapshotFor(personaId)
-        return toAutonomyInput({
+        currentTopic = topicOf(snapshot.currentDesire)
+        const input = toAutonomyInput({
           now,
           lastSpokeAt,
           messages: chatSession.getSessionMessagesIfLoaded(sessionId),
@@ -54,12 +79,29 @@ export const useSelfInitiatedSpeechStore = defineStore('self-initiated-speech', 
           },
           relationshipStage: readStoredRelationship(personaId)?.stage,
         })
+        // The owner answered, so the unanswered run ends and the pace resets.
+        if (input.lastUserAt !== null && (lastOwnerAt === null || input.lastUserAt > lastOwnerAt)) {
+          outbound = recordOwnerMessage(outbound)
+        }
+        lastOwnerAt = input.lastUserAt
+        return input
+      },
+      gate: ({ now }) => {
+        const verdict = decideOutbound({ now, hour: new Date(now).getHours(), topic: currentTopic }, outbound)
+        return { allow: verdict.allow, reason: verdict.reason }
+      },
+      onGated: (verdict) => {
+        gatedCount.value += 1
+        lastGateReason.value = verdict.reason
       },
       speak: () => {
         const sessionId = chatSession.activeSessionId
         if (!sessionId) {
           return
         }
+        const now = Date.now()
+        outbound = recordOutbound(outbound, { now, hour: new Date(now).getHours(), topic: currentTopic })
+        lastGateReason.value = undefined
         return chat.notifyConversation(sessionId, { source: SELF_INITIATED_SOURCE, text: SELF_INITIATED_NOTICE })
       },
     })
@@ -74,5 +116,34 @@ export const useSelfInitiatedSpeechStore = defineStore('self-initiated-speech', 
     running.value = false
   }
 
-  return { running, start, stop }
+  /**
+   * Silences or resumes self-initiated speech.
+   *
+   * A hand-set pause outlives an owner message: only this call lifts it. The
+   * unanswered pause lifts by itself, because the owner answering is an answer.
+   */
+  function setSpeechPaused(next: boolean) {
+    paused.value = next
+    outbound = setPaused(outbound, next)
+  }
+
+  /** Forgets the day, the gaps, and the topics. A test and a new session both use it. */
+  function resetOutbound(now: number = Date.now()) {
+    outbound = createOutboundState(now)
+    lastOwnerAt = null
+    gatedCount.value = 0
+    lastGateReason.value = undefined
+  }
+
+  return {
+    running,
+    paused,
+    lastGateReason,
+    gatedCount,
+    outboundPolicy: OUTBOUND_POLICY_DEFAULTS,
+    setSpeechPaused,
+    resetOutbound,
+    start,
+    stop,
+  }
 })

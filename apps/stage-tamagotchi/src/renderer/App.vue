@@ -21,6 +21,7 @@ import { useArtistryStore } from '@proj-airi/stage-ui/stores/modules/artistry'
 import { useConsciousnessStore } from '@proj-airi/stage-ui/stores/modules/consciousness'
 import { useHearingStore } from '@proj-airi/stage-ui/stores/modules/hearing'
 import { useMindStore } from '@proj-airi/stage-ui/stores/modules/mind'
+import { useSelfInitiatedSpeechStore } from '@proj-airi/stage-ui/stores/modules/self-initiated-speech'
 import { useSpeechStore } from '@proj-airi/stage-ui/stores/modules/speech'
 import { useVisionStore } from '@proj-airi/stage-ui/stores/modules/vision'
 import { usePerfTracerBridgeStore } from '@proj-airi/stage-ui/stores/perf-tracer-bridge'
@@ -44,7 +45,7 @@ import {
   i18nGetLocale,
   i18nSetLocale,
 } from '../shared/eventa'
-import { castaliaMemoryForget, castaliaMemoryList, castaliaMemorySave } from '../shared/eventa/castalia-memory'
+import { castaliaMemoryForget, castaliaMemoryList, castaliaMemoryRecall, castaliaMemorySave } from '../shared/eventa/castalia-memory'
 import { electronModelAssetCancel, electronModelAssetEnsure, electronModelAssetRemove, electronModelAssetsClear, electronModelAssetsList, electronModelAssetStatusChanged } from '../shared/eventa/model-assets'
 import {
   electronPluginUpdateCapability,
@@ -88,10 +89,12 @@ const memoryStore = useMemoryStore()
 const listCastaliaMemory = useElectronEventaInvoke(castaliaMemoryList)
 const saveCastaliaMemory = useElectronEventaInvoke(castaliaMemorySave)
 const forgetCastaliaMemory = useElectronEventaInvoke(castaliaMemoryForget)
+const recallCastaliaMemory = useElectronEventaInvoke(castaliaMemoryRecall)
 memoryStore.attachRemote({
   list: listCastaliaMemory,
   save: saveCastaliaMemory,
   forget: async (entry) => { await forgetCastaliaMemory(entry) },
+  recall: query => recallCastaliaMemory(query),
 })
 void memoryStore.hydrate()
 const listModelAssets = useElectronEventaInvoke(electronModelAssetsList)
@@ -120,6 +123,10 @@ const windowContext = resolveRendererWindowContext()
 const initialRoutePath = resolveInitialRendererRoutePath(route.path)
 const chatStore = useChatStore()
 const mindStore = useMindStore()
+// The desktop shell starts the same autonomy ticker as the web app. Without this
+// line the policy layer runs (its tests pass) but nothing ever fires: she only
+// answers, never opens a conversation on her own.
+const selfInitiatedSpeechStore = useSelfInitiatedSpeechStore()
 const builtinToolsStore = useTamagotchiBuiltinToolsStore()
 const homeAssistantStore = useTamagotchiHomeAssistantStore()
 const mcpToolsStore = useTamagotchiMcpToolsStore()
@@ -378,6 +385,11 @@ onMounted(async () => {
 
   await chatStore.initialize(syncedPinia)
 
+  // She can open a conversation on her own. The ticker reads Castalia's energy,
+  // desire and arousal plus the relationship depth, and never fires while the
+  // user is still inside the grace window. The web app starts the same ticker.
+  selfInitiatedSpeechStore.start()
+
   // The mind reads what happened while the app was off, then keeps its own clock.
   // It only listens to finished turns; it never reads the chat store directly, so
   // the two stores stay independent.
@@ -397,6 +409,7 @@ watch(themeColorsHueDynamic, () => {
 }, { immediate: true })
 
 onUnmounted(() => {
+  selfInitiatedSpeechStore.stop()
   mindStore.dispose()
   stopIOTraceHubBridge()
   stopModelAssetStatus()

@@ -1,6 +1,12 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { useContextObservabilityStore } from '../devtools/context-observability'
 import { createRelationalPolicyContextProvider } from './context-providers/relational-policy'
+
+beforeEach(() => {
+  setActivePinia(createPinia())
+})
 
 function installFakeStorage(): Map<string, string> {
   const store = new Map<string, string>()
@@ -14,8 +20,27 @@ function installFakeStorage(): Map<string, string> {
   return store
 }
 
+const HOUR = 3_600_000
+/**
+ * Depth is evidence over time: the gate wants the evidence to span at least
+ * twelve hours and to land on two separate days. These tests drive the provider
+ * on a clock that moves, so what they check (persistence, one persona per turn)
+ * is not confused with how fast depth grows.
+ */
+const DAY_STEP = 25 * HOUR
+
+function installFakeClock(): void {
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date(2026, 9, 28, 12, 0, 0))
+}
+
+function advance(): void {
+  vi.setSystemTime(Date.now() + DAY_STEP)
+}
+
 afterEach(() => {
   Reflect.deleteProperty(globalThis, 'localStorage')
+  vi.useRealTimers()
 })
 
 describe('relational policy context provider', () => {
@@ -62,11 +87,82 @@ describe('relational policy context provider', () => {
   })
 })
 
+describe('crisis watch across turns of one session', () => {
+  it('lifts the third rough turn to safety-first, which no single turn would reach', () => {
+    installFakeStorage()
+    const provider = createRelationalPolicyContextProvider()
+
+    const first = provider('session-crisis', { id: 'r1', text: '这周真的很崩溃' })
+    const second = provider('session-crisis', { id: 'r2', text: '我撑不住了' })
+    const third = provider('session-crisis', { id: 'r3', text: '感觉是空的' })
+
+    expect(first?.text).toContain('having a hard time')
+    expect(second?.text).toContain('having a hard time')
+    // The run is what makes it a crisis, so the turn that completes it changes tiers.
+    expect(third?.text).toContain('safety first')
+    expect(third?.text).toContain('12356')
+  })
+
+  it('keeps one watch per persona, so a switch starts its own run', () => {
+    installFakeStorage()
+    const provider = createRelationalPolicyContextProvider()
+
+    provider('session-watch', { id: 'a1', text: '这周真的很崩溃' }, 'persona-A')
+    provider('session-watch', { id: 'a2', text: '我撑不住了' }, 'persona-A')
+    // Two rough turns belong to persona-A only, so persona-B starts clean.
+    const other = provider('session-watch', { id: 'b1', text: '感觉是空的' }, 'persona-B')
+    expect(other?.text).not.toContain('safety first')
+
+    const samePersona = provider('session-watch', { id: 'a3', text: '感觉是空的' }, 'persona-A')
+    expect(samePersona?.text).toContain('safety first')
+  })
+
+  it('audits the safety turns it took, and keeps the words of the user out of the audit', () => {
+    installFakeStorage()
+    const provider = createRelationalPolicyContextProvider()
+    const observability = useContextObservabilityStore()
+
+    provider('session-audit', { id: 'x1', text: '这周真的很崩溃' })
+    provider('session-audit', { id: 'x2', text: '我撑不住了' })
+    provider('session-audit', { id: 'x3', text: '感觉是空的' })
+
+    const audits = observability.crisisAudits
+    expect(audits.length).toBeGreaterThan(0)
+    // Newest first, so the turn the run lifted is at the front.
+    expect(audits[0]).toMatchObject({ level: 'crisis', escalated: true, resourcesOffered: true, categories: ['numbness'] })
+    const dumped = JSON.stringify(audits)
+    for (const text of ['这周真的很崩溃', '我撑不住了', '感觉是空的'])
+      expect(dumped, text).not.toContain(text)
+  })
+
+  it('leaves no audit behind for an ordinary conversation', () => {
+    installFakeStorage()
+    const provider = createRelationalPolicyContextProvider()
+    const observability = useContextObservabilityStore()
+
+    provider('session-quiet', { id: 'q1', text: '今天有点累' })
+    provider('session-quiet', { id: 'q2', text: '明天几点开会' })
+
+    expect(observability.crisisAudits).toEqual([])
+  })
+
+  it('never lifts an ordinary conversation', () => {
+    installFakeStorage()
+    const provider = createRelationalPolicyContextProvider()
+    for (const [index, text] of ['今天有点累', '明天几点开会', '我最近在学做饭', '晚安'].entries()) {
+      const message = provider('session-calm', { id: `c${index}`, text })
+      expect(message?.text, text).not.toContain('safety first')
+    }
+  })
+})
+
 describe('relational policy persistence', () => {
   it('restores depth after a reload', () => {
     installFakeStorage()
+    installFakeClock()
     const before = createRelationalPolicyContextProvider()
     before('session-1', { id: 'a', text: '我害怕一个人待着' })
+    advance()
     const deep = before('session-1', { id: 'b', text: '我其实很喜欢猫' })
     const depth = Number(/Depth: (\d) of 4/.exec(deep?.text ?? '')?.[1])
     expect(depth).toBeGreaterThan(1)
@@ -89,10 +185,13 @@ describe('relational policy persistence', () => {
 
   it('shares depth across sessions of one persona', () => {
     installFakeStorage()
+    installFakeClock()
     const before = createRelationalPolicyContextProvider()
     before('session-1', { id: 'a', text: '我害怕一个人待着' }, 'airi')
+    advance()
     const deep = before('session-1', { id: 'b', text: '我其实很喜欢猫' }, 'airi')
     const depth = Number(/Depth: (\d) of 4/.exec(deep?.text ?? '')?.[1])
+    expect(depth).toBeGreaterThan(1)
 
     const otherSession = createRelationalPolicyContextProvider()
 
@@ -102,8 +201,10 @@ describe('relational policy persistence', () => {
 
   it('starts a new persona from depth 1 inside one session', () => {
     installFakeStorage()
+    installFakeClock()
     const provider = createRelationalPolicyContextProvider()
     provider('session-1', { id: 'a', text: '我害怕一个人待着' }, 'persona-A')
+    advance()
     const deep = provider('session-1', { id: 'b', text: '我其实很喜欢猫' }, 'persona-A')
     expect(Number(/Depth: (\d) of 4/.exec(deep?.text ?? '')?.[1])).toBeGreaterThan(1)
 
@@ -114,8 +215,10 @@ describe('relational policy persistence', () => {
 
   it('starts a new persona from depth 1 when the message id repeats', () => {
     installFakeStorage()
+    installFakeClock()
     const provider = createRelationalPolicyContextProvider()
     provider('session-1', { id: 'a', text: '我害怕一个人待着' }, 'persona-A')
+    advance()
     const deep = provider('session-1', { id: 'b', text: '我其实很喜欢猫' }, 'persona-A')
     expect(Number(/Depth: (\d) of 4/.exec(deep?.text ?? '')?.[1])).toBeGreaterThan(1)
 
@@ -127,20 +230,25 @@ describe('relational policy persistence', () => {
 
   it('counts one signal per persona per user turn across a switch back', () => {
     installFakeStorage()
+    installFakeClock()
     const provider = createRelationalPolicyContextProvider()
     const depthOf = (text?: string) => Number(/Depth: (\d) of 4/.exec(text ?? '')?.[1])
 
     provider('session-1', { id: 'a', text: '我害怕一个人待着' }, 'persona-A')
+    advance()
     provider('session-1', { id: 'b', text: '我其实很喜欢猫' }, 'persona-A')
     provider('session-1', { id: 'b', text: '我其实很喜欢猫' }, 'persona-B')
     provider('session-1', { id: 'b', text: '我其实很喜欢猫' }, 'persona-A')
+    advance()
     const afterSwitch = provider('session-1', { id: 'c', text: '我其实很喜欢猫' }, 'persona-A')
 
     // The same three turns without a switch. Persona-A must end where an
     // undisturbed persona ends, because the switch back re-sent an id it
     // already counted.
     provider('session-2', { id: 'a', text: '我害怕一个人待着' }, 'persona-C')
+    advance()
     provider('session-2', { id: 'b', text: '我其实很喜欢猫' }, 'persona-C')
+    advance()
     const control = provider('session-2', { id: 'c', text: '我其实很喜欢猫' }, 'persona-C')
 
     expect(depthOf(control?.text)).toBeGreaterThan(1)

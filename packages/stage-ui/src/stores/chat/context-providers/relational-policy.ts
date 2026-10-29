@@ -1,8 +1,10 @@
 import type { ContextMessage, RelationshipState } from '@proj-airi/core-agent'
 
-import { createRelationalPolicy, inferRelationalSignals, renderRelationalPolicyContext } from '@proj-airi/core-agent'
+import { createCrisisWatch, createRelationalPolicy, inferRelationalSignals, renderRelationalPolicyContext } from '@proj-airi/core-agent'
 import { ContextUpdateStrategy } from '@proj-airi/server-sdk'
 import { nanoid } from 'nanoid'
+
+import { useContextObservabilityStore } from '../../devtools/context-observability'
 
 /** Short on purpose: the renderer prints this id as the bullet label. */
 const RELATIONAL_POLICY_CONTEXT_ID = 'relational-policy'
@@ -71,6 +73,14 @@ function writeStoredRelationship(ownerId: string, relationship: RelationshipStat
  */
 export function createRelationalPolicyContextProvider() {
   const turns = new Map<string, TrackedTurn>()
+  /**
+   * One crisis watch per session and persona.
+   *
+   * A single hard sentence is caught by the signals of that turn. A slow walk
+   * into a bad place is not: three rough turns inside one evening only look like
+   * a crisis when something counts them together, and that counter is here.
+   */
+  const watches = new Map<string, ReturnType<typeof createCrisisWatch>>()
 
   return function createRelationalPolicyContext(
     sessionId: string,
@@ -84,12 +94,44 @@ export function createRelationalPolicyContextProvider() {
     // A new persona must not reuse the previous persona's turn, even when the
     // renderer sends the same user message id again. The key carries the persona.
     if (turn?.messageId !== lastUser.id) {
+      const now = Date.now()
+      const key = turnKey(sessionId, ownerId)
+      const signals = inferRelationalSignals(lastUser.text)
+      const watch = watches.get(key) ?? createCrisisWatch()
+      watches.set(key, watch)
+      // The watch can lift a turn to safety-first, and it never lowers one that a
+      // single sentence already called a crisis. It also keeps the audit record,
+      // which carries categories and flags and never the words of the user.
+      const audited = watch.observe({ text: lastUser.text, level: signals.safety, at: now })
+      const safety = audited.level
+      if (safety !== 'normal') {
+        // NOTICE:
+        // A provider can be built outside a pinia (unit probes), so the write is
+        // guarded: diagnostics must never cost a turn.
+        // Root cause: no pinia is active in that call shape.
+        // Source: packages/stage-ui/src/stores/chat/context-providers.
+        // Remove when every provider call site has an active pinia.
+        try {
+          useContextObservabilityStore().recordCrisisAudit({
+            at: audited.at,
+            level: audited.level,
+            categories: audited.categories,
+            resourcesOffered: audited.resourcesOffered,
+            escalated: audited.escalated,
+          })
+        }
+        catch {}
+      }
       const policy = createRelationalPolicy({
-        now: Date.now(),
+        now,
         // The session cache only stands in for storage when the persona matches.
         // Storage is per persona, so a switch inside one session starts fresh.
         relationship: readStoredRelationship(ownerId) ?? turn?.relationship,
-        ...inferRelationalSignals(lastUser.text),
+        // The message id is the event id: a replayed or retried turn of the same
+        // user message never counts as a second step closer.
+        eventId: lastUser.id,
+        ...signals,
+        safety,
         candidateHypotheses: [],
       })
       turn = {
@@ -97,11 +139,19 @@ export function createRelationalPolicyContextProvider() {
         relationship: policy.relationship,
         text: renderRelationalPolicyContext(policy),
       }
-      turns.set(turnKey(sessionId, ownerId), turn)
+      turns.set(key, turn)
       if (turns.size > MAX_TRACKED_TURNS) {
         const oldest = turns.keys().next()
-        if (!oldest.done)
+        if (!oldest.done) {
           turns.delete(oldest.value)
+          // The watch of an evicted session goes with it, so a stale run of rough
+          // turns cannot escalate a later, unrelated conversation.
+          const evicted = oldest.value.split('\u0000')[0]
+          for (const candidate of [...watches.keys()]) {
+            if (candidate.startsWith(`${evicted}\u0000`))
+              watches.delete(candidate)
+          }
+        }
       }
       writeStoredRelationship(ownerId, policy.relationship)
     }

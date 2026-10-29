@@ -8,7 +8,7 @@ import { defineInvokeHandler } from '@moeru/eventa'
 import { createCastaliaMemoryRepository } from '@proj-airi/castalia-plugin/memory'
 import { app } from 'electron'
 
-import { castaliaMemoryForget, castaliaMemoryList, castaliaMemorySave } from '../../../shared/eventa/castalia-memory'
+import { castaliaMemoryForget, castaliaMemoryList, castaliaMemoryRecall, castaliaMemorySave } from '../../../shared/eventa/castalia-memory'
 import { createCastaliaEngineMemory, resolveCastaliaEngineOptions } from './castalia-engine'
 
 let repository: ReturnType<typeof createCastaliaMemoryRepository> | undefined
@@ -47,6 +47,7 @@ export function setupCastaliaMemoryService(params: {
     defineInvokeHandler(params.context, castaliaMemoryList, () => engine.list())
     defineInvokeHandler(params.context, castaliaMemorySave, entry => engine.save(entry))
     defineInvokeHandler(params.context, castaliaMemoryForget, entry => engine.forget(entry))
+    defineInvokeHandler(params.context, castaliaMemoryRecall, query => engine.recall(query))
     app.once('before-quit', () => {
       void engine.close()
     })
@@ -58,4 +59,6 @@ export function setupCastaliaMemoryService(params: {
   defineInvokeHandler(params.context, castaliaMemoryList, () => memory.list())
   defineInvokeHandler(params.context, castaliaMemorySave, entry => memory.save(entry))
   defineInvokeHandler(params.context, castaliaMemoryForget, entry => memory.forget(entry))
+  // The local repository holds entries only, so a recall has no ranked text to render.
+  defineInvokeHandler(params.context, castaliaMemoryRecall, () => ({ text: '', count: 0, topSim: 0, chars: 0 }))
 }

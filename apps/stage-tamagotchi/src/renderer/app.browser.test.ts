@@ -18,6 +18,7 @@ import { useCharacterOrchestratorStore } from '@proj-airi/stage-ui/stores/charac
 import { useChatStore } from '@proj-airi/stage-ui/stores/chat'
 import { useChatSessionStore } from '@proj-airi/stage-ui/stores/chat/session-store'
 import { useModsServerChannelStore } from '@proj-airi/stage-ui/stores/mods/api/channel-server'
+import { useSelfInitiatedSpeechStore } from '@proj-airi/stage-ui/stores/modules/self-initiated-speech'
 import { useSpeechStore } from '@proj-airi/stage-ui/stores/modules/speech'
 import { useVisionStore } from '@proj-airi/stage-ui/stores/modules/vision'
 import { useProviderConfigStore } from '@proj-airi/stage-ui/stores/providers/config'
@@ -390,6 +391,17 @@ describe('renderer startup', () => {
     expect(stage.initializeCharacter).not.toHaveBeenCalled()
     expect(stage.reports).toEqual([])
     expect(inference.loadModel).not.toHaveBeenCalled()
+  }, 15000)
+
+  // The policy layer and its 84 unit tests pass whether or not the shell wires the
+  // ticker, so nothing else in the suite notices a missing start(). Without it the
+  // desktop app only answers: she never opens a conversation on her own.
+  it('starts the autonomy ticker so she can speak first', async () => {
+    const stage = await renderStage('/', '?synced-leader=true')
+    const autonomy = useSelfInitiatedSpeechStore(stage.pinia)
+
+    await expect.poll(() => autonomy.running, { timeout: 5000 }).toBe(true)
+    expect(stage.errors).toEqual([])
   }, 15000)
 
   it('starts widgets as a full follower without the character orchestrator', async () => {

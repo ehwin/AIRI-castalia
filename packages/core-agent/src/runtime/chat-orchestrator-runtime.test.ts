@@ -39,6 +39,8 @@ function createHarness(getActiveProvider = () => 'mock-provider') {
   const assistantTurns: unknown[] = []
   const stateChanges: unknown[] = []
   const settled: unknown[] = []
+  const runtimeContextProviders: NonNullable<Parameters<typeof createChatOrchestratorRuntime>[0]['runtimeContextProviders']> = []
+  const contextIngest = vi.fn()
   const telemetry = {
     chatActivationStarted: [] as unknown[],
     chatActivationSucceeded: [] as unknown[],
@@ -81,9 +83,10 @@ function createHarness(getActiveProvider = () => 'mock-provider') {
       getSessionGeneration: () => generation,
     },
     context: {
-      ingest: vi.fn(),
+      ingest: contextIngest,
       snapshot: () => structuredClone(contextSnapshot),
     },
+    runtimeContextProviders,
     foregroundStream: {
       patch: message => foregroundPatches.push(message),
       reset: () => foregroundResets.push({ role: 'assistant', content: '', slices: [], tool_results: [] }),
@@ -123,6 +126,8 @@ function createHarness(getActiveProvider = () => 'mock-provider') {
 
   return {
     settled,
+    contextIngest,
+    runtimeContextProviders,
     commitUserMessage,
     assistantAppended,
     assistantResponseRenderedError: {
@@ -167,6 +172,34 @@ function createHarness(getActiveProvider = () => 'mock-provider') {
 }
 
 describe('createChatOrchestratorRuntime', () => {
+  it('awaits a late runtime context provider and hands it the turn text', async () => {
+    const harness = createHarness()
+    const seen: unknown[] = []
+    harness.runtimeContextProviders.push(async (input) => {
+      seen.push(input)
+      await new Promise(resolve => setTimeout(resolve, 5))
+      return {
+        id: 'recalled',
+        contextId: 'recalled',
+        strategy: ContextUpdateStrategy.ReplaceSelf,
+        text: '<memory>recalled block</memory>',
+        createdAt: 1,
+      } as ContextMessage
+    })
+    await harness.runtime.ingest('hello there', { model: 'test', chatProvider: provider })
+    expect(seen).toEqual([{ sessionId: 'session-1', text: 'hello there' }])
+    expect(harness.contextIngest).toHaveBeenCalledTimes(1)
+    expect(harness.contextIngest.mock.calls[0][0]).toMatchObject({ text: '<memory>recalled block</memory>' })
+  })
+
+  it('keeps the turn alive when a runtime context provider rejects', async () => {
+    const harness = createHarness()
+    harness.runtimeContextProviders.push(() => Promise.reject(new Error('memory backend down')))
+    await harness.runtime.ingest('still works', { model: 'test', chatProvider: provider })
+    expect(harness.contextIngest).not.toHaveBeenCalled()
+    expect(harness.sessionMessages['session-1'].some(message => message.role === 'assistant')).toBe(true)
+  })
+
   // https://github.com/moeru-ai/airi/issues/2899
   // ROOT CAUSE:
   //

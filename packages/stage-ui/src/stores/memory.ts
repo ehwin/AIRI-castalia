@@ -21,11 +21,31 @@ export interface MemoryEntry {
  * path and this port only receives writes. A remote that is slow, offline, or
  * absent never blocks a reply.
  */
+/**
+ * One recall for the injection block.
+ *
+ * Empty `text` means nothing passed the backend's similarity gate. The caller
+ * appends the block without a relevance check of its own.
+ */
+export interface MemoryRecall {
+  text: string
+  count: number
+  topSim: number
+  chars: number
+}
+
 export interface MemoryRemotePort {
   /** Every entry the remote holds. Replaces the local cache on start. */
   list: () => Promise<MemoryEntry[]>
   save: (entry: MemoryEntry) => Promise<void>
   forget: (entry: Pick<MemoryEntry, 'name' | 'persona'>) => Promise<void>
+  /**
+   * Renders a context block for one query, from the entries the backend ranks.
+   *
+   * A port without it leaves the recall provider with nothing to inject. The
+   * recall reads ranked text, so it never serves the synchronous prompt index.
+   */
+  recall?: (query: string) => Promise<MemoryRecall>
 }
 
 /** Turns a free name into the kebab-case key that entries use. */
@@ -173,6 +193,28 @@ export const useMemoryStore = defineStore('memory', () => {
     return true
   }
 
+  /**
+   * Recalls memories for one turn as a ready-to-inject block.
+   *
+   * Answers empty when memory is off, no port can recall, or nothing passed the
+   * backend's gate. A failed recall never reaches the caller: a turn without the
+   * block reads better than a turn that reports a backend error.
+   */
+  async function recallForInjection(query: string): Promise<string> {
+    if (!enabled.value || !remote?.recall)
+      return ''
+    const text = query.trim()
+    if (!text)
+      return ''
+    try {
+      return (await remote.recall(text)).text
+    }
+    catch (cause) {
+      console.warn('[memory] remote recall failed:', cause)
+      return ''
+    }
+  }
+
   function resetState() {
     enabled.reset()
     entries.reset()
@@ -192,6 +234,7 @@ export const useMemoryStore = defineStore('memory', () => {
     makeGeneral,
     forget,
     remove,
+    recallForInjection,
     resetState,
   }
 })

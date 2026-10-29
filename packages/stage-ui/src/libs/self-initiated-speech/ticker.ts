@@ -5,10 +5,29 @@ export interface TickerReadArgs {
   lastSpokeAt: number | null
 }
 
+/**
+ * The verdict of the last check before an utterance goes out.
+ *
+ * The ticker never reads the reason. It hands it to the caller, which records it
+ * for the diagnostics page, so a silent companion can explain itself.
+ */
+export interface SpeechGateVerdict {
+  allow: boolean
+  reason: string
+}
+
 export interface SpeechTickerOptions {
   decide: (input: AutonomyInput, policy: AutonomyPolicy) => SpeakDecision
   policy: AutonomyPolicy
   now: () => number
+  /**
+   * Traffic control, asked after the policy accepted and before the ticker
+   * commits the time of the utterance. A refusal costs nothing: the next tick
+   * asks again, and the cooldown is not spent on a message that never went out.
+   */
+  gate?: (args: { now: number, decision: SpeakDecision }) => SpeechGateVerdict
+  /** Called once per refusal, so the caller can record what held the message back. */
+  onGated?: (verdict: SpeechGateVerdict) => void
   /**
    * Returns undefined when no persona or session is ready. It stays synchronous
    * so that one tick reads one consistent state.
@@ -52,6 +71,20 @@ export function createSpeechTicker(options: SpeechTickerOptions): SpeechTicker {
 
     const decision = options.decide(input, options.policy)
     if (!decision.speak || sending) {
+      return decision
+    }
+
+    // A gate that throws refuses. Silence is the safe failure for a companion
+    // that starts its own turns.
+    let verdict: SpeechGateVerdict | undefined
+    try {
+      verdict = options.gate?.({ now, decision })
+    }
+    catch {
+      verdict = { allow: false, reason: 'gate-error' }
+    }
+    if (verdict && !verdict.allow) {
+      options.onGated?.(verdict)
       return decision
     }
 

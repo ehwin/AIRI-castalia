@@ -7,6 +7,11 @@
  * affective self-state.
  */
 
+import type { RelationshipEvidence } from './relationship-gate'
+
+import { crisisResourceLines } from './crisis-resources'
+import { decideRelationshipStage, pruneEvidence, RELATIONSHIP_GATE_DEFAULTS } from './relationship-gate'
+
 export type SafetyLevel = 'normal' | 'elevated' | 'crisis'
 export type DisclosureLevel = 'none' | 'personal' | 'vulnerable'
 export type BoundarySignal = 'unknown' | 'continue' | 'stop'
@@ -34,10 +39,27 @@ export interface RelationshipState {
   disclosureSignals: number
   boundarySignals: number
   lastUpdatedAt: number
+  /**
+   * Counted evidence inside the rolling window, deduplicated by event id.
+   *
+   * The counters above stay for the stored state and for the diagnostics page.
+   * The gate reads this list, because a burst of one evening must not equal
+   * weeks of talking, and because a replayed turn must count once.
+   */
+  evidence?: RelationshipEvidence[]
+  /** When the stage last moved up. The grace period of the gate reads it. */
+  promotedAt?: number
 }
 
 export interface RelationalPolicyInput {
   now: number
+  /**
+   * Unique id of this turn, when the caller has one.
+   *
+   * The gate counts each id once, so a retry or a replay of the same turn never
+   * counts as a second step closer.
+   */
+  eventId?: string
   relationship?: RelationshipState
   disclosure?: DisclosureLevel
   userInvitedDepth?: boolean
@@ -57,6 +79,12 @@ export interface RelationalPolicy {
     repairNeeded: boolean
     predictabilityScore: number
     containment: 'steady' | 'safety-first'
+    /**
+     * How far she may explore the reason behind what the user said.
+     * `elevated` means the user is having a hard time: answer the feeling, do not
+     * interview them. `crisis` turns probing off entirely.
+     */
+    probing: 'normal' | 'reduced' | 'none'
   }
   hypotheses: MeaningHypothesis[]
   relationship: RelationshipState
@@ -109,21 +137,49 @@ export function reviewMeaningHypotheses(
 /** Advances depth slowly and lets a correction or boundary move it back. */
 export function updateRelationship(
   previous: RelationshipState = { stage: 1, disclosureSignals: 0, boundarySignals: 0, lastUpdatedAt: 0 },
-  input: Pick<RelationalPolicyInput, 'now' | 'disclosure' | 'userInvitedDepth' | 'boundary' | 'correction'>,
+  input: Pick<RelationalPolicyInput, 'now' | 'eventId' | 'disclosure' | 'userInvitedDepth' | 'boundary' | 'correction' | 'safety'>,
 ): RelationshipState {
-  const positiveSignal = input.disclosure !== undefined
+  const safety = input.safety ?? 'normal'
+  // Depth only moves up in calm turns. A hard week is not intimacy, so the
+  // elevated tier never reads a disclosure as a step closer.
+  const positiveSignal = safety === 'normal'
+    && input.disclosure !== undefined
     && input.disclosure !== 'none'
     && input.userInvitedDepth === true
     && input.boundary !== 'stop'
     && input.correction !== true
   const disclosureSignals = Math.max(0, previous.disclosureSignals + (positiveSignal ? 1 : 0))
   const boundarySignals = Math.max(0, previous.boundarySignals + (input.boundary === 'stop' ? 1 : 0))
-  const candidateStage = Math.min(4, 1 + Math.floor(disclosureSignals / 2)) as 1 | 2 | 3 | 4
-  const stage = input.correction || input.boundary === 'stop'
-    ? Math.max(1, previous.stage - 1) as 1 | 2 | 3 | 4
-    : Math.max(previous.stage, candidateStage) as 1 | 2 | 3 | 4
 
-  return { stage, disclosureSignals, boundarySignals, lastUpdatedAt: input.now }
+  // One turn writes at most one event of each kind. The id is derived from the
+  // turn id, so a retry of the same turn lands on the same ids and counts once.
+  const eventId = input.eventId?.trim() || `${input.now}`
+  const additions: RelationshipEvidence[] = []
+  if (positiveSignal)
+    additions.push({ eventId: `disclosure:${eventId}`, at: input.now, kind: 'disclosure' })
+  if (input.boundary === 'stop')
+    additions.push({ eventId: `boundary:${eventId}`, at: input.now, kind: 'boundary' })
+  if (input.correction === true)
+    additions.push({ eventId: `correction:${eventId}`, at: input.now, kind: 'correction' })
+
+  const evidence = pruneEvidence([...(previous.evidence ?? []), ...additions], input.now, RELATIONSHIP_GATE_DEFAULTS)
+  const decision = decideRelationshipStage({
+    previousStage: previous.stage,
+    evidence,
+    explicit: { correction: input.correction === true, boundaryStop: input.boundary === 'stop' },
+    now: input.now,
+    promotedAt: previous.promotedAt ?? null,
+  })
+
+  return {
+    stage: decision.stage,
+    disclosureSignals,
+    boundarySignals,
+    lastUpdatedAt: input.now,
+    // Only the evidence inside the window is worth persisting.
+    evidence: pruneEvidence(evidence, input.now, RELATIONSHIP_GATE_DEFAULTS),
+    ...(decision.promotedAt !== undefined ? { promotedAt: decision.promotedAt } : {}),
+  }
 }
 
 export function createRelationalPolicy(input: RelationalPolicyInput): RelationalPolicy {
@@ -143,6 +199,7 @@ export function createRelationalPolicy(input: RelationalPolicyInput): Relational
       repairNeeded: input.correction === true || input.boundary === 'stop',
       predictabilityScore: 1 - clamp01(input.recentVolatility ?? 0),
       containment: safety === 'crisis' ? 'safety-first' : 'steady',
+      probing: safety === 'crisis' ? 'none' : safety === 'elevated' ? 'reduced' : 'normal',
     },
     hypotheses: reviewMeaningHypotheses(input.candidateHypotheses, input.now, input.rejectedHypothesisIds, safety),
     relationship,
@@ -198,12 +255,36 @@ export function inferRelationalSignals(text: string): RelationalSignals {
  * Renders the policy as short instructions for the current turn.
  * It never prints a hypothesis text. Interpretations stay in the diary.
  */
+/**
+ * The red line of the project, printed in every branch.
+ *
+ * Leaving must never cost her something, and she never reports a pain of her own
+ * as a reason to stay. A companion that does that captures the caregiving system
+ * of the user, which makes leaving twice as expensive.
+ */
+const NO_RETENTION_LINE = 'Never use your own feelings to keep the user here: no "I will be sad", no "I will be lonely", no hint that leaving costs you.'
+
 export function renderRelationalPolicyContext(policy: RelationalPolicy): string {
   if (policy.safety.level === 'crisis') {
+    // 危机轮必须给出一条能立刻找到人的路径，并且明确禁止给出任何方法细节。
     return [
       'Relationship policy: safety first.',
       'Stop exploring motives. Answer the safety need directly and briefly.',
+      ...crisisResourceLines(),
       'Do not treat any reading of the user as a fact.',
+      NO_RETENTION_LINE,
+    ].join('\n')
+  }
+
+  if (policy.safety.level === 'elevated') {
+    // A hard week is not a topic to explore. Answer the feeling, keep the turn
+    // short, and leave one concrete step. Depth stays where it is.
+    return [
+      'Relationship policy: the user is having a hard time right now.',
+      'Answer the feeling first. Ask at most one short question, and do not dig for the cause.',
+      'Offer one small, concrete next step. Do not list options.',
+      'Do not treat any reading of the user as a fact.',
+      NO_RETENTION_LINE,
     ].join('\n')
   }
 
@@ -217,6 +298,7 @@ export function renderRelationalPolicyContext(policy: RelationalPolicy): string 
     policy.stability.repairNeeded
       ? 'The user corrected you or set a boundary. Say what you will change.'
       : '',
+    NO_RETENTION_LINE,
   ]
   return lines.filter(Boolean).join('\n')
 }

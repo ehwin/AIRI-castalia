@@ -20,6 +20,16 @@ import { categorizeResponse, createStreamingCategorizer } from './response-categ
 const REASONING_UI_FLUSH_CHUNK_SIZE = 24
 
 /**
+ * What a runtime context provider reads: the turn that is about to be sent.
+ * A provider that only needs the conversation state ignores this argument.
+ */
+export interface RuntimeContextInput {
+  sessionId: string
+  /** The user text of this turn. Empty when a turn carries attachments only. */
+  text: string
+}
+
+/**
  * Caps repeated reply text in the model prompt. The referenced message remains
  * in history, so the prefix only needs enough text to identify it.
  */
@@ -328,8 +338,12 @@ export interface ChatOrchestratorRuntimeDeps {
    * With it, history carries no identity. Stored system messages are skipped, so a persona edit or switch reaches the next send of its own sessions only.
    */
   getSystemPrompt?: (sessionId: string) => string | undefined
-  /** Runtime context providers ingested immediately before prompt composition. */
-  runtimeContextProviders?: Array<() => ContextMessage | null | undefined>
+  /**
+   * Runtime context providers ingested immediately before prompt composition.
+   * A provider can answer late: a recalled memory block costs one round trip to
+   * the memory backend, and dropping it is worse than waiting for it.
+   */
+  runtimeContextProviders?: Array<(input: RuntimeContextInput) => ContextMessage | null | undefined | Promise<ContextMessage | null | undefined>>
   /**
    * Tools whose calls show as content of the reply, by tool name. A reply keeps no slice for their calls, and the model
    * still sees the calls in the provider transcript.
@@ -596,9 +610,12 @@ export function createChatOrchestratorRuntime(deps: ChatOrchestratorRuntimeDeps)
       deps.foregroundStream.reset()
   }
 
-  function ingestRuntimeContexts() {
+  async function ingestRuntimeContexts(input: RuntimeContextInput) {
     for (const provider of deps.runtimeContextProviders ?? []) {
-      const contextMessage = provider()
+      // A provider that throws or hangs must not take the turn down with it.
+      const contextMessage = await Promise.resolve()
+        .then(() => provider(input))
+        .catch(() => null)
       if (contextMessage)
         deps.context.ingest(contextMessage)
     }
@@ -659,7 +676,7 @@ export function createChatOrchestratorRuntime(deps: ChatOrchestratorRuntimeDeps)
     // It is applied at message-assembly time (see below) as a system-prompt
     // date anchor + per-message [HH:MM] prefixes, which is more KV-cache
     // friendly and less prone to weak models echoing timestamps verbatim.
-    ingestRuntimeContexts()
+    await ingestRuntimeContexts({ sessionId, text: sendingMessage ?? '' })
 
     const sendingCreatedAt = now()
 

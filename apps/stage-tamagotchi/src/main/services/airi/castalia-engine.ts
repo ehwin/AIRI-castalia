@@ -1,5 +1,7 @@
 import type { CastaliaMemoryEntry } from '@proj-airi/castalia-plugin/memory'
 
+import type { CastaliaRecalledMemory } from '../../../shared/eventa/castalia-memory'
+
 import process from 'node:process'
 
 import { existsSync, readFileSync } from 'node:fs'
@@ -121,6 +123,11 @@ export interface CastaliaEngineMemory {
   list: () => Promise<CastaliaMemoryEntry[]>
   save: (entry: CastaliaMemoryEntry) => Promise<void>
   forget: (entry: Pick<CastaliaMemoryEntry, 'name' | 'persona'>) => Promise<boolean>
+  /**
+   * Renders a context block for one query. The engine abstains with empty text,
+   * so the caller appends the block without a relevance check of its own.
+   */
+  recall: (query: string) => Promise<CastaliaRecalledMemory>
   close: () => Promise<void>
 }
 
@@ -149,7 +156,7 @@ export function createCastaliaEngineMemory(options: CastaliaEngineOptions): Cast
         },
         stderr: 'inherit',
       })
-      const client = new Client({ name: 'airi-memory', version: '1.26.0' })
+      const client = new Client({ name: 'airi-memory', version: '1.28.0' })
       clientPromise = client.connect(transport).then(() => client)
     }
     return clientPromise
@@ -207,6 +214,20 @@ export function createCastaliaEngineMemory(options: CastaliaEngineOptions): Cast
         ...(entry.persona ? { characterId: entry.persona } : { general: true }),
       })
       return envelope.ok === true && envelope.deleted === true
+    },
+
+    async recall(query) {
+      if (closing)
+        return { text: '', count: 0, topSim: 0, chars: 0 }
+      const envelope = await call('memory_recall', { project: options.project, query })
+      if (envelope.ok !== true)
+        throw new Error(`castalia engine recall failed: ${JSON.stringify(envelope.error ?? envelope)}`)
+      return {
+        text: typeof envelope.text === 'string' ? envelope.text : '',
+        count: typeof envelope.count === 'number' ? envelope.count : 0,
+        topSim: typeof envelope.topSim === 'number' ? envelope.topSim : 0,
+        chars: typeof envelope.chars === 'number' ? envelope.chars : 0,
+      }
     },
 
     async close() {

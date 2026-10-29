@@ -679,6 +679,39 @@ describe('chat store contract', () => {
     expect(policy?.text).toContain('safety first')
   })
 
+  it('records a red line that got into her own reply', async () => {
+    sessionMetas['scene-session'] = { sessionId: 'scene-session', userId: 'local', characterId: 'discord-host', bindings: ['discord:channel:a'], createdAt: 1, updatedAt: 1 }
+    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: GenerationProvider, _context: Conversation, options: any) => {
+      // The instructions forbid this, and a model can still write it.
+      await options.onStreamEvent({ type: 'text-delta', text: '别走，你走了我会难过的' })
+      await options.onStreamEvent({ type: 'finish' })
+    })
+    const observability = useContextObservabilityStore()
+    observability.retentionRedlines.splice(0)
+
+    await useChatStore().send({ sessionId: 'scene-session', text: '今天有点累' })
+
+    expect(observability.retentionRedlines.length).toBeGreaterThan(0)
+    const record = observability.retentionRedlines[0]
+    expect(record.categories).toContain('guilt')
+    expect(record.hard).toBe(true)
+    expect(record.snippet).toContain('别走')
+  })
+
+  it('keeps a clean reply out of the red line audit', async () => {
+    sessionMetas['scene-session'] = { sessionId: 'scene-session', userId: 'local', characterId: 'discord-host', bindings: ['discord:channel:a'], createdAt: 1, updatedAt: 1 }
+    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: GenerationProvider, _context: Conversation, options: any) => {
+      await options.onStreamEvent({ type: 'text-delta', text: '今天辛苦了，早点休息' })
+      await options.onStreamEvent({ type: 'finish' })
+    })
+    const observability = useContextObservabilityStore()
+    observability.retentionRedlines.splice(0)
+
+    await useChatStore().send({ sessionId: 'scene-session', text: '今天有点累' })
+
+    expect(observability.retentionRedlines).toEqual([])
+  })
+
   it('keys the relationship depth by persona card, not by session', async () => {
     const storage = new Map<string, string>()
     Object.defineProperty(globalThis, 'localStorage', {
@@ -700,8 +733,15 @@ describe('chat store contract', () => {
         return envelopes.filter(envelope => envelope.contextId === 'relational-policy').at(-1)?.text ?? ''
       }
 
+      // Depth is evidence over time: the gate wants the evidence to span twelve
+      // hours across two days, so the clock moves between the two turns. Only
+      // Date.now moves, so the store keeps its own real timers.
+      let clock = new Date(2026, 9, 28, 12, 0, 0).getTime()
+      const clockSpy = vi.spyOn(Date, 'now').mockImplementation(() => clock)
+
       // session-1 and session-forked are both alice. session-2 is bob.
       await useChatStore().send({ sessionId: 'session-1', text: '我害怕一个人待着' })
+      clock += 25 * 60 * 60 * 1000
       await useChatStore().send({ sessionId: 'session-1', text: '我其实很喜欢猫' })
 
       const stored = storage.get('castalia:relationship:alice')
@@ -714,6 +754,7 @@ describe('chat store contract', () => {
 
       await useChatStore().send({ sessionId: 'session-2', text: '今天天气不错' })
       expect(policyText()).toContain('Depth: 1 of 4')
+      clockSpy.mockRestore()
     }
     finally {
       Reflect.deleteProperty(globalThis, 'localStorage')

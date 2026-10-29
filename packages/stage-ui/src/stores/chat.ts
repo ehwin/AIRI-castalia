@@ -13,7 +13,7 @@ import { decodeBase64 } from '@moeru/std/base64'
 import { SpanStatusCode } from '@opentelemetry/api'
 import { fileSource } from '@proj-airi/audio/encoding'
 import { formatAgentStatePrompt, useCastaliaPluginStore } from '@proj-airi/castalia-plugin'
-import { createChatOrchestratorRuntime, isBackgroundRecipe, matchKeywordRecipes, renderConversationPreview } from '@proj-airi/core-agent'
+import { createChatOrchestratorRuntime, isBackgroundRecipe, matchKeywordRecipes, renderConversationPreview, scanRetention } from '@proj-airi/core-agent'
 import { IOAttributes, IOEvents, IOSpanNames, IOSubsystems } from '@proj-airi/stage-shared'
 import { isEqual } from 'es-toolkit'
 import { nanoid } from 'nanoid'
@@ -42,6 +42,7 @@ import { resolveLlmTools } from './ai/chat-llm/tool-resolver'
 import { useLlmToolsStore } from './ai/chat-llm/tools'
 import { useLlmToolsetPromptsStore } from './ai/chat-llm/toolset-prompts'
 import { createMinecraftContext, createRuntimePromptContext } from './chat/context-providers'
+import { createMemoryRecallContext } from './chat/context-providers/memory-recall'
 import { createMindStateContext } from './chat/context-providers/mind-state'
 import { createRelationalPolicyContextProvider } from './chat/context-providers/relational-policy'
 import { useChatContextStore } from './chat/context-store'
@@ -996,6 +997,9 @@ export const useChatStore = defineStore('chat', () => {
       () => createMindStateContext(mindStore.stateLineForSend()),
       // Relationship policy: tone, depth, and when disagreement is allowed.
       () => relationalPolicyContext(),
+      // What this turn brings back from long-term memory. The engine abstains on
+      // its own, so a block arrives only when it passed the similarity gate.
+      createMemoryRecallContext(query => memory.recallForInjection(query)),
       createMinecraftContext,
     ],
     // A card that the model draws is part of its answer, so the reply shows the card, not the call.
@@ -1020,6 +1024,14 @@ export const useChatStore = defineStore('chat', () => {
         toolCards.recordCall(slice.toolCall.toolName, slice.toolCall.args, result.result)
           .catch(error => console.warn('[chat] Failed to keep a tool call on its card:', errorMessageFrom(error)))
       }
+
+      // Scan her own reply too: a red line can still be written when the prompt
+      // forbids it, so the count of what got through is the only honest measure.
+      // Categories and counts reach devtools; the words stay in the message.
+      const spoken = typeof message.content === 'string' ? message.content : ''
+      const scan = scanRetention(spoken)
+      if (scan.hits.length > 0)
+        contextObservability.recordRetentionRedline({ text: spoken, verdict: scan.verdict, categories: scan.hits.map(hit => hit.category), hard: scan.hard })
     },
     onUserTurnReady: ({ sessionId, messageText, sessionMessages }) => {
       if (!isOwnerTurn(sessionId, sessionMessages))
