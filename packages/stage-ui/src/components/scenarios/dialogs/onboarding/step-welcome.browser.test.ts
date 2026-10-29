@@ -10,8 +10,7 @@ import { createI18n } from 'vue-i18n'
 
 import StepWelcome from './step-welcome.vue'
 
-import { AIRI_FLUX_URL, AIRI_TERMS_URL } from '../../../../constants/public-links'
-import { useAuthStore } from '../../../../stores/auth'
+import { AIRI_TERMS_URL } from '../../../../constants/public-links'
 import { useAiriCardStore } from '../../../../stores/modules/airi-card'
 
 afterEach(() => {
@@ -54,9 +53,9 @@ async function renderWelcomeStep(customProviderSetupEnabled: boolean) {
 describe('steam onboarding provider restrictions', () => {
   /**
    * @example
-   * it('keeps login without custom provider setup in Steam builds', async () => {})
+   * it('hides the local provider action in Steam builds', async () => {})
    */
-  it('keeps login without custom provider setup in Steam builds', async () => {
+  it('hides the local provider action in Steam builds', async () => {
     // ROOT CAUSE:
     //
     // The welcome step rendered its local-provider action without consulting
@@ -65,7 +64,6 @@ describe('steam onboarding provider restrictions', () => {
     // the same provider paths were hidden after setup.
     await renderWelcomeStep(false)
 
-    expect(document.body.textContent).toContain('Sign in')
     expect(document.body.textContent).not.toContain('Setup with your provider')
   })
 
@@ -80,33 +78,34 @@ describe('steam onboarding provider restrictions', () => {
   })
 })
 
-describe('desktop onboarding sign-in', () => {
-  it('requests login through the auth store', async () => {
-    vi.stubEnv('RUNTIME_ENVIRONMENT', 'electron')
-    const pinia = createPinia()
+describe('onboarding local setup', () => {
+  it('continues the flow without an account', async () => {
+    const onNext = vi.fn()
     const screen = await render(StepWelcome, {
       props: {
         customProviderSetupEnabled: true,
-        onNext: vi.fn(),
+        onNext,
       },
       global: {
         directives: { motion: {} },
-        plugins: [pinia, createTestI18n()],
+        plugins: [createPinia(), createTestI18n()],
       },
     })
 
-    await screen.getByRole('button', { name: 'Sign in' }).click()
+    await screen.getByRole('button', { name: 'Setup with your provider' }).click()
 
-    await expect.poll(() => useAuthStore(pinia).needsLogin).toBe(true)
+    expect(onNext).toHaveBeenCalledOnce()
   })
 })
 
 describe('onboarding public links', () => {
-  it('links to public pricing and terms without requiring sign-in', async () => {
+  it('links to public terms without requiring sign-in and hides the removed pricing entry', async () => {
     const screen = await renderWelcomeStep(true)
 
-    await expect.element(screen.getByRole('link', { name: 'Pricing' })).toHaveAttribute('href', AIRI_FLUX_URL)
     await expect.element(screen.getByRole('link', { name: 'Terms of Service' })).toHaveAttribute('href', AIRI_TERMS_URL)
+    // The pricing entry pointed at the removed /settings/flux page. It must not come back
+    // until a live pricing target exists.
+    expect(screen.getByRole('link', { name: 'Pricing' }).elements()).toHaveLength(0)
   })
 })
 

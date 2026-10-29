@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { DataSettingsStatusEmits } from '../status'
 
-import { useAnalytics } from '@proj-airi/stage-ui/composables'
 import { useDataMaintenance } from '@proj-airi/stage-ui/composables/use-data-maintenance'
 import { DoubleCheckButton } from '@proj-airi/ui'
 import { useI18n } from 'vue-i18n'
@@ -10,14 +9,12 @@ import { createDataSettingsStatusHelpers } from '../status'
 
 const emit = defineEmits<DataSettingsStatusEmits>()
 const { t } = useI18n()
-const { trackDataAction } = useAnalytics()
 const { deleteAllModels, resetModulesSettings } = useDataMaintenance()
 const { emitStatus, handleActionError } = createDataSettingsStatusHelpers(emit)
 
 async function deleteModels() {
   try {
     await deleteAllModels()
-    trackDataAction({ action: 'models_cache_cleared' })
     emitStatus(t('settings.pages.data.status.models_deleted'))
   }
   catch (error) {
@@ -28,7 +25,6 @@ async function deleteModels() {
 async function resetModules() {
   try {
     await resetModulesSettings()
-    trackDataAction({ action: 'modules_settings_reset' })
     emitStatus(t('settings.pages.data.status.modules_reset'))
   }
   catch (error) {

@@ -1,4 +1,3 @@
-import { useAnalytics } from '@proj-airi/stage-ui/composables/use-analytics'
 import { useSpeakingStore } from '@proj-airi/stage-ui/stores/audio'
 import { useChatSessionStore } from '@proj-airi/stage-ui/stores/chat/session-store'
 import { useSpeechOutputControlStore } from '@proj-airi/stage-ui/stores/speech-output-control'
@@ -23,12 +22,10 @@ export function useStopSpeakingButton(options: {
   const sessions = useChatSessionStore()
   const speechOutputControlStore = useSpeechOutputControlStore()
   const { speechMuted } = storeToRefs(speechOutputControlStore)
-  const { trackSpeechMuteToggled, trackTtsStopClicked } = useAnalytics()
 
   const showStopSpeakingButton = computed(() => speechOutputControlStore.activeTurns.some(turn => turn.sessionId === sessions.activeSessionId))
 
   function stopSpeakingFromChat(sessionId = sessions.activeSessionId) {
-    trackTtsStopClicked({ reason: 'manual-chat' })
     return speechOutputControlStore.requestStopSpeaking({ reason: 'manual-chat', sessionId })
   }
 
@@ -37,17 +34,15 @@ export function useStopSpeakingButton(options: {
   }
 
   function stopAllSpeaking() {
-    trackTtsStopClicked({ reason: 'manual-all' })
     return speechOutputControlStore.requestStopSpeaking({ reason: 'manual-all' })
   }
 
   async function toggleSpeechMuted() {
-    let wasSpeaking: boolean
     try {
-      wasSpeaking = await (options.resolveSpeakingState?.() ?? nowSpeaking.value)
+      await (options.resolveSpeakingState?.() ?? nowSpeaking.value)
     }
     catch {
-      // Muting is the user action; analytics must not make it fail when an
+      // Muting is the user action; a failed probe must not block it when an
       // auxiliary renderer cannot reach the output host during a reload.
       speechOutputControlStore.setSpeechMuted(!speechMuted.value)
       return
@@ -56,10 +51,6 @@ export function useStopSpeakingButton(options: {
     const muted = !speechMuted.value
 
     speechOutputControlStore.setSpeechMuted(muted)
-    trackSpeechMuteToggled({
-      muted,
-      was_speaking: wasSpeaking,
-    })
   }
 
   return {

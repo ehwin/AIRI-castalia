@@ -1,0 +1,854 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Castalia</title>
+<style>
+  /* ═══ Castalia 控制台(重构版:左侧 rail + 内容区切换,与星图同一套交互语言)═══
+     圆角 8/4px · 间距 4/8pt · 分层靠背景深浅 · rail 选中带强调条 */
+  :root{
+    --canvas:#141619; --layer:#1b1e23; --layer2:#22262d; --deep:#101216;
+    --line:#2b3038; --line2:#343a44;
+    --fg:#e8ebf1; --dim:#9099ab; --dim2:#6d7686;
+    --accent:#3fd9c0; --accent2:#7fe3ff; --pink:#ff6fa5; --glow:#ffb48a;
+    --warn:#ffb84d; --err:#ff5f6d;
+    --r-win:8px; --r-ctl:4px;
+    --tbar:40px; --sbar:26px; --rail:60px;
+  }
+  *{box-sizing:border-box}
+  /* 深色滚动条(WebView2 默认是白的,在深色界面里很突兀) */
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:#333a44;border-radius:6px;border:2px solid transparent;background-clip:content-box}
+  ::-webkit-scrollbar-thumb:hover{background:#454e5b;background-clip:content-box}
+  ::-webkit-scrollbar-corner{background:transparent}
+  *{scrollbar-width:thin;scrollbar-color:#333a44 transparent}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--canvas);color:var(--fg);
+    font-family:"Segoe UI Variable Text","Segoe UI",system-ui,"Microsoft YaHei UI",sans-serif;font-size:13px}
+  button{font-family:inherit}
+
+  /* ── 标题栏 ── */
+  #tbar{height:var(--tbar);display:flex;align-items:center;gap:12px;padding:0 0 0 12px;
+    background:var(--layer);border-bottom:1px solid var(--line);user-select:none;position:relative;z-index:30}
+  #logo{width:20px;height:20px;flex:none;display:flex;align-items:center;justify-content:center}
+  #logo img{width:20px;height:20px;border-radius:5px;display:block;
+    box-shadow:0 0 10px rgba(63,217,192,.35)}
+  #brand{font-weight:600}
+  #brand small{color:var(--dim);font-weight:400;margin-left:6px}
+  #tright{margin-left:auto;display:flex;align-items:center;gap:6px}
+  .tb-btn{height:28px;padding:0 12px;border-radius:var(--r-ctl);border:1px solid var(--line2);
+    background:transparent;color:var(--fg);cursor:pointer;display:flex;align-items:center;gap:6px}
+  .tb-btn:hover{background:var(--layer2);border-color:#3d4550}
+  .wbtn{width:44px;height:var(--tbar);display:grid;place-items:center;cursor:pointer;color:#b9c0cf}
+  .wbtn:hover{background:#262c35;color:#fff}
+  .wbtn.close:hover{background:#e0393e;color:#fff}
+  .wbtn svg{width:10px;height:10px}
+
+  /* ── 主体:rail + 内容 ── */
+  #app{position:absolute;inset:var(--tbar) 0 var(--sbar) 0;display:flex}
+
+  #rail{width:var(--rail);flex:none;background:var(--layer);border-right:1px solid var(--line);
+    display:flex;flex-direction:column;padding:8px 0;gap:2px}
+  .ri{height:46px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+    cursor:pointer;color:var(--dim);position:relative;font-size:10px;user-select:none}
+  .ri svg{width:19px;height:19px;stroke-width:1.7}
+  .ri:hover{background:var(--layer2);color:var(--fg)}
+  .ri.on{color:var(--accent);background:#20262d}
+  .ri.on::before{content:"";position:absolute;left:0;top:50%;transform:translateY(-50%);
+    width:3px;height:20px;border-radius:0 2px 2px 0;background:var(--accent)}
+  .ri.sp{flex:1;pointer-events:none}
+  .ri.sep{height:1px;background:var(--line);margin:6px 12px;pointer-events:none}
+  /* rail 悬停提示(和星图一样的 data-tip) */
+  .ri[data-tip]:hover::after{content:attr(data-tip);position:absolute;left:calc(100% + 8px);top:50%;
+    transform:translateY(-50%);background:#0e1114;border:1px solid var(--line2);color:var(--fg);
+    padding:5px 9px;border-radius:var(--r-ctl);white-space:nowrap;font-size:12px;z-index:60;
+    box-shadow:0 8px 20px rgba(0,0,0,.5)}
+  .ri.badge::before{content:"";position:absolute;left:0;top:50%;transform:translateY(-50%);
+    width:3px;height:20px;border-radius:0 2px 2px 0;background:var(--warn)}
+
+  #views{flex:1;position:relative;min-width:0}
+  .view{position:absolute;inset:0;display:none;overflow:hidden}
+  .view.on{display:block}
+  #viz,#fr-agg,#fr-mng{width:100%;height:100%;border:0;background:var(--canvas)}
+  #viz-home{position:absolute;right:16px;top:14px;z-index:20;height:30px;padding:0 12px;
+    border-radius:var(--r-ctl);background:rgba(31,35,42,.86);border:1px solid var(--line2);
+    color:var(--fg);cursor:pointer;display:none;align-items:center;gap:6px;font-size:12px;
+    backdrop-filter:blur(6px)}
+  #viz-home:hover{background:#2b3139;border-color:var(--accent);color:var(--accent)}
+  #viz-home.show{display:flex}
+
+  /* ── 提醒中心(rail 红点 + 列表) ── */
+  #alert-badge{display:none;position:absolute;top:4px;right:8px;min-width:14px;height:14px;
+    padding:0 4px;border-radius:7px;background:#e5484d;color:#fff;font-size:9px;line-height:14px;
+    text-align:center;font-weight:600;box-sizing:border-box}
+  #alert-badge.warn{background:#d99b2b}
+  .al-sum{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+  .al-chip{display:flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;
+    background:var(--layer);border:1px solid var(--line);font-size:12px;color:var(--dim)}
+  .al-chip b{color:var(--fg);font-size:13px}
+  .al-row{display:flex;gap:10px;align-items:flex-start;padding:10px 2px;border-top:1px solid var(--line)}
+  .al-row:first-child{border-top:0;padding-top:2px}
+  .al-dot{width:7px;height:7px;border-radius:50%;margin-top:6px;flex:none;background:#5b636d}
+  .al-row.alert .al-dot{background:#e5484d;box-shadow:0 0 0 3px rgba(229,72,77,.15)}
+  .al-row.warn .al-dot{background:#d99b2b}
+  .al-row.info .al-dot{background:var(--accent)}
+  .al-main{flex:1;min-width:0}
+  .al-t{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+  .al-t b{font-size:13px}
+  .al-meta{color:var(--dim);font-size:11px}
+  .al-d{color:var(--dim);font-size:12px;margin-top:3px;word-break:break-all;line-height:1.5}
+  .al-empty{color:var(--dim);font-size:13px;padding:10px 2px}
+
+  /* ── 内容页通用 ── */
+  .scroller{height:100%;overflow:auto;padding:22px 26px}
+  h2{font-size:16px;margin:0 0 2px;font-weight:600}
+  .sub{color:var(--dim);margin-bottom:18px}
+  .grp{margin-bottom:22px}
+  .grp > .t{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;margin:0 0 8px 2px}
+  .card{background:var(--layer);border:1px solid var(--line);border-radius:var(--r-win);
+    padding:14px 16px;margin-bottom:8px}
+  .row{display:flex;align-items:center;gap:12px}
+  .row + .row{margin-top:10px}
+  .row .lbl{width:86px;color:var(--dim);flex:none}
+  input[type=text],input[type=number],select{height:32px;padding:0 10px;border-radius:var(--r-ctl);
+    border:1px solid var(--line2);background:#171a1f;color:var(--fg);outline:none;font-family:inherit;font-size:13px}
+  input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(63,217,192,.15)}
+  input[type=number]{width:92px}
+  .grow{flex:1;min-width:0}
+  .btn{height:32px;padding:0 14px;border-radius:var(--r-ctl);border:1px solid var(--line2);
+    background:var(--layer2);color:var(--fg);cursor:pointer}
+  .btn:hover{background:#2b3139;border-color:#3d4550}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#0c1a18;font-weight:600}
+  .btn.primary:hover{background:#54e6cf}
+  .btn.ghost{background:transparent}
+  .btn.danger{border-color:#5a2c31;color:#ff9aa3}
+  .btn.danger:hover{background:#3a2126}
+  .btn.sm{height:26px;padding:0 10px;font-size:12px}
+
+  .sw{width:42px;height:24px;border-radius:12px;background:#333a44;position:relative;flex:none;
+    cursor:pointer;transition:background .16s}
+  .sw.on{background:var(--accent)}
+  .sw::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;
+    background:#fff;transition:left .16s}
+  .sw.on::after{left:21px}
+
+  .pill{font-size:11px;padding:3px 9px;border-radius:999px;background:#212a31;color:var(--accent);white-space:nowrap}
+  .pill.p{background:#33212c;color:var(--pink)}
+  .pill.g{background:#26302a;color:var(--glow)}
+  .pill.mute{background:#242830;color:var(--dim)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--dim2);flex:none}
+  .dot.on{background:var(--accent);box-shadow:0 0 8px var(--accent)}
+  .dot.part{background:var(--warn);box-shadow:0 0 8px var(--warn)}
+  .dot.off{background:var(--err);box-shadow:0 0 8px var(--err)}
+
+  .code{position:relative;background:var(--deep);border:1px solid var(--line);border-radius:var(--r-win);
+    padding:12px 14px;font-family:Consolas,"Cascadia Mono",monospace;font-size:12px;
+    white-space:pre;overflow:auto;max-height:250px;color:#cfe3e0;line-height:1.5}
+  .copy{position:absolute;top:8px;right:8px}
+  .hint{color:var(--dim2);font-size:12px;margin-top:6px}
+  .star{color:var(--warn)}
+  .kv{color:var(--dim)}
+
+  /* 设置页:二级导航(rail 里放不下这么多项) */
+  #setBody{display:flex;height:100%}
+  #setNav{width:168px;flex:none;border-right:1px solid var(--line);padding:12px 8px;background:#191c21}
+  .sv{position:relative;padding:8px 12px;border-radius:var(--r-ctl);color:var(--dim);cursor:pointer;margin-bottom:2px}
+  .sv:hover{background:var(--layer2);color:var(--fg)}
+  .sv.on{background:#232a33;color:var(--accent)}
+  .sv.on::before{content:"";position:absolute;left:0;top:50%;transform:translateY(-50%);
+    width:3px;height:14px;border-radius:2px;background:var(--accent)}
+  #setPages{flex:1;overflow:auto;padding:20px 24px}
+  .sp2{display:none}
+  .sp2.on{display:block}
+
+  /* 底部操作条(设置页) */
+  #setFoot{position:absolute;left:0;right:0;bottom:0;height:50px;display:none;align-items:center;gap:8px;
+    padding:0 16px;border-top:1px solid var(--line);background:#1a1d22;z-index:5}
+  #setFoot.on{display:flex}
+  #pmsg{margin-left:auto;color:var(--dim);font-size:12px;text-align:right}
+  #pmsg.err{color:#ff8f97}
+  #pmsg.ok{color:var(--accent)}
+  #setPages{padding-bottom:70px}
+
+  /* ── 底部状态栏 ── */
+  #sbar{position:absolute;left:0;right:0;bottom:0;height:var(--sbar);display:flex;align-items:center;
+    gap:16px;padding:0 12px;background:var(--layer);border-top:1px solid var(--line);color:var(--dim);font-size:12px}
+  .st{display:flex;align-items:center;gap:6px}
+  #sbar .sp{margin-left:auto}
+
+  /* ── 编辑成员浮层 ── */
+  #dlg{position:absolute;inset:0;background:rgba(6,8,11,.5);display:none;align-items:center;
+    justify-content:center;z-index:50}
+  #dlg.on{display:flex}
+  #dlgbox{width:540px;background:#1f232a;border:1px solid var(--line2);border-radius:var(--r-win);
+    box-shadow:0 20px 48px rgba(0,0,0,.5);padding:18px 20px}
+  #dlgbox h3{margin:0 0 14px;font-size:14px}
+  #v-about a{color:var(--accent);text-decoration:none}
+  #v-about a:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+
+<!-- 标题栏 -->
+<div id="tbar">
+  <div id="logo"><img src="data:image/png;base64,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" alt="Castalia" width="20" height="20"></div>
+  <div id="brand">Castalia<small>记忆体 · 控制台</small></div>
+  <div id="tright">
+    <div class="wbtn" id="min" title="最小化"><svg viewBox="0 0 10 10"><path d="M0 5h10" stroke="currentColor" stroke-width="1"/></svg></div>
+    <div class="wbtn" id="max" title="最大化"><svg viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke="currentColor"/></svg></div>
+    <div class="wbtn close" id="cls" title="关闭"><svg viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor" stroke-width="1"/></svg></div>
+  </div>
+</div>
+
+<!-- rail + 内容 -->
+<div id="app">
+  <div id="rail">
+    <div class="ri on" data-v="viz" data-tip="星图(3D 总图)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="2.2"/><circle cx="5" cy="6" r="1.6"/><circle cx="19" cy="7" r="1.6"/><circle cx="7" cy="18" r="1.6"/><circle cx="18" cy="17" r="1.6"/><path d="M10.3 10.8 6.2 7.3M13.7 10.9l3.9-2.7M10.7 13.5l-2.2 3.3M13.5 13.6l3 2.2"/></svg>
+      星图</div>
+    <div class="ri" data-v="agg" data-tip="记忆总成(跨库聚合视图)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+      记忆总成</div>
+    <div class="ri" data-v="mng" data-tip="库管理(建库/导入/导出)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/><path d="M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/></svg>
+      库管理</div>
+    <div class="ri sep"></div>
+    <div class="ri" data-v="set" data-tip="设置">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      设置</div>
+    <div class="ri" data-v="svc" data-tip="服务">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01"/></svg>
+      服务</div>
+    <div class="ri" data-v="alert" data-tip="提醒(反思/整合异常与退避)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10.3 21a2 2 0 0 0 3.4 0"/></svg>
+      提醒<span id="alert-badge"></span></div>
+    <div class="ri" data-v="acc" data-tip="接入">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 3v6M15 3v6"/><path d="M6 9h12v3a6 6 0 0 1-12 0z"/><path d="M12 18v3"/></svg>
+      接入</div>
+    <div class="ri sp"></div>
+    <div class="ri" data-v="about" data-tip="关于">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/></svg>
+      关于</div>
+  </div>
+
+  <div id="views">
+    <!-- 星图 -->
+    <div class="view on" id="v-viz">
+      <iframe id="viz" data-src="http://127.0.0.1:3346/?embed=1" src="about:blank"></iframe>
+      <button id="viz-home" title="回到星图主页(星图左侧 rail 里的 记忆总成/库管理 会跳到别的页)">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 12l9-9 9 9"/><path d="M5 10v10h14V10"/></svg>回到主页</button>
+    </div>
+
+    <!-- 记忆总成 / 库管理(iframe,复用星图服务提供的页面) -->
+    <div class="view" id="v-agg"><iframe id="fr-agg" data-src="http://127.0.0.1:3346/aggregate.html?embed=1" src="about:blank"></iframe></div>
+    <div class="view" id="v-mng"><iframe id="fr-mng" data-src="http://127.0.0.1:3346/manage.html?embed=1" src="about:blank"></iframe></div>
+
+    <!-- 提醒中心 -->
+    <div class="view" id="v-alert">
+      <div class="scroller">
+        <h2>提醒</h2>
+        <div class="sub">反思失败/退避、整合异常、桥日志错误。每 30 秒自动刷新；rail 上的红点表示正在退避或失败。</div>
+        <div class="al-sum" id="alert-sum"></div>
+        <div class="grp">
+          <div class="t" style="display:flex;align-items:center;justify-content:space-between">
+            最近的提醒 <button class="btn sm ghost" id="alert-refresh">刷新</button></div>
+          <div class="card" id="alert-list"><div class="al-empty">加载中…</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 设置 -->
+    <div class="view" id="v-set">
+      <div id="setBody">
+        <div id="setNav">
+          <div class="sv on" data-s="general">常规</div>
+          <div class="sv" data-s="fed">联邦接口</div>
+          <div class="sv" data-s="inst">实例</div>
+        </div>
+        <div id="setPages">
+          <div class="sp2 on" id="sp-general">
+            <h2>常规</h2><div class="sub">应用信息与操作</div>
+            <div class="grp"><div class="t">应用程序</div>
+              <div class="card">
+                <div class="row"><span class="lbl">名称</span><span id="g-name">Castalia 记忆体</span></div>
+                <div class="row"><span class="lbl">配置</span><span class="grow kv" id="g-path"></span></div>
+                <div class="row"><span class="lbl">状态</span><span class="grow" id="g-stat"></span></div>
+              </div></div>
+            <div class="grp"><div class="t">操作</div>
+              <div class="card">
+                <div class="row"><span class="grow">重启托盘(让配置改动生效)</span>
+                  <button class="btn" id="btn-restart">重启托盘</button></div>
+                <div class="row"><span class="grow">重新加载界面(放弃未保存改动)</span>
+                  <button class="btn" id="btn-reload">重新加载</button></div>
+              </div></div>
+          </div>
+
+          <div class="sp2" id="sp-fed">
+            <h2>联邦接口</h2>
+            <div class="sub">把"跨记忆体检索"暴露成独立 MCP 端点 —— 任何客户端(含不带联邦代码的 Lite 实例)都能接入</div>
+            <div class="grp"><div class="t">服务</div>
+              <div class="card">
+                <div class="row"><span class="grow">启用联邦接口</span><div class="sw" id="fed-enable"></div></div>
+                <div class="row"><span class="lbl">名称</span><input type="text" id="fed-name" class="grow"></div>
+                <div class="row"><span class="lbl">端口</span><input type="number" id="fed-port">
+                  <span class="lbl" style="width:auto">引擎目录</span>
+                  <input type="text" id="fed-dir" class="grow"></div>
+              </div></div>
+            <div class="grp"><div class="t">成员(可被收纳的记忆体)</div>
+              <div id="fed-members"></div>
+              <div style="display:flex;gap:8px;margin-top:10px">
+                <button class="btn" id="btn-add-member">+ 添加成员</button>
+                <button class="btn ghost" id="btn-test-all">测试全部连通</button>
+              </div></div>
+          </div>
+
+          <div class="sp2" id="sp-inst">
+            <h2>实例</h2><div class="sub">接入端与变体(lite 中立核 / anima 情感层 / max 联合版)</div>
+            <div id="inst-list"></div>
+            <div class="hint">双击名称可改名;变体与图标在 castalia.config.json 的 instances[] 里改。</div>
+          </div>
+        </div>
+      </div>
+      <div id="setFoot">
+        <button class="btn primary" id="btn-save">保存</button>
+        <button class="btn" id="btn-save-restart">保存并重启托盘</button>
+        <div id="pmsg"></div>
+      </div>
+    </div>
+
+    <!-- 服务 -->
+    <div class="view" id="v-svc">
+      <div class="scroller">
+        <h2>服务</h2><div class="sub">各接入口的实时状态(开关操作在托盘菜单里)</div>
+        <div id="svc-list"></div>
+      </div>
+    </div>
+
+    <!-- 接入 -->
+    <div class="view" id="v-acc">
+      <div class="scroller">
+        <h2>接入</h2>
+        <div class="sub">任何支持 MCP 的客户端 / agent 框架都能接进来,下面是可直接粘贴的配置</div>
+        <div class="grp"><div class="t">方式一 · stdio(本地进程直挂,推荐)</div>
+          <label>接入实例 <select id="acc-instance"></select></label>
+          <div class="code" id="acc-stdio"></div>
+          <div class="hint">把上面的 JSON 合并进你 harness 的 MCP 配置(mcpServers 段)。</div></div>
+        <div class="grp"><div class="t">方式二 · HTTP 端点(容器 / 跨进程 / 另一台机器)</div>
+          <div id="acc-http"></div>
+          <div class="hint" style="margin-top:8px">端点由记忆桥提供,对端零改动;<span class="star">联邦接口</span>那一条能跨所有成员检索(含远端 MCP 端点)。</div></div>
+        <div class="grp"><div class="t">连接后可用的工具</div><div class="card" id="acc-tools"></div></div>
+        <div class="grp"><div class="t">说明</div><div class="card kv" id="acc-notes"></div></div>
+      </div>
+    </div>
+
+    <!-- 关于 -->
+    <div class="view" id="v-about">
+      <div class="scroller">
+        <h2>关于</h2><div class="sub">Castalia 记忆体 · 控制台</div>
+
+        <div class="card" style="display:flex;gap:16px;align-items:center">
+          <img src="data:image/png;base64,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" alt="Castalia" width="56" height="56"
+               style="border-radius:12px;flex:none;box-shadow:0 0 18px rgba(63,217,192,.3)">
+          <div>
+            <div style="font-size:17px;font-weight:600">Castalia 记忆体</div>
+            <div class="sub" style="margin:3px 0 0">开源记忆体系统 · 星图 / 记忆桥 / 联邦接口</div>
+            <div class="sub" style="margin:3px 0 0">v1.22.0 · MIT License · © 2026 Castalia contributors</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="row"><span class="lbl">完整版</span><span class="grow kv">
+            <a href="https://github.com/ehwin/castalia-full" target="_blank">castalia-full</a>
+            <span class="sub" style="margin-left:8px">联邦 / 跨库反思</span></span></div>
+          <div class="row"><span class="lbl">轻量版</span><span class="grow kv">
+            <a href="https://github.com/ehwin/Castalia" target="_blank">Castalia</a>
+            <span class="sub" style="margin-left:8px">单实例中立核心</span></span></div>
+          <div class="row"><span class="lbl">情感版</span><span class="grow kv">
+            <a href="https://github.com/ehwin/Castalia-Anima" target="_blank">Castalia-Anima</a>
+            <span class="sub" style="margin-left:8px">情感层</span></span></div>
+          <div class="row"><span class="lbl">作者</span><span class="grow kv">
+            <a href="https://github.com/ehwin" target="_blank">github.com/ehwin</a>
+            <span class="sub" style="margin-left:8px">· MIT,欢迎自部署与二次开发</span></span></div>
+        </div>
+
+        <div class="card">
+          <div class="row"><span class="lbl">引擎</span><span class="grow kv" id="ab-engine"></span></div>
+          <div class="row"><span class="lbl">运行时</span><span class="grow kv" id="ab-node"></span></div>
+          <div class="row"><span class="lbl">组件</span><span class="grow kv">控制台 · 星图 · 系统托盘 · 守护 · 联邦接口</span></div>
+          <div class="row"><span class="lbl">许可</span><span class="grow kv">MIT · 图标与品牌资源随项目一同发布</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 底部状态栏 -->
+<div id="sbar">
+  <div class="st"><span class="dot" id="d-bridge"></span><span id="t-bridge">记忆桥 —</span></div>
+  <div class="st"><span class="dot" id="d-viz"></span><span id="t-viz">星图 —</span></div>
+  <div class="st"><span class="dot" id="d-other"></span><span id="t-other">其它 —</span></div>
+  <div class="sp"></div>
+  <span id="t-total"></span>
+  <button class="btn sm ghost" id="refresh-st" title="刷新服务状态并重载当前页面">刷新</button>
+</div>
+
+<!-- 成员编辑浮层 -->
+<div id="dlg">
+  <div id="dlgbox">
+    <h3 id="dlg-title">编辑成员</h3>
+    <div class="row"><span class="lbl">标识</span><input type="text" id="m-id" class="grow"></div>
+    <div class="row"><span class="lbl">名称</span><input type="text" id="m-label" class="grow"></div>
+    <div class="row"><span class="lbl">传输</span>
+      <select id="m-transport"><option value="local-dir">local-dir(同机目录)</option>
+        <option value="mcp-http">mcp-http(远端端点)</option></select>
+      <span class="lbl" style="width:auto">变体</span>
+      <select id="m-variant"><option value="full">full</option><option value="anima">anima</option></select></div>
+    <div class="row"><span class="lbl">目标</span><input type="text" id="m-target" class="grow"></div>
+    <div class="row"><span class="lbl">能力</span><input type="text" id="m-caps" class="grow"
+      placeholder="逗号分隔,如 emotion,federation"></div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn primary" id="m-ok">确定</button>
+      <button class="btn ghost" id="m-cancel">取消</button>
+      <button class="btn danger" id="m-del" style="margin-left:auto">删除</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const api = () => (window.pywebview ? window.pywebview.api : null);
+const call = (fn, ...a) => api() && api()[fn](...a);
+let CFG = null, PATH = "", EDIT_IDX = -1;
+
+/* ══ 星图懒加载 ══ */
+/* 初始页来自 #viz 的 data-src —— 外壳进程可以用 --url 把它换成任意星图实例(3344/3345/3346),
+   没换过就是默认的 LobeHub 星图。以前这里写死 3346,导致 --url 被覆盖(2026-09-18 修)。 */
+const VIZ_IFRAME = $('viz');
+const VIZ_HOME = VIZ_IFRAME.dataset.src || 'http://127.0.0.1:3346/?embed=1';   // embed=1 → 星图隐藏自带 rail
+const VIZ_BASE = (function () {
+  try { return new URL(VIZ_HOME).origin; } catch (e) { return 'http://127.0.0.1:3346'; }
+})();
+/* 记忆总成 / 库管理跟着当前星图实例走(外壳被指向哪张星图,就用哪张的 aggregate/manage) */
+['fr-agg', 'fr-mng'].forEach((id) => {
+  const f = $(id);
+  if (f && f.dataset.src) f.dataset.src = f.dataset.src.replace(/^https?:\/\/127\.0\.0\.1:\d+/, VIZ_BASE);
+});
+(function () {
+  const f = $('viz');
+  const load = () => { if (f.src.endsWith('about:blank')) f.src = f.dataset.src = VIZ_HOME; };
+  if (window.pywebview) setTimeout(load, 800); else setTimeout(load, 1300);
+})();
+
+/* ══ 窗口控制(拖动/双击由 Python 交给系统)═══ */
+$('min').onclick = () => call('minimize');
+$('max').onclick = () => call('toggle_max');
+$('cls').onclick = () => call('close');
+let lastDown = 0;
+$('tbar').addEventListener('mousedown', (e) => {
+  if (e.button !== 0 || e.target.closest('.wbtn') || e.target.closest('.tb-btn')) return;
+  const now = Date.now();
+  if (now - lastDown < 400) { lastDown = 0; call('toggle_max'); return; }
+  lastDown = now; call('start_drag');
+});
+
+/* ══ rail 切换(和星图同一套交互)═══ */
+const railBtns = document.querySelectorAll('.ri[data-v]');
+railBtns.forEach(b => b.onclick = () => {
+  const v = b.dataset.v;
+  railBtns.forEach(x => x.classList.remove('on'));
+  document.querySelectorAll('.view').forEach(x => x.classList.remove('on'));
+  b.classList.add('on');
+  $('v-' + v).classList.add('on');
+  $('setFoot').classList.toggle('on', v === 'set');
+  // 记忆总成 / 库管理 用 iframe 承载:首次进入加载,**之后每次进入都重新拉**(这两个是数据看板,
+  // 无状态;否则外壳里永远停在旧版页面 —— 改完前端必须重启控制台才生效,踩过多次)
+  const fr = { agg: 'fr-agg', mng: 'fr-mng' }[v];
+  if (fr) {
+    const f = $(fr), base = (f.dataset.src || '').replace(/[?&]r=\d+/, '');
+    if (!f.src.endsWith('about:blank') && base) f.src = base + (base.indexOf('?') >= 0 ? '&' : '?') + 'r=' + Date.now();
+    else if (f.src.endsWith('about:blank')) f.src = f.dataset.src;
+  }
+  if (v === 'svc') refreshStatus();
+  if (v === 'alert') refreshAlerts();
+});
+/* 二级导航(设置内) */
+document.querySelectorAll('.sv').forEach(n => n.onclick = () => {
+  document.querySelectorAll('.sv').forEach(x => x.classList.remove('on'));
+  document.querySelectorAll('.sp2').forEach(x => x.classList.remove('on'));
+  n.classList.add('on');
+  $('sp-' + n.dataset.s).classList.add('on');
+});
+
+
+/* 顶栏的星图相关入口(星图 / 记忆总成 / 库管理)—— 都走 embed 模式,导航归外壳管 */
+/* 回到星图主页(星图内部跳去子页后用) */
+function navTo(url) {
+  document.querySelectorAll('.ri[data-v]').forEach(x => x.classList.remove('on'));
+  const home = document.querySelector('.ri[data-v="viz"]');
+  if (home) home.classList.add('on');
+  document.querySelectorAll('.view').forEach(x => x.classList.remove('on'));
+  $('v-viz').classList.add('on');
+  $('setFoot').classList.remove('on');
+  const f = $('viz');
+  if (f.src !== url) f.src = url;
+}
+
+/* 星图跳去子页(记忆总成/库管理)后,给一个显眼的回程入口 */
+$('viz').addEventListener('load', () => {
+  if (!$('viz').src.endsWith('about:blank')) $('viz-home').classList.add('show');
+});
+$('viz-home').onclick = () => navTo(VIZ_HOME);
+
+/* ══ 外部导航入口 ══
+   托盘点「打开…」时走外壳控制端口(castalia_shell.py /open)→ evaluate_js 调它:
+     __nav(url)          → 星图 iframe 换到 url(带 embed=1 的话自带 rail 会隐藏)
+     __nav("", "agg")    → 切到记忆总成视图(其余视图同理:viz/agg/mng/set/svc/acc/about)
+     __nav(url, "viz")   → 切回星图视图并换页 */
+/* 重载某个视图的 iframe(保留当前地址,只加时间戳破缓存)——
+ * 外壳的页面是懒加载"只载一次"的,前端更新后必须手动刷一下(踩过:改了总成页样式,外壳里还是旧版) */
+function reloadView(view) {
+  const c = document.getElementById('v-' + view);
+  const f = c && c.querySelector('iframe');
+  if (!f || !f.src || f.src.endsWith('about:blank')) return;
+  const base = f.src.replace(/[?&]r=\d+/, '');
+  f.src = base + (base.indexOf('?') >= 0 ? '&' : '?') + 'r=' + Date.now();
+}
+window.__nav = function (url, view) {
+  try {
+    /* 总成/库管理是独立 iframe:要按目标 origin 设置 iframe 地址。
+     * 以前只 b.click() 走默认 data-src —— 外壳若从 3345/3346 启动,点 3348 的总成
+     * 会静默显示/改写另一实例的库(2026-10-17 实测)。 */
+    if (view === 'agg' || view === 'mng') {
+      const b = document.querySelector('.ri[data-v="' + view + '"]');
+      if (!b) return;
+      if (!b.classList.contains('on')) b.click();
+      if (url) {
+        const f = document.getElementById(view === 'agg' ? 'fr-agg' : 'fr-mng');
+        if (f) {
+          f.dataset.src = url;
+          f.src = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'r=' + Date.now();
+        }
+      }
+      return;
+    }
+    if (view && view !== 'viz') {
+      const b = document.querySelector('.ri[data-v="' + view + '"]');
+      if (b && b.classList.contains('on')) { reloadView(view); return; }   /* 再点当前项=刷新该页 */
+      if (b) { b.click(); return; }
+    }
+    if (url) navTo(url);
+  } catch (e) {}
+};
+
+/* ══ 复制 ══ */
+function copy(text, btn) {
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.style.position = 'fixed'; ta.style.left = '-9999px';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); } catch (e) {}
+  document.body.removeChild(ta);
+  if (btn) { const o = btn.textContent; btn.textContent = '已复制'; setTimeout(() => btn.textContent = o, 1200); }
+}
+
+/* ══ 提醒中心 ══ */
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, m =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+const fmtAge = (h) => {
+  if (h === null || h === undefined) return '本次启动后';
+  if (h < 1) return Math.max(1, Math.round(h * 60)) + ' 分钟前';
+  if (h < 48) return h.toFixed(1) + ' 小时前';
+  return Math.round(h / 24) + ' 天前';
+};
+async function refreshAlerts() {
+  if (!api() || !api().get_alerts) return;
+  let r;
+  try { r = await api().get_alerts(); } catch (e) { return; }
+  const items = (r && r.items) || [];
+  const c = (r && r.counts) || {};
+  const n = (c.alert || 0) + (c.warn || 0);
+  const badge = $('alert-badge');
+  badge.style.display = n > 0 ? 'block' : 'none';
+  badge.textContent = n > 99 ? '99+' : String(n);
+  badge.className = (c.alert || 0) > 0 ? '' : 'warn';
+  $('alert-sum').innerHTML =
+    '<span class="al-chip"><span class="al-dot" style="background:#e5484d"></span>失败/退避 <b>' + (c.alert || 0) + '</b></span>' +
+    '<span class="al-chip"><span class="al-dot" style="background:#d99b2b"></span>警告 <b>' + (c.warn || 0) + '</b></span>' +
+    '<span class="al-chip"><span class="al-dot" style="background:var(--accent)"></span>信息 <b>' + (c.info || 0) + '</b></span>';
+  const list = $('alert-list');
+  if (!items.length) { list.innerHTML = '<div class="al-empty">暂无提醒 — 反思与整合均正常</div>'; return; }
+  list.innerHTML = items.map((it) => {
+    const where = it.kind === 'log'
+      ? ('日志 · ' + (it.title || ''))
+      : ((it.project || it.bank || '') + ' · ' + (it.kind === 'reflect' ? '反思' : it.kind === 'consolidate' ? '整合' : it.kind));
+    return '<div class="al-row ' + esc(it.level) + '"><span class="al-dot"></span><div class="al-main">' +
+      '<div class="al-t"><b>' + esc(it.title) + '</b>' +
+      '<span class="al-meta">' + esc(where) + ' · ' + esc(fmtAge(it.ageHours)) + '</span></div>' +
+      '<div class="al-d">' + esc(it.detail) + '</div></div></div>';
+  }).join('');
+}
+$('alert-refresh').onclick = refreshAlerts;
+
+/* ══ 状态栏 ══ */
+function paintStatus(st) {
+  if (!st || !st.ok) return;
+  const by = {};
+  (st.groups || []).forEach(g => by[g.kind] = g.items);
+  const set = (kind, did, tid) => {
+    const items = by[kind] || [];
+    if (!items.length) return;
+    const up = items.filter(i => i.up).length;
+    $(did).className = 'dot ' + (up === items.length ? 'on' : (up ? 'part' : 'off'));
+    $(tid).textContent = kind + ' ' + up + '/' + items.length;
+  };
+  set('桥', 'd-bridge', 't-bridge');
+  set('星图', 'd-viz', 't-viz');
+  set('其它', 'd-other', 't-other');
+  $('t-total').textContent = '共 ' + st.up + '/' + st.total + ' 个服务在线';
+}
+async function refreshStatus() {
+  if (!api()) return;
+  try { paintStatus(await api().get_status()); } catch (e) {}
+}
+/* ══ 状态栏刷新(全应用唯一刷新入口)══
+ * 语义统一:重载当前页(星图 / 记忆总成 / 库管理)+ 刷新服务状态。
+ * 2026-10-17:侧栏原有一个 ↻ 只重载 iframe,和这里的"刷新"语义不一致,已删除并入此处。 */
+function refreshCurrent() {
+  const cur = document.querySelector('.view.on');
+  if (cur) reloadView(cur.id.replace(/^v-/, ''));
+  refreshStatus();
+  const b = $('refresh-st');
+  b.textContent = '已刷新';
+  setTimeout(() => { b.textContent = '刷新'; }, 1200);
+}
+$('refresh-st').onclick = refreshCurrent;
+
+const msg = (t, cls) => { const m = $('pmsg'); m.textContent = t || ''; m.className = cls || ''; };
+
+/* ══ 渲染:联邦接口 ══ */
+function renderFed() {
+  const fs = CFG.federationService || (CFG.federationService = {
+    id: 'federation-bridge', name: '联邦接口', port: 3314, dir: 'runFed', members: [] });
+  $('fed-enable').className = 'sw' + (CFG.federationService ? ' on' : '');
+  $('fed-name').value = fs.name || '';
+  $('fed-port').value = fs.port || 3314;
+  $('fed-dir').value = fs.dir || 'runFed';
+  const box = $('fed-members');
+  box.innerHTML = '';
+  (fs.members || []).forEach((m, i) => {
+    const caps = (m.capabilities || []).map(c =>
+      `<span class="pill ${c === 'emotion' ? 'p' : (c === 'federation' ? 'g' : 'mute')}">${c}</span>`).join(' ');
+    const el = document.createElement('div');
+    el.className = 'card';
+    el.innerHTML = `<div class="row">
+        <span class="dot" data-dot="${i}"></span>
+        <b>${m.label || m.id}</b>
+        <span class="pill mute">${m.transport || 'local-dir'}</span>
+        <span class="pill">${m.variant || '-'}</span>${caps}
+        <span class="grow kv" style="font-size:12px;overflow:hidden;text-overflow:ellipsis;
+          white-space:nowrap">${m.target || ''}</span>
+        <button class="btn sm" data-edit="${i}">编辑</button>
+      </div>`;
+    box.appendChild(el);
+  });
+  box.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openMember(+b.dataset.edit));
+  if (api()) {
+    (fs.members || []).forEach(async (m, i) => {
+      const r = await api().test_member(m);
+      const d = box.querySelector(`[data-dot="${i}"]`);
+      if (d) d.className = 'dot ' + (r.ok ? 'on' : 'off');
+    });
+  }
+}
+
+/* ══ 渲染:实例 / 服务 / 接入 / 关于 ══ */
+function renderInst() {
+  const box = $('inst-list');
+  box.innerHTML = '';
+  (CFG.instances || []).forEach((it, i) => {
+    const el = document.createElement('div');
+    el.className = 'card';
+    el.innerHTML = `<div class="row">
+      <b data-name="${i}" style="cursor:text">${it.label || it.id}</b>
+      <span class="pill">${it.variant || 'lite'}</span>
+      <span class="pill mute">${it.id}</span>
+      <span class="grow kv" style="font-size:12px">${it.bank || ''}</span>
+      <span class="kv" style="font-size:12px">${(it.icon || '').split('/').pop()}</span></div>`;
+    box.appendChild(el);
+  });
+  box.querySelectorAll('[data-name]').forEach(b => b.ondblclick = () => {
+    const i = +b.dataset.name;
+    const v = prompt('名称', CFG.instances[i].label || '');
+    if (v) { CFG.instances[i].label = v; b.textContent = v; msg('名称已改,记得点保存', ''); }
+  });
+}
+function renderSvc(st) {
+  const box = $('svc-list');
+  box.innerHTML = '';
+  ((st && st.groups) || []).forEach(g => {
+    const t = document.createElement('div');
+    t.className = 'grp';
+    t.innerHTML = `<div class="t">${g.kind}</div>`;
+    g.items.forEach(it => {
+      const el = document.createElement('div');
+      el.className = 'card';
+      el.innerHTML = `<div class="row"><span class="dot ${it.up ? 'on' : 'off'}"></span>
+        <b>${it.name || it.id}</b><span class="pill mute">:${it.port}</span>
+        <span class="grow kv" style="font-size:12px">${it.up ? '运行中' : '未运行'}</span></div>`;
+      t.appendChild(el);
+    });
+    box.appendChild(t);
+  });
+}
+function renderAccess(a) {
+  if (!a || !a.ok) { $('acc-stdio').textContent = '接入信息不可用:' + ((a && a.error) || ''); return; }
+  const selector = $('acc-instance');
+  const previous = selector.value;
+  const options = a.stdioOptions || [];
+  selector.replaceChildren(...options.map(o => {
+    const el = document.createElement('option');
+    el.value = o.id; el.textContent = o.name; return el;
+  }));
+  selector.value = options.some(o => o.id === previous) ? previous : a.selectedBridge;
+  let stdioJson = a.stdioJson || '{}';
+  const showStdio = () => {
+    stdioJson = (options.find(o => o.id === selector.value) || a).stdioJson || '{}';
+    $('acc-stdio').replaceChildren();
+    const button = document.createElement('button');
+    button.className = 'btn sm copy'; button.textContent = '复制';
+    button.onclick = () => copy(stdioJson, button);
+    $('acc-stdio').append(button, document.createTextNode(stdioJson));
+  };
+  selector.onchange = showStdio; showStdio();
+  const box = $('acc-http');
+  box.innerHTML = '';
+  (a.http || []).forEach(h => {
+    const el = document.createElement('div');
+    el.className = 'card';
+    el.innerHTML = `<div class="row"><span class="dot ${h.up ? 'on' : 'off'}"></span>
+      <b>${h.name}</b><span class="pill mute">${h.id}</span>
+      <span class="grow" style="font-family:Consolas,monospace;color:var(--accent2)">${h.url}</span>
+      <button class="btn sm" data-copy="${h.url}">复制地址</button></div>`;
+    box.appendChild(el);
+  });
+  const jb = document.createElement('div');
+  jb.className = 'card';
+  jb.innerHTML = `<div class="row" style="margin-bottom:8px"><b style="flex:1">全部端点(JSON)</b>
+      <button class="btn sm" data-copy="http">复制</button></div>
+    <div class="code" style="max-height:190px">${(a.httpJson || '').replace(/</g, '&lt;')}</div>`;
+  box.appendChild(jb);
+  $('acc-tools').innerHTML = Object.entries(a.tools || {}).map(([k, v]) =>
+    `<div class="row"><span class="lbl">${k}</span><span class="grow"
+      style="font-family:Consolas,monospace;font-size:12px;color:var(--accent2)">${v.join('  ')}</span></div>`).join('');
+  $('acc-notes').innerHTML = (a.notes || []).map(n => '· ' + n).join('<br>');
+  document.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => {
+    const k = b.dataset.copy;
+    copy(k === 'stdio' ? stdioJson : (k === 'http' ? a.httpJson : k), b);
+  });
+}
+function renderAbout(a, st) {
+  $('ab-engine').textContent = (a && a.stdio ? a.stdio.args[0] : '');
+  $('ab-node').textContent = (a && a.stdio ? a.stdio.command : '');
+  $('g-name').textContent = (CFG.app && CFG.app.name) || 'Castalia 记忆体';
+  $('g-path').textContent = PATH || '';
+  $('g-stat').innerHTML = st && st.ok
+    ? `<span class="dot ${st.up === st.total ? 'on' : (st.up ? 'part' : 'off')}"></span> ${st.up}/${st.total} 个服务在线`
+    : '未知';
+}
+
+/* ══ 成员编辑 ══ */
+function openMember(i) {
+  EDIT_IDX = i;
+  const fs = CFG.federationService;
+  const m = i >= 0 ? fs.members[i] : { id: '', label: '', transport: 'local-dir', variant: 'lite',
+    capabilities: [], target: '' };
+  $('dlg-title').textContent = i >= 0 ? '编辑成员' : '添加成员';
+  $('m-id').value = m.id || ''; $('m-label').value = m.label || '';
+  $('m-transport').value = m.transport || 'local-dir';
+  $('m-variant').value = m.variant || 'lite';
+  $('m-target').value = m.target || '';
+  $('m-caps').value = (m.capabilities || []).join(',');
+  $('m-del').style.display = i >= 0 ? '' : 'none';
+  $('dlg').classList.add('on');
+}
+$('btn-add-member').onclick = () => openMember(-1);
+$('m-cancel').onclick = () => $('dlg').classList.remove('on');
+$('m-ok').onclick = () => {
+  const fs = CFG.federationService || (CFG.federationService = { members: [] });
+  fs.members = fs.members || [];
+  const m = { id: $('m-id').value.trim(), label: $('m-label').value.trim(),
+    transport: $('m-transport').value, variant: $('m-variant').value,
+    capabilities: $('m-caps').value.split(',').map(x => x.trim()).filter(Boolean),
+    target: $('m-target').value.trim() };
+  if (!m.id || !m.target) { alert('标识与目标都必须填'); return; }
+  if (EDIT_IDX >= 0) fs.members[EDIT_IDX] = m; else fs.members.push(m);
+  $('dlg').classList.remove('on');
+  renderFed(); msg('成员已更新,记得点保存', '');
+};
+$('m-del').onclick = () => {
+  if (EDIT_IDX < 0 || !confirm('删除该成员?')) return;
+  CFG.federationService.members.splice(EDIT_IDX, 1);
+  $('dlg').classList.remove('on');
+  renderFed(); msg('成员已删除,记得点保存', '');
+};
+$('btn-test-all').onclick = async () => {
+  const ms = (CFG.federationService || {}).members || [];
+  msg('测试中…', '');
+  const rs = [];
+  for (const m of ms) { const r = await api().test_member(m); rs.push(`${m.id}: ${r.ok ? '✓' : '✗'} ${r.detail}`); }
+  alert(rs.join('\n') || '没有成员');
+  msg('', '');
+};
+
+/* ══ 保存 ══ */
+function collect() {
+  if (!$('fed-enable').classList.contains('on')) { delete CFG.federationService; }
+  else {
+    const fs = CFG.federationService || (CFG.federationService = { id: 'federation-bridge', members: [] });
+    fs.name = $('fed-name').value.trim() || '联邦接口';
+    fs.port = parseInt($('fed-port').value, 10) || 3314;
+    fs.dir = $('fed-dir').value.trim() || 'runFed';
+  }
+  return CFG;
+}
+async function save(restart) {
+  if (!api()) return;
+  msg('保存中…', '');
+  const r = await api().save_config(collect());
+  if (!r.ok) { msg('保存失败:' + (r.errors || []).join(';'), 'err'); return; }
+  msg('已保存' + (restart ? ',正在重启托盘…' : ''), 'ok');
+  if (restart) { await api().restart_tray(); setTimeout(refreshStatus, 2500); }
+}
+$('btn-save').onclick = () => save(false);
+$('btn-save-restart').onclick = () => save(true);
+$('btn-restart').onclick = async () => { msg('重启托盘中…', ''); await api().restart_tray();
+  setTimeout(async () => { msg('托盘已重启', 'ok'); refreshStatus(); }, 2500); };
+$('btn-reload').onclick = () => location.reload();
+$('fed-enable').onclick = () => $('fed-enable').classList.toggle('on');
+
+/* ══ 启动 ══ */
+const boot = async () => {
+  if (!api()) { setTimeout(boot, 300); return; }
+  let b;
+  try {
+    b = await api().get_bootstrap();
+  } catch (e) {
+    alert('控制台初始化失败：' + (e && e.message ? e.message : e) + '\n请检查 scripts/castalia.config.json 是否存在且为 UTF-8 JSON');
+    return;
+  }
+  if (!b || b.ok === false) {
+    alert('配置读取失败：' + ((b && b.error) || '未知错误') + '\n修复配置后点“重载”。');
+    if (!b) return;
+  }
+  CFG = b.config || {}; PATH = b.path;
+  renderFed(); renderInst(); renderSvc(b.status); renderAccess(b.access); renderAbout(b.access, b.status);
+  paintStatus(b.status);
+  setInterval(refreshStatus, 5000);
+  refreshAlerts();
+  setInterval(refreshAlerts, 30000);
+};
+window.addEventListener('pywebviewready', boot);
+if (window.pywebview && window.pywebview.api) boot();
+</script>
+</body>
+</html>

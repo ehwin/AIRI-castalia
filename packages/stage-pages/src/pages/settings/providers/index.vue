@@ -4,11 +4,9 @@ import type { Ref } from 'vue'
 
 import { isCustomProvidersDisabled } from '@proj-airi/stage-shared'
 import { IconStatusItem, RippleGrid } from '@proj-airi/stage-ui/components'
-import { useAnalytics } from '@proj-airi/stage-ui/composables'
 import { useRippleGridState } from '@proj-airi/stage-ui/composables/use-ripple-grid-state'
 import { providerSettingsRouteOf } from '@proj-airi/stage-ui/libs/providers/metadata'
 import { useArtistryStore } from '@proj-airi/stage-ui/stores/modules/artistry'
-import { useProviderConfigStore } from '@proj-airi/stage-ui/stores/providers/config'
 import { useProviderStore } from '@proj-airi/stage-ui/stores/providers/provider'
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, ref } from 'vue'
@@ -44,10 +42,8 @@ const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
 const providersStore = useProviderStore()
-const providerConfigStore = useProviderConfigStore()
 const artistryStore = useArtistryStore()
 const { lastClickedIndex, setLastClickedIndex } = useRippleGridState()
-const { trackProviderClick } = useAnalytics()
 
 const {
   allChatProvidersMetadata,
@@ -55,7 +51,6 @@ const {
   allAudioTranscriptionProvidersMetadata,
   allVisionProvidersMetadata,
 } = storeToRefs(providersStore)
-const { replicaSyncState } = storeToRefs(providerConfigStore)
 
 const allArtistryProvidersMetadata = computed<ProviderSourceCard[]>((): ProviderSourceCard[] => {
   return [
@@ -298,11 +293,9 @@ const providerBlocks = computed(() => {
           :icon-image="provider.iconImage"
           :to="providerSettingsRouteOf(provider)"
           :configured="provider.configured"
-          :sync-state="replicaSyncState[provider.id]"
           :pricing="provider.pricing"
           :deployment="provider.deployment"
           :beginner-recommended="provider.beginnerRecommended"
-          @click="trackProviderClick(provider.id, provider.category)"
         />
       </template>
     </RippleGrid>

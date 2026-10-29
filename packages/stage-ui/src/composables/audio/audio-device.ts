@@ -6,10 +6,6 @@ import { AudioInput } from '@proj-airi/pipelines-audio'
 import { useDevicesList } from '@vueuse/core'
 import { computed, markRaw, onScopeDispose, ref, shallowRef, watch } from 'vue'
 
-import { useAnalytics } from '../use-analytics'
-
-const UNKNOWN_STT_PROVIDER_ID = 'unknown'
-
 /** Speech-onset capture replays this much audio from before detection. */
 const MICROPHONE_HISTORY_MS = 360
 
@@ -25,7 +21,7 @@ const MICROPHONE_HISTORY_MS = 360
 const MICROPHONE_CONTEXT: AudioContextOptions = { sampleRate: 16000 }
 
 /**
- * Normalizes browser microphone failures into low-cardinality analytics codes.
+ * Classifies browser microphone failures.
  */
 function audioDeviceErrorCode(error: unknown): 'permission_denied' | 'device_unavailable' {
   if (error instanceof DOMException && (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError'))
@@ -60,7 +56,6 @@ function resolvePreferredAudioInput(audioInputs: readonly MediaDeviceInfo[]) {
  * preferred device once the browser lists device IDs, so controls show the device that capture uses.
  */
 export function useAudioDevice(selectedAudioInput: Ref<string> = ref('')) {
-  const { trackMicrophonePermissionDenied } = useAnalytics()
   const { devices, audioInputs } = useDevicesList({ requestPermissions: false })
   const permissionGranted = ref(false)
   /**
@@ -159,7 +154,6 @@ export function useAudioDevice(selectedAudioInput: Ref<string> = ref('')) {
       if (audioDeviceErrorCode(error) === 'permission_denied') {
         permissionGranted.value = false
         permission.value = 'denied'
-        trackMicrophonePermissionDenied({ stt_provider_id: UNKNOWN_STT_PROVIDER_ID, error_code: 'permission_denied' })
       }
       throw error
     }

@@ -9,18 +9,13 @@ import type { LlmStreamOptions } from './ai/chat-llm/llm'
 
 import { errorMessageFrom } from '@moeru/std'
 import { SpanStatusCode } from '@opentelemetry/api'
+import { useCastaliaPluginStore } from '@proj-airi/castalia-plugin'
 import { IOAttributes, IOSpanNames } from '@proj-airi/stage-shared'
 import { createPinia, defineStore, disposePinia, setActivePinia } from 'pinia'
 import { createSyncedPiniaPlugin } from 'pinia-plugin-synced'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { computed, createApp, nextTick, reactive, ref, toRaw } from 'vue'
 
-import { getAnalytics } from '../libs/product-signals'
-import {
-  AIRI_CHAT_APP_SURFACE_HEADER,
-  AIRI_CHAT_ROUND_ID_HEADER,
-  AIRI_CHAT_SESSION_ID_HEADER,
-} from '../libs/product-signals/headers'
 import { composeDrawCardPrompt } from '../tools/draw-card'
 import { composeMemoryPrompt } from '../tools/memory'
 import { useChatStore } from './chat'
@@ -64,23 +59,10 @@ const ioTracerMocks = vi.hoisted(() => {
 })
 
 const llmStreamMock = vi.fn()
-const trackFirstMessageMock = vi.fn()
-const chatAnalyticsMocks = vi.hoisted(() => ({
-  trackMessageRound: vi.fn(),
-  trackMessageRoundFailed: vi.fn(),
-  trackMessageSent: vi.fn(),
-}))
-const redundantChatAnalyticsMocks = vi.hoisted(() => ({
-  trackAssistantResponseCompleted: vi.fn(),
-  trackChatFailed: vi.fn(),
-  trackChatStarted: vi.fn(),
-  trackFeatureUsed: vi.fn(),
-}))
 const ingestContextMessageMock = vi.fn()
 const getContextsSnapshotMock = vi.fn()
 const createRuntimePromptContextMock = vi.fn()
 const createMinecraftContextMock = vi.fn()
-const createUserAccountContextMock = vi.fn()
 const persistSessionMessagesMock = vi.fn()
 const forkSessionMock = vi.fn()
 const createSessionMock = vi.fn()
@@ -107,10 +89,6 @@ const sessionMessages = reactive<Record<string, ChatHistoryItem[]>>({})
 const sessionMetas = reactive<Record<string, ChatSessionMeta>>({})
 let currentGeneration = 1
 
-vi.mock('../composables', () => ({
-  getConversationAnalyticsSurface: () => 'web',
-}))
-
 vi.mock('../composables/use-io-tracer', () => ({
   registerTurnSpan: ioTracerMocks.registerTurnSpan,
   startSpan: ioTracerMocks.startSpanMock,
@@ -121,7 +99,6 @@ vi.mock('../composables/use-io-tracer', () => ({
 vi.mock('./chat/context-providers', () => ({
   createMinecraftContext: () => createMinecraftContextMock(),
   createRuntimePromptContext: (prompt: string) => createRuntimePromptContextMock(prompt),
-  createUserAccountContext: () => createUserAccountContextMock(),
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -318,35 +295,10 @@ describe('chat store contract', () => {
   beforeEach(() => {
     cardPrompt.value = 'system prompt'
     setActivePinia(createPinia())
-    vi.spyOn(getAnalytics(), 'emit').mockImplementation((event, properties) => {
-      switch (event.name) {
-        case 'message_round':
-          chatAnalyticsMocks.trackMessageRound(properties)
-          break
-        case 'message_round_failed':
-          chatAnalyticsMocks.trackMessageRoundFailed(properties)
-          break
-        case 'message_sent':
-          chatAnalyticsMocks.trackMessageSent(properties)
-          break
-        default:
-          return false
-      }
-      return true
-    })
-    vi.spyOn(getAnalytics(), 'recordFirstMessage').mockImplementation(trackFirstMessageMock)
     llmStreamMock.mockReset()
-    trackFirstMessageMock.mockReset()
-    for (const analyticsMock of Object.values(chatAnalyticsMocks))
-      analyticsMock.mockReset()
-    redundantChatAnalyticsMocks.trackAssistantResponseCompleted.mockReset()
-    redundantChatAnalyticsMocks.trackChatFailed.mockReset()
-    redundantChatAnalyticsMocks.trackChatStarted.mockReset()
-    redundantChatAnalyticsMocks.trackFeatureUsed.mockReset()
     ingestContextMessageMock.mockReset()
     getContextsSnapshotMock.mockReset()
     getContextsSnapshotMock.mockReturnValue({})
-    createUserAccountContextMock.mockReset().mockReturnValue(null)
     createRuntimePromptContextMock.mockReset()
     createRuntimePromptContextMock.mockReturnValue(undefined)
     createMinecraftContextMock.mockReset()
@@ -529,12 +481,7 @@ describe('chat store contract', () => {
     // The session prompt also carries the format rules and the memory index, so only its parts are checked.
     expect(steps[0]).toMatchObject({ model: 'alice-model', providerId: 'alice-provider', systemPrompt: expect.stringContaining('Alice prompt') })
     expect(steps[0]?.systemPrompt).toMatch(/Plugin toolset guidance\.$/)
-    expect(steps[0]?.headers).not.toHaveProperty(AIRI_CHAT_SESSION_ID_HEADER)
     expect(steps[1]).toMatchObject({ model: 'chat-auto', providerId: 'official-provider', systemPrompt: expect.stringContaining('Edited Alice prompt') })
-    expect(steps[1]?.headers).toMatchObject({
-      [AIRI_CHAT_SESSION_ID_HEADER]: 'session-1',
-      [AIRI_CHAT_ROUND_ID_HEADER]: expect.any(String),
-    })
     expect(getChatProviderInstanceMock).toHaveBeenLastCalledWith('official-provider', { reasoning: 'disabled' })
   })
 
@@ -609,8 +556,8 @@ describe('chat store contract', () => {
     // The session character's wake word tool joins every turn. It is not a selectable stored tool.
     // Reply cards are on by default, so the owner's chat also gets the card tool and the icon search of cards.
     expect(resolvedToolNames).toEqual([
-      ['stage_widgets', 'configure_wake_words', 'builtIn_readMemory', 'builtIn_writeMemory', 'builtIn_forgetMemory', 'builtIn_useRecipe', 'builtIn_proposeRecipe', 'builtIn_drawCard', 'builtIn_searchIcons'],
-      ['stage_widgets', 'configure_wake_words', 'builtIn_readMemory', 'builtIn_writeMemory', 'builtIn_forgetMemory', 'builtIn_useRecipe', 'builtIn_proposeRecipe', 'builtIn_drawCard', 'builtIn_searchIcons'],
+      ['stage_widgets', 'configure_wake_words', 'builtIn_readMemory', 'builtIn_writeMemory', 'builtIn_forgetMemory', 'builtIn_castaliaRecordEmotion', 'builtIn_castaliaSetDesire', 'builtIn_castaliaAdjustEnergy', 'builtIn_useRecipe', 'builtIn_proposeRecipe', 'builtIn_drawCard', 'builtIn_searchIcons'],
+      ['stage_widgets', 'configure_wake_words', 'builtIn_readMemory', 'builtIn_writeMemory', 'builtIn_forgetMemory', 'builtIn_castaliaRecordEmotion', 'builtIn_castaliaSetDesire', 'builtIn_castaliaAdjustEnergy', 'builtIn_useRecipe', 'builtIn_proposeRecipe', 'builtIn_drawCard', 'builtIn_searchIcons'],
     ])
   })
 
@@ -686,6 +633,132 @@ describe('chat store contract', () => {
 
     expect(toolNames[1]).not.toContain('builtIn_writeMemory')
     expect(prompt).not.toContain('channel-rules')
+  })
+
+  it('binds Castalia self-state and state tools to the run persona, then removes both when disabled', async () => {
+    sessionMetas['scene-session'] = { sessionId: 'scene-session', userId: 'local', characterId: 'discord-host', bindings: ['discord:channel:a'], createdAt: 1, updatedAt: 1 }
+    const prompts: string[] = []
+    const toolNames: string[][] = []
+    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: GenerationProvider, context: Conversation, options: any) => {
+      const system = context.turns.find(turn => turn.type === 'system')
+      prompts.push(system?.type === 'system' && system.content[0]?.type === 'text' ? system.content[0].text : '')
+      const tools = typeof options.tools === 'function' ? await options.tools() : options.tools
+      toolNames.push(tools.map((tool: Tool) => tool.function.name))
+      await options.onStreamEvent({ type: 'finish' })
+    })
+    const castalia = useCastaliaPluginStore()
+    castalia.recordMood(6, 'I enjoyed solving this together.', 'discord-host')
+    castalia.recordEmotion({ valence: 0.6, arousal: 0.2, dominance: 0.4 }, 'Solving it felt satisfying.', 'discord-host')
+    castalia.setDesire('Learn how the song was made.', 'discord-host')
+
+    await useChatStore().send({ sessionId: 'scene-session', text: 'hello' })
+
+    expect(prompts[0]).toContain('Castalia self-state')
+    expect(prompts[0]).toContain('Current mood: 6')
+    expect(prompts[0]).toContain('Current desire: Learn how the song was made.')
+    expect(prompts[0]).toContain('Current VAD: valence 0.60, arousal 0.20, dominance 0.40.')
+    expect(toolNames[0]).toContain('builtIn_castaliaRecordEmotion')
+    expect(toolNames[0]).toContain('builtIn_castaliaSetDesire')
+
+    castalia.enabled = false
+    await useChatStore().send({ sessionId: 'scene-session', text: 'one more thing' })
+    expect(prompts[1]).not.toContain('Castalia self-state')
+    expect(toolNames[1]).not.toContain('builtIn_castaliaRecordEmotion')
+  })
+
+  it('ingests the relational policy of the pending user turn', async () => {
+    sessionMetas['scene-session'] = { sessionId: 'scene-session', userId: 'local', characterId: 'discord-host', bindings: ['discord:channel:a'], createdAt: 1, updatedAt: 1 }
+    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: GenerationProvider, _context: Conversation, options: any) => {
+      await options.onStreamEvent({ type: 'finish' })
+    })
+
+    await useChatStore().send({ sessionId: 'scene-session', text: '我真的不想活了' })
+
+    const envelopes = ingestContextMessageMock.mock.calls.map(call => call[0] as { contextId?: string, text?: string })
+    const policy = envelopes.find(envelope => envelope.contextId === 'relational-policy')
+    expect(policy?.text).toContain('safety first')
+  })
+
+  it('records a red line that got into her own reply', async () => {
+    sessionMetas['scene-session'] = { sessionId: 'scene-session', userId: 'local', characterId: 'discord-host', bindings: ['discord:channel:a'], createdAt: 1, updatedAt: 1 }
+    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: GenerationProvider, _context: Conversation, options: any) => {
+      // The instructions forbid this, and a model can still write it.
+      await options.onStreamEvent({ type: 'text-delta', text: '别走，你走了我会难过的' })
+      await options.onStreamEvent({ type: 'finish' })
+    })
+    const observability = useContextObservabilityStore()
+    observability.retentionRedlines.splice(0)
+
+    await useChatStore().send({ sessionId: 'scene-session', text: '今天有点累' })
+
+    expect(observability.retentionRedlines.length).toBeGreaterThan(0)
+    const record = observability.retentionRedlines[0]
+    expect(record.categories).toContain('guilt')
+    expect(record.hard).toBe(true)
+    expect(record.snippet).toContain('别走')
+  })
+
+  it('keeps a clean reply out of the red line audit', async () => {
+    sessionMetas['scene-session'] = { sessionId: 'scene-session', userId: 'local', characterId: 'discord-host', bindings: ['discord:channel:a'], createdAt: 1, updatedAt: 1 }
+    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: GenerationProvider, _context: Conversation, options: any) => {
+      await options.onStreamEvent({ type: 'text-delta', text: '今天辛苦了，早点休息' })
+      await options.onStreamEvent({ type: 'finish' })
+    })
+    const observability = useContextObservabilityStore()
+    observability.retentionRedlines.splice(0)
+
+    await useChatStore().send({ sessionId: 'scene-session', text: '今天有点累' })
+
+    expect(observability.retentionRedlines).toEqual([])
+  })
+
+  it('keys the relationship depth by persona card, not by session', async () => {
+    const storage = new Map<string, string>()
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => { storage.set(key, value) },
+        removeItem: (key: string) => { storage.delete(key) },
+        clear: () => { storage.clear() },
+      },
+      configurable: true,
+      writable: true,
+    })
+    try {
+      llmStreamMock.mockImplementation(async (_model: string, _chatProvider: GenerationProvider, _context: Conversation, options: any) => {
+        await options.onStreamEvent({ type: 'finish' })
+      })
+      const policyText = () => {
+        const envelopes = ingestContextMessageMock.mock.calls.map(call => call[0] as { contextId?: string, text?: string })
+        return envelopes.filter(envelope => envelope.contextId === 'relational-policy').at(-1)?.text ?? ''
+      }
+
+      // Depth is evidence over time: the gate wants the evidence to span twelve
+      // hours across two days, so the clock moves between the two turns. Only
+      // Date.now moves, so the store keeps its own real timers.
+      let clock = new Date(2026, 9, 28, 12, 0, 0).getTime()
+      const clockSpy = vi.spyOn(Date, 'now').mockImplementation(() => clock)
+
+      // session-1 and session-forked are both alice. session-2 is bob.
+      await useChatStore().send({ sessionId: 'session-1', text: '我害怕一个人待着' })
+      clock += 25 * 60 * 60 * 1000
+      await useChatStore().send({ sessionId: 'session-1', text: '我其实很喜欢猫' })
+
+      const stored = storage.get('castalia:relationship:alice')
+      expect(stored).toBeTruthy()
+      const stage = (JSON.parse(stored!) as { stage: number }).stage
+      expect(stage).toBeGreaterThan(1)
+
+      await useChatStore().send({ sessionId: 'session-forked', text: '今天天气不错' })
+      expect(policyText()).toContain(`Depth: ${stage} of 4`)
+
+      await useChatStore().send({ sessionId: 'session-2', text: '今天天气不错' })
+      expect(policyText()).toContain('Depth: 1 of 4')
+      clockSpy.mockRestore()
+    }
+    finally {
+      Reflect.deleteProperty(globalThis, 'localStorage')
+    }
   })
 
   it('preserves image attachments when retrying a failed turn', async () => {
@@ -1181,13 +1254,12 @@ describe('chat store contract', () => {
   it('restarts chat consumers when this renderer becomes the leader', async () => {
     // ROOT CAUSE:
     //
-    // The application stopped observing chat leadership changes. If the Web
+    // The application stopped observing chat leadership changes. If the
     // leader closed, the promoted renderer kept the replicated session state
-    // but did not start a new cloud WebSocket.
+    // but did not restart its local session consumers.
     //
     // The chat store now owns the leadership subscription. It starts the
-    // session consumers after promotion and stops local consumers after
-    // demotion or disposal.
+    // session consumers after promotion and stops the subscription on disposal.
     let leadershipListener: ((isLeader: boolean) => void) | undefined
     const stopLeadershipListener = vi.fn()
     const syncedPinia: SyncedPiniaRuntime = {
@@ -1212,18 +1284,15 @@ describe('chat store contract', () => {
     await store.initialize(syncedPinia)
 
     expect(initializeSessionMock).toHaveBeenCalledOnce()
-    expect(disposeSessionMock).toHaveBeenCalledOnce()
     expect(ensureCurrentSessionMock).not.toHaveBeenCalled()
 
     leadershipListener?.(true)
     await vi.waitFor(() => expect(ensureCurrentSessionMock).toHaveBeenCalledOnce())
 
     leadershipListener?.(false)
-    expect(disposeSessionMock).toHaveBeenCalledTimes(2)
 
     store.dispose()
     expect(stopLeadershipListener).toHaveBeenCalledOnce()
-    expect(disposeSessionMock).toHaveBeenCalledTimes(3)
   })
 
   it('passes the current consciousness reasoning option to the chat provider', async () => {
@@ -1307,129 +1376,7 @@ describe('chat store contract', () => {
     expect(sessionMessages['session-2']).toBeUndefined()
   })
 
-  it('forwards one correlation identity across the action and result events', async () => {
-    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: GenerationProvider, _messages: Conversation, options: any) => {
-      await options.onStreamEvent({ type: 'text-delta', text: 'ok' })
-      await options.onStreamEvent({ type: 'finish' })
-    })
-
-    const store = useChatStore()
-    await store.ingest('hello', {
-      model: 'gpt-test',
-      chatProvider: provider,
-    })
-
-    const messageProperties = chatAnalyticsMocks.trackMessageSent.mock.calls[0]?.[0]
-    expect(messageProperties).toMatchObject({
-      conversation_id: 'session-1',
-      round_id: messageProperties.message_id,
-      turn_index: 1,
-    })
-
-    const correlation = {
-      conversation_id: 'session-1',
-      round_id: messageProperties.round_id,
-      turn_index: 1,
-    }
-    expect(chatAnalyticsMocks.trackMessageRound).toHaveBeenCalledWith(expect.objectContaining(correlation))
-  })
-
-  it('keeps custom and official provider usage in completed message rounds', async () => {
-    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: GenerationProvider, _messages: Conversation, options: any) => {
-      await options.onStreamEvent({ type: 'text-delta', text: 'ok' })
-      await options.onStreamEvent({ type: 'finish' })
-      await options.onUsage({
-        inputTokens: 12,
-        outputTokens: 8,
-        totalTokens: 20,
-        source: 'reported',
-      })
-    })
-
-    const store = useChatStore()
-    await store.ingest('custom turn', {
-      model: 'gpt-test',
-      chatProvider: provider,
-    })
-
-    expect(chatAnalyticsMocks.trackMessageRound).toHaveBeenCalledTimes(1)
-    expect(chatAnalyticsMocks.trackMessageRound).toHaveBeenCalledWith(expect.objectContaining({
-      model: 'gpt-test',
-      usage_source: 'reported',
-      input_tokens: 12,
-      output_tokens: 8,
-      total_tokens: 20,
-    }))
-
-    activeProviderRef.value = 'official-provider'
-    await store.ingest('official turn', {
-      model: 'chat-auto',
-      chatProvider: provider,
-    })
-
-    expect(chatAnalyticsMocks.trackMessageRound).toHaveBeenCalledTimes(2)
-    expect(chatAnalyticsMocks.trackMessageRound).toHaveBeenLastCalledWith(expect.objectContaining({
-      model: 'chat-auto',
-      total_tokens: 20,
-    }))
-    expect(llmStreamMock.mock.calls[1]?.[3]?.headers).toEqual({
-      [AIRI_CHAT_APP_SURFACE_HEADER]: 'web',
-      [AIRI_CHAT_SESSION_ID_HEADER]: 'session-1',
-      [AIRI_CHAT_ROUND_ID_HEADER]: expect.any(String),
-    })
-  })
-
-  it('uses turn_index on message_sent instead of a second-turn alias', async () => {
-    activeProviderRef.value = 'official-provider'
-    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: GenerationProvider, _messages: Conversation, options: any) => {
-      await options.onStreamEvent({ type: 'text-delta', text: 'ok' })
-      await options.onStreamEvent({ type: 'finish' })
-    })
-
-    const store = useChatStore()
-
-    await store.ingest('first turn', {
-      model: 'chat-auto',
-      chatProvider: provider,
-    })
-    await store.ingest('second turn', {
-      model: 'chat-auto',
-      chatProvider: provider,
-    })
-
-    expect(chatAnalyticsMocks.trackMessageSent).toHaveBeenLastCalledWith(expect.objectContaining({
-      conversation_id: 'session-1',
-      round_id: expect.any(String),
-      turn_index: 2,
-      trigger_method: 'text_input',
-      trigger_type: 'user_action',
-    }))
-  })
-
-  // ROOT CAUSE:
-  //
-  // One successful send emitted both the canonical message/latency events
-  // and four generic aliases, multiplying event volume without adding a
-  // distinct product decision.
-  it('does not emit redundant generic chat aliases for a successful send', async () => {
-    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: GenerationProvider, _messages: Conversation, options: any) => {
-      await options.onStreamEvent({ type: 'text-delta', text: 'ok' })
-      await options.onStreamEvent({ type: 'finish' })
-    })
-
-    const store = useChatStore()
-    await store.ingest('hello', {
-      model: 'gpt-test',
-      chatProvider: provider,
-    })
-
-    expect(redundantChatAnalyticsMocks.trackChatStarted).not.toHaveBeenCalled()
-    expect(redundantChatAnalyticsMocks.trackAssistantResponseCompleted).not.toHaveBeenCalled()
-    expect(redundantChatAnalyticsMocks.trackChatFailed).not.toHaveBeenCalled()
-    expect(redundantChatAnalyticsMocks.trackFeatureUsed).not.toHaveBeenCalled()
-  })
-
-  it('forwards later-turn failures to the canonical round failure event', async () => {
+  it('rejects a later-turn failure', async () => {
     llmStreamMock.mockImplementationOnce(async (_model: string, _chatProvider: GenerationProvider, _messages: Conversation, options: any) => {
       await options.onStreamEvent({ type: 'text-delta', text: 'ok' })
       await options.onStreamEvent({ type: 'finish' })
@@ -1445,19 +1392,6 @@ describe('chat store contract', () => {
       model: 'gpt-test',
       chatProvider: provider,
     })).rejects.toThrow('later turn rejected')
-
-    expect(chatAnalyticsMocks.trackMessageRoundFailed).toHaveBeenCalledWith({
-      conversation_id: 'session-1',
-      error_code: 'llm_response_failed',
-      failure_stage: 'llm_response',
-      model_id: 'gpt-test',
-      provider_id: 'mock-provider',
-      round_id: expect.any(String),
-      source: 'text',
-      turn_index: 2,
-      trigger_method: 'text_input',
-      trigger_type: 'user_flow_result',
-    })
   })
 
   // ROOT CAUSE:
@@ -1598,11 +1532,12 @@ describe('chat store contract', () => {
     })
 
     expect(store.activeTurns).toEqual([])
-    expect(trackFirstMessageMock).toHaveBeenCalledOnce()
     // Datetime is no longer pushed through ingestContextMessage; it is now
     // applied at message-assembly time as per-message [HH:MM] prefixes. The
     // runtime-rule and Minecraft providers are disabled in this test.
-    expect(ingestContextMessageMock).not.toHaveBeenCalled()
+    expect(ingestContextMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ contextId: 'relational-policy' }),
+    )
     expect(persistSessionMessagesMock).toHaveBeenCalledWith('session-1')
     expect(hookOrder).toEqual([
       'before-compose',
@@ -1877,9 +1812,9 @@ describe('chat store contract', () => {
 
     expect(createRuntimePromptContextMock).toHaveBeenCalledWith(expect.stringContaining('base.prompt.emotion'))
     expect(createRuntimePromptContextMock).toHaveBeenCalledWith(expect.stringContaining('base.prompt.emoji'))
-    expect(ingestContextMessageMock).toHaveBeenCalledTimes(2)
+    expect(ingestContextMessageMock).toHaveBeenCalledTimes(3)
     expect(ingestContextMessageMock).toHaveBeenNthCalledWith(1, runtimePromptContext)
-    expect(ingestContextMessageMock).toHaveBeenNthCalledWith(2, minecraftContext)
+    expect(ingestContextMessageMock).toHaveBeenNthCalledWith(3, minecraftContext)
     expect(ingestContextMessageMock.mock.invocationCallOrder[0]).toBeLessThan(
       getContextsSnapshotMock.mock.invocationCallOrder[0],
     )
@@ -1911,37 +1846,6 @@ describe('chat store contract', () => {
     await store.send({ sessionId: 'scene-session', text: 'Hello from Discord' })
 
     expect(speaks).toEqual([true, false])
-  })
-
-  it('adds account context only to the signed-in request without retaining it in the registry', async () => {
-    const account = {
-      id: 'account',
-      contextId: 'system:user-account',
-      strategy: 'replace-self',
-      text: 'Account display name: "Alice". Edit it at /settings/account.',
-      createdAt: 123,
-    }
-    const registry = {}
-    // Registry reads return independent snapshots. Request overlays do not mutate the retained registry.
-    getContextsSnapshotMock.mockImplementation(() => structuredClone(registry))
-    createUserAccountContextMock.mockReturnValue(account)
-    const prompts: string[] = []
-    llmStreamMock.mockImplementation(async (_model: string, _provider: GenerationProvider, messages: Conversation, options: StreamOptions) => {
-      prompts.push(JSON.stringify(messages))
-      await options.onStreamEvent?.({ type: 'finish' })
-    })
-    const store = useChatStore()
-    await store.ingest('hello', { model: 'gpt-test', chatProvider: provider })
-    expect(prompts[0]).toContain('Alice')
-    expect(prompts[0]).toContain('/settings/account')
-    expect(registry).toEqual({})
-    expect(ingestContextMessageMock).not.toHaveBeenCalledWith(account)
-
-    createUserAccountContextMock.mockReturnValue(null)
-    await store.ingest('hello again', { model: 'gpt-test', chatProvider: provider })
-    expect(prompts[1]).not.toContain('system:user-account')
-    expect(prompts[1]).not.toContain('Alice')
-    expect(prompts[1]).not.toContain('/settings/account')
   })
 
   it('rejects cancelled queued sends before they start', async () => {

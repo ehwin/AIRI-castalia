@@ -1,18 +1,15 @@
 <script setup lang="ts">
-import type { DocumentHistoryEntry } from '@proj-airi/stage-ui/libs/document-sync/client'
 import type { AiriCard } from '@proj-airi/stage-ui/stores/modules/airi-card'
 
 import DOMPurify from 'dompurify'
 
-import { useAnalytics } from '@proj-airi/stage-ui/composables'
 import { useDownload } from '@proj-airi/stage-ui/composables/download'
 import { getAiriCardEditorModuleSettings } from '@proj-airi/stage-ui/services/airi-card-editor'
 import { exportAiriCardPackage } from '@proj-airi/stage-ui/services/airi-card-import-export'
-import { useAuthStore } from '@proj-airi/stage-ui/stores/auth'
 import { useBackgroundStore } from '@proj-airi/stage-ui/stores/background'
 import { useDisplayModelsStore } from '@proj-airi/stage-ui/stores/display-models'
 import { useAiriCardStore } from '@proj-airi/stage-ui/stores/modules/airi-card'
-import { Button, GhostButton, IconButton, Select } from '@proj-airi/ui'
+import { Button, IconButton, Select } from '@proj-airi/ui'
 import { storeToRefs } from 'pinia'
 import { computed, nextTick, onMounted, shallowRef, toRaw, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -20,9 +17,6 @@ import { toast } from 'vue-sonner'
 
 import CardModelPreview from './card-model-preview.vue'
 import DeleteCardDialog from './DeleteCardDialog.vue'
-import RestoreVersionDialog from './RestoreVersionDialog.vue'
-
-import { formatRelativeTime } from '../composables/relative-time'
 
 const props = defineProps<{
   cardId: string
@@ -34,28 +28,19 @@ const emit = defineEmits<{
   edit: [cardId: string]
 }>()
 
-const { t, te, locale } = useI18n()
-const { trackSceneBackgroundSet } = useAnalytics()
+const { t } = useI18n()
 const cardStore = useAiriCardStore()
 const backgroundStore = useBackgroundStore()
 const displayModelsStore = useDisplayModelsStore()
 
-const { activeCardId, cardSyncStates, cloudSyncEnabled } = storeToRefs(cardStore)
-const { isAuthenticated } = storeToRefs(useAuthStore())
+const { activeCardId } = storeToRefs(cardStore)
 
 const selectedCard = computed<AiriCard | undefined>(() => cardStore.getCard(props.cardId))
 const isActive = computed(() => props.cardId === activeCardId.value)
-const syncState = computed(() => cardSyncStates.value[props.cardId])
 const displayModelId = computed(() => selectedCard.value
   ? getAiriCardEditorModuleSettings(selectedCard.value).displayModelId
   : '')
 const displayModel = computed(() => displayModelsStore.displayModels.find(model => model.id === displayModelId.value))
-
-const syncIcons = {
-  synced: 'i-solar:cloud-check-outline',
-  pending: 'i-solar:cloud-upload-outline',
-  refused: 'i-solar:cloud-cross-outline',
-} as const
 
 const isActivating = shallowRef(false)
 const isExportingCard = shallowRef(false)
@@ -174,7 +159,6 @@ const activeBackgroundId = computed({
       ...selectedCard.value,
       extensions,
     })
-    trackSceneBackgroundSet({ source: 'card_gallery', cleared: value === 'none' })
   },
 })
 
@@ -221,101 +205,7 @@ async function handleDownloadEntry(id: string, title: string) {
   document.body.removeChild(link)
 }
 
-const historyEntries = shallowRef<DocumentHistoryEntry[]>([])
-const isLoadingHistory = shallowRef(false)
-const historyLoadFailed = shallowRef(false)
-const restoringRevision = shallowRef<number | null>(null)
-const showRestoreConfirm = shallowRef(false)
-const pendingRestore = shallowRef<DocumentHistoryEntry | null>(null)
-const showAllHistory = shallowRef(false)
-let historyGeneration = 0
-
-const visibleHistoryEntries = computed(() => showAllHistory.value
-  ? historyEntries.value
-  : historyEntries.value.slice(0, 3))
-
-function formatHistoryDate(at: string) {
-  return new Date(at).toLocaleString(locale.value, { dateStyle: 'medium', timeStyle: 'short' })
-}
-
-function formatHistoryRelative(at: string) {
-  return formatRelativeTime(at, locale.value)
-}
-
-// A field key is an RFC 6901 pointer such as `/name`. The label comes from
-// the last segment, with the raw segment as the fallback for unknown fields.
-function historyFieldLabel(pointer: string) {
-  const segment = pointer.split('/').pop() || pointer
-  const key = `settings.pages.card.sync.history.fields.${segment}`
-  return te(key) ? t(key) : segment
-}
-
-async function loadHistory() {
-  const cardId = props.cardId
-  if (!cardId)
-    return
-
-  const generation = ++historyGeneration
-  isLoadingHistory.value = true
-  historyLoadFailed.value = false
-  try {
-    const history = await cardStore.cardHistory(cardId, { limit: 50 })
-    // A late response belongs to the card that started the request. It must not
-    // replace the history of a card that the user opened afterwards.
-    if (generation !== historyGeneration || cardId !== props.cardId)
-      return
-    historyEntries.value = history ?? []
-  }
-  catch (error) {
-    if (generation !== historyGeneration)
-      return
-    console.error('Error loading card history:', error)
-    historyLoadFailed.value = true
-  }
-  finally {
-    if (generation === historyGeneration)
-      isLoadingHistory.value = false
-  }
-}
-
-watch([() => props.cardId, isAuthenticated, cloudSyncEnabled], ([cardId, authenticated, syncEnabled]) => {
-  historyGeneration += 1
-  historyEntries.value = []
-  historyLoadFailed.value = false
-  isLoadingHistory.value = false
-  showAllHistory.value = false
-  if (cardId && authenticated && syncEnabled)
-    void loadHistory()
-}, { immediate: true })
-
-function requestRestoreVersion(entry: DocumentHistoryEntry) {
-  pendingRestore.value = entry
-  showRestoreConfirm.value = true
-}
-
-async function confirmRestoreVersion() {
-  const entry = pendingRestore.value
-  if (!entry || !selectedCard.value)
-    return
-
-  restoringRevision.value = entry.revision
-  try {
-    const restored = await cardStore.restoreCardVersion(props.cardId, entry.revision)
-    toast(t(restored ? 'settings.pages.card.sync.history.restore_success' : 'settings.pages.card.sync.history.restore_failed', { name: selectedCard.value.name }))
-    if (restored)
-      await loadHistory()
-  }
-  catch (error) {
-    console.error('Error restoring card version:', error)
-    toast(t('settings.pages.card.sync.history.restore_failed', { name: selectedCard.value.name }))
-  }
-  finally {
-    restoringRevision.value = null
-    pendingRestore.value = null
-  }
-}
-
-const detailSectionIds = new Set(['description', 'notes', 'character', 'modules', 'gallery', 'history'])
+const detailSectionIds = new Set(['description', 'notes', 'character', 'modules', 'gallery'])
 
 watch(() => [props.cardId, props.initialTab], async ([, section]) => {
   if (!section || !detailSectionIds.has(section))
@@ -378,18 +268,6 @@ const proseClasses = [
             <span class="tabular-nums">v{{ selectedCard.version }}</span>
             <span v-if="selectedCard.creator">
               {{ t('settings.pages.card.created_by') }} {{ selectedCard.creator }}
-            </span>
-            <span
-              v-if="syncState"
-              :class="[
-                'flex items-center text-base',
-                syncState === 'refused' ? 'text-amber-600 dark:text-amber-400' : '',
-              ]"
-              :title="t(`settings.pages.card.sync.state.${syncState}`)"
-              :aria-label="t(`settings.pages.card.sync.state.${syncState}`)"
-              :data-sync-state="syncState"
-            >
-              <span :class="syncIcons[syncState]" aria-hidden="true" />
             </span>
           </div>
           <p v-if="selectedCard.description" :class="['line-clamp-2 max-w-[46ch] text-[15px] text-primary-800 dark:text-primary-300']">
@@ -590,100 +468,6 @@ const proseClasses = [
               </template>
             </dl>
           </section>
-
-          <section v-if="isAuthenticated && cloudSyncEnabled" id="card-detail-history" :class="['scroll-mt-6']">
-            <h2 :class="sectionHeadingClasses">
-              {{ t('settings.pages.card.sync.history.tab') }}
-            </h2>
-            <div v-if="isLoadingHistory" :class="['py-5 text-sm text-neutral-500 dark:text-neutral-400']">
-              {{ t('settings.pages.card.sync.history.loading') }}
-            </div>
-            <div v-else-if="historyLoadFailed" :class="['py-5 text-sm text-red-500 dark:text-red-400']">
-              {{ t('settings.pages.card.sync.history.load_failed') }}
-            </div>
-            <div v-else-if="historyEntries.length === 0" :class="['py-5 text-sm text-neutral-500 dark:text-neutral-400']">
-              {{ t('settings.pages.card.sync.history.empty') }}
-            </div>
-            <template v-else>
-              <ol>
-                <li
-                  v-for="(entry, index) in visibleHistoryEntries"
-                  :key="entry.revision"
-                  :class="['relative flex gap-3 pb-5 last:pb-0']"
-                >
-                  <div :class="['flex flex-col items-center']">
-                    <div
-                      :class="[
-                        'mt-1.5 size-2.5 shrink-0 rounded-full',
-                        index === 0 ? 'bg-primary-500 dark:bg-primary-400' : 'bg-neutral-300 dark:bg-neutral-600',
-                      ]"
-                    />
-                    <div v-if="index < visibleHistoryEntries.length - 1" :class="['mt-1 w-px flex-1 bg-neutral-200 dark:bg-neutral-700']" />
-                  </div>
-                  <div :class="['min-w-0 flex flex-1 items-start justify-between gap-3']">
-                    <div :class="['min-w-0 flex flex-col gap-1.5']">
-                      <div :class="['flex flex-wrap items-center gap-2']">
-                        <span :class="['text-sm font-medium']" :title="formatHistoryDate(entry.at)">
-                          {{ formatHistoryRelative(entry.at) }}
-                        </span>
-                        <span
-                          v-if="index === 0"
-                          :class="[
-                            'rounded-full px-2 py-0.5 text-xs font-medium',
-                            'bg-primary-100 text-primary-600 dark:bg-primary-900/40 dark:text-primary-400',
-                          ]"
-                        >
-                          {{ t('settings.pages.card.sync.history.current') }}
-                        </span>
-                      </div>
-                      <div v-if="entry.changed.length > 0" :class="['flex flex-wrap items-center gap-1.5']">
-                        <span :class="['text-xs text-neutral-500 dark:text-neutral-400']">
-                          {{ t('settings.pages.card.sync.history.changed_label') }}
-                        </span>
-                        <span
-                          v-for="key in entry.changed"
-                          :key="key"
-                          :class="['rounded-md bg-primary-500/10 px-1.5 py-0.5 text-xs text-primary-600 dark:text-primary-400']"
-                        >
-                          {{ historyFieldLabel(key) }}
-                        </span>
-                      </div>
-                      <div v-if="entry.removed.length > 0" :class="['flex flex-wrap items-center gap-1.5']">
-                        <span :class="['text-xs text-neutral-500 dark:text-neutral-400']">
-                          {{ t('settings.pages.card.sync.history.removed_label') }}
-                        </span>
-                        <span
-                          v-for="key in entry.removed"
-                          :key="key"
-                          :class="['rounded-md bg-red-500/10 px-1.5 py-0.5 text-xs text-red-600 dark:text-red-400']"
-                        >
-                          {{ historyFieldLabel(key) }}
-                        </span>
-                      </div>
-                    </div>
-                    <GhostButton
-                      v-if="index !== 0"
-                      size="sm"
-                      icon="i-solar:restart-line-duotone"
-                      :label="t('settings.pages.card.sync.history.restore')"
-                      :disabled="restoringRevision === entry.revision"
-                      @click="requestRestoreVersion(entry)"
-                    />
-                  </div>
-                </li>
-              </ol>
-              <GhostButton
-                v-if="historyEntries.length > 3"
-                size="sm"
-                :class="['mt-4']"
-                :icon="showAllHistory ? 'i-solar:alt-arrow-up-linear' : 'i-solar:arrow-right-linear'"
-                :label="showAllHistory
-                  ? t('settings.pages.card.show_less')
-                  : t('settings.pages.card.view_all_history', { count: historyEntries.length })"
-                @click="showAllHistory = !showAllHistory"
-              />
-            </template>
-          </section>
         </aside>
       </div>
     </div>
@@ -708,14 +492,6 @@ const proseClasses = [
       :card-name="selectedCard?.name"
       @confirm="handleDeleteConfirm"
       @cancel="showDeleteConfirm = false"
-    />
-
-    <RestoreVersionDialog
-      v-model="showRestoreConfirm"
-      :card-name="selectedCard?.name"
-      :version-date="pendingRestore ? formatHistoryDate(pendingRestore.at) : ''"
-      @confirm="confirmRestoreVersion"
-      @cancel="pendingRestore = null"
     />
   </div>
 </template>

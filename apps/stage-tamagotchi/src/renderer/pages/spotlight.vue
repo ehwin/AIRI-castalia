@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { errorMessageFrom } from '@moeru/std'
 import { useElectronEventaInvoke } from '@proj-airi/electron-vueuse'
-import { useAnalytics } from '@proj-airi/stage-ui/composables'
 import { extractMessageText } from '@proj-airi/stage-ui/libs/chat-sync/wire-message'
 import { useChatStore } from '@proj-airi/stage-ui/stores/chat'
 import { useChatSessionStore } from '@proj-airi/stage-ui/stores/chat/session-store'
@@ -22,7 +21,6 @@ const inputRef = useTemplateRef<HTMLInputElement>('inputRef')
 
 const chatStore = useChatStore()
 const chatSession = useChatSessionStore()
-const { trackSpotlightUsed } = useAnalytics()
 const hideSpotlightWindow = useElectronEventaInvoke(electronSpotlightHide)
 const showResultNotification = useElectronEventaInvoke(electronSpotlightShowResultNotification)
 const { t } = useI18n()
@@ -45,7 +43,6 @@ async function handleSend() {
 
   messageInput.value = ''
   sending.value = true
-  trackSpotlightUsed()
 
   try {
     await hideSpotlightWindow()

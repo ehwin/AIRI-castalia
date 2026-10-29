@@ -40,7 +40,6 @@ const label = computed(() => pressed.value
 <template>
   <ControlButtonTooltip side="inward">
     <ControlButton
-      v-track-button="{ name: 'controls_island_action', action: 'toggle_chat' }"
       :button-style="[buttonStyle, pressed ? 'bg-primary-100! dark:bg-primary-900/60!' : ''].join(' ')"
       :aria-label="label"
       :aria-pressed="pressed"

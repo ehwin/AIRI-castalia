@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { Character, CreateCharacterPayload } from '@proj-airi/stage-ui/types/character'
 
-import { useAnalytics } from '@proj-airi/stage-ui/composables/use-analytics'
 import { useCharacterStore } from '@proj-airi/stage-ui/stores/characters'
 import { CreateCharacterSchema } from '@proj-airi/stage-ui/types/character'
 import { Button, FieldInput, GhostButton, ScrollableArea } from '@proj-airi/ui'
@@ -27,7 +26,6 @@ const emit = defineEmits<{
 }>()
 
 const characterStore = useCharacterStore()
-const { trackCharacterCreated, trackCharacterUpdated } = useAnalytics()
 
 // Form State
 const form = reactive({
@@ -159,19 +157,9 @@ async function handleSubmit() {
         coverUrl: form.coverUrl,
         capabilities: payload.capabilities,
       })
-      trackCharacterUpdated({ character_id: props.character.id })
     }
     else {
       await characterStore.create(payload)
-      // OpenPanel retention driver. This dialog is the only user-initiated
-      // create path; clones from built-in presets would emit
-      // `character_type: 'built_in'` from wherever they get wired up.
-      // `voice_enabled` reflects whether the user supplied a TTS voice id
-      // — the tts capability is always emitted but is inert without one.
-      trackCharacterCreated({
-        character_type: 'custom',
-        voice_enabled: !!form.ttsVoiceId,
-      })
     }
     emit('submit')
     emit('update:modelValue', false)

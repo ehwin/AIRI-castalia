@@ -1,20 +1,17 @@
 <script setup lang="ts">
-import { useHostAlwaysOnTop, useHostAppQuit, useHostEventaInvoke, useHostMouseInElement, useHostWindowCenter, useHostWindowMove } from '@proj-airi/stage-host-context'
+import { useHostAlwaysOnTop, useHostAppQuit, useHostChat, useHostEventaInvoke, useHostMouseInElement, useHostWindowCenter, useHostWindowMove } from '@proj-airi/stage-host-context'
 import { IS_DEV } from '@proj-airi/stage-shared'
-import { HearingConfigDialog, InboxPanel } from '@proj-airi/stage-ui/components'
-import { useInboxStore } from '@proj-airi/stage-ui/stores/inbox'
+import { HearingConfigDialog } from '@proj-airi/stage-ui/components'
 import { useSettings, useSettingsAudioDevice } from '@proj-airi/stage-ui/stores/settings'
-import { Badge, IconButton, ScrollableArea, useTheme } from '@proj-airi/ui'
-import { refDebounced, useFocusWithin, useIntervalFn, useMouseInElement, useMousePressed, useNow } from '@vueuse/core'
+import { ScrollableArea, useTheme } from '@proj-airi/ui'
+import { refDebounced, useFocusWithin, useIntervalFn, useMouseInElement, useMousePressed } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
-import { computed, nextTick, reactive, ref, useId, useTemplateRef, watch } from 'vue'
+import { computed, reactive, ref, useId, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import StatusIsland from '../status-island/index.vue'
 import ControlButtonTooltip from './control-button-tooltip.vue'
 import ControlButton from './control-button.vue'
-import ControlsIslandAuthButton from './controls-island-auth-button.vue'
-import ControlsIslandChatButton from './controls-island-chat-button.vue'
 import ControlsIslandFadeOnHover from './controls-island-fade-on-hover.vue'
 import ControlsIslandProfilePicker from './controls-island-profile-picker.vue'
 import ControlsIslandSpeechMute from './controls-island-speech-mute.vue'
@@ -52,11 +49,6 @@ const themeIcons = {
   dark: 'i-solar:moon-outline',
   auto: 'i-lucide:contrast',
 } as const
-const themeActions = {
-  light: 'switch_to_dark_mode',
-  dark: 'switch_to_system_mode',
-  auto: 'switch_to_light_mode',
-} as const
 const themeLabel = computed(() => ({
   light: t('tamagotchi.stage.controls-island.switch-to-dark-mode'),
   dark: t('tamagotchi.stage.controls-island.switch-to-system-mode'),
@@ -70,28 +62,13 @@ const settingsStore = useSettings()
 const { enabled } = storeToRefs(settingsAudioDeviceStore)
 const { alwaysOnTop, controlsIslandIconSize } = storeToRefs(settingsStore)
 const openSettings = useHostEventaInvoke(electronOpenSettings)
+const openChat = useHostChat()
 const quitApp = useHostAppQuit()
 const setAlwaysOnTop = useHostAlwaysOnTop()
 const centerMainWindow = useHostWindowCenter()
 const { beginMove, isNativeMoveSupported, usesCssDragRegion } = useHostWindowMove()
 
 const expanded = ref(false)
-// The store also polls the unread count, so the collapse button can show a dot while the menu is closed.
-const inbox = useInboxStore()
-const {
-  unread: notificationsUnread,
-  messages: notificationMessages,
-  loading: notificationsLoading,
-  error: notificationsError,
-  hasMore: notificationsHasMore,
-  signedIn: notificationsSignedIn,
-} = storeToRefs(inbox)
-const now = useNow({ interval: 60_000 })
-const notificationsLabel = computed(() => notificationsUnread.value > 0
-  ? t('stage.notifications.open-unread', { count: notificationsUnread.value })
-  : t('stage.notifications.open'))
-/** The menu card shows the controls or, after the Notifications row, the Notifications list. */
-const menuView = ref<'controls' | 'notifications'>('controls')
 // Closing disables interaction immediately. Keep layout until the exit
 // animation ends, then isolate the same menu for natural-size measurement.
 const panelPresent = ref(false)
@@ -211,7 +188,6 @@ watch(expanded, (isExpanded) => {
     if (menuContent.value?.contains(document.activeElement) || blockingOverlays.size > 0)
       mainControlsElement.value?.querySelector<HTMLButtonElement>('[aria-controls]')?.focus()
     profileOpen.value = false
-    menuView.value = 'controls'
     blockingOverlays.clear()
   }
 })
@@ -235,25 +211,6 @@ watch(alwaysOnTop, (val) => {
 function toggleAlwaysOnTop() {
   alwaysOnTop.value = !alwaysOnTop.value
 }
-
-async function showNotifications() {
-  menuView.value = 'notifications'
-  void inbox.loadFirstPage()
-  await nextTick()
-  menuContent.value?.querySelector<HTMLButtonElement>('[data-testid="controls-island-notifications-back"]')?.focus()
-}
-
-async function showControls() {
-  menuView.value = 'controls'
-  await nextTick()
-  menuContent.value?.querySelector<HTMLButtonElement>('[data-testid="controls-island-notifications"]')?.focus()
-}
-
-// A sign-out removes the Notifications row, so the list must not stay without a way back to it.
-watch(notificationsSignedIn, (signedIn) => {
-  if (!signedIn)
-    menuView.value = 'controls'
-})
 
 function toggleControls() {
   expanded.value = !expanded.value
@@ -391,70 +348,10 @@ function resetMainWindowPosition() {
                   'bg-neutral-100/80 shadow-2xl shadow-black/20 backdrop-blur-xl dark:bg-neutral-900/80',
                 ]"
               >
-                <!--
-                  The Notifications row switches this card to the Notifications list in place.
-                  The list stays inside the island, so the stage hit test already covers it.
-                -->
-                <div v-if="menuView === 'notifications'" data-testid="controls-island-notifications-view" :class="['w-80']">
-                  <InboxPanel
-                    :messages="notificationMessages" :now="now" :unread="notificationsUnread"
-                    :loading="notificationsLoading" :error="notificationsError" :has-more="notificationsHasMore"
-                    surface="drawer"
-                    @open="inbox.markRead" @read-all="inbox.markAllRead" @retry="inbox.loadFirstPage" @load-more="inbox.loadMore"
-                  >
-                    <template #leading>
-                      <IconButton
-                        data-testid="controls-island-notifications-back"
-                        :aria-label="t('stage.notifications.back')" :title="t('stage.notifications.back')"
-                        :class="[
-                          'size-8 rounded-full outline-none',
-                          'text-neutral-600 hover:bg-black/5 hover:text-neutral-900',
-                          'dark:text-neutral-300 dark:hover:bg-white/5 dark:hover:text-white',
-                          'focus-visible:outline-2 focus-visible:outline-primary-400',
-                        ]"
-                        @click="showControls"
-                      >
-                        <span aria-hidden="true" :class="['i-solar:alt-arrow-left-linear size-5']" />
-                      </IconButton>
-                    </template>
-                  </InboxPanel>
-                </div>
-                <!-- v-show keeps dialogs and listeners of the controls mounted while the list shows. -->
-                <div v-show="menuView === 'controls'" :class="['flex flex-col gap-1']">
-                  <ControlsIslandAuthButton
-                    :active="expanded"
-                    :button-style="adjustStyleClasses.button"
-                    :icon-class="adjustStyleClasses.icon"
-                  />
-
-                  <!--
-                    The same Notifications row as the mobile menu. It is a plain button like the account card above,
-                    because BasicButton centers its content and does not suit a full-width row.
-                  -->
-                  <button
-                    v-if="notificationsSignedIn"
-                    type="button"
-                    data-testid="controls-island-notifications"
-                    :aria-label="notificationsLabel"
-                    :class="[
-                      'mb-1.5 flex items-center gap-2.5 rounded-xl px-3 py-2',
-                      'bg-black/4 hover:bg-black/8 dark:bg-white/4 dark:hover:bg-white/8',
-                      'text-sm text-neutral-800 dark:text-neutral-200',
-                      'cursor-pointer border-none outline-none transition-colors duration-200',
-                      'focus-visible:outline-2 focus-visible:outline-primary-500',
-                    ]"
-                    @click="showNotifications"
-                  >
-                    <span aria-hidden="true" :class="['i-solar:bell-outline shrink-0 text-neutral-500 dark:text-neutral-400', adjustStyleClasses.icon]" />
-                    <span :class="['flex-1 text-left']">{{ t('stage.notifications.title') }}</span>
-                    <Badge :count="notificationsUnread" data-testid="controls-island-notifications-count" />
-                    <span aria-hidden="true" :class="['i-solar:alt-arrow-right-outline size-4 shrink-0 text-neutral-400']" />
-                  </button>
-
+                <div :class="['flex flex-col gap-1']">
                   <div :class="['grid grid-cols-3 gap-2']">
                     <ControlButtonTooltip disable-hoverable-content>
                       <ControlButton
-                        v-track-button="{ name: 'controls_island_action', action: 'toggle_settings' }"
                         :button-style="adjustStyleClasses.button"
                         :aria-label="t('tamagotchi.stage.controls-island.open-settings')"
                         @click="openSettings({ route: '/settings' })"
@@ -475,7 +372,6 @@ function resetMainWindowPosition() {
                       >
                         <template #default="{ toggle }">
                           <ControlButton
-                            v-track-button="{ name: 'controls_island_action', action: 'toggle_profile_picker' }"
                             :button-style="adjustStyleClasses.button"
                             :aria-label="t('tamagotchi.stage.controls-island.switch-profile')"
                             @click="toggle"
@@ -491,7 +387,6 @@ function resetMainWindowPosition() {
 
                     <ControlButtonTooltip disable-hoverable-content>
                       <ControlButton
-                        v-track-button="{ name: 'controls_island_action', action: 'refresh_window' }"
                         :button-style="adjustStyleClasses.button"
                         :aria-label="t('tamagotchi.stage.controls-island.refresh')"
                         @click="refreshWindow"
@@ -505,7 +400,6 @@ function resetMainWindowPosition() {
 
                     <ControlButtonTooltip disable-hoverable-content>
                       <ControlButton
-                        v-track-button="{ name: 'controls_island_action', action: 'center_main_window' }"
                         :button-style="adjustStyleClasses.button"
                         :aria-label="t('tamagotchi.stage.controls-island.center-main-window')"
                         @click="resetMainWindowPosition"
@@ -519,10 +413,6 @@ function resetMainWindowPosition() {
 
                     <ControlButtonTooltip disable-hoverable-content>
                       <ControlButton
-                        v-track-button="{
-                          name: 'controls_island_action',
-                          action: themeActions[themeMode],
-                        }"
                         :button-style="adjustStyleClasses.button"
                         :aria-label="themeLabel"
                         @click="switchToNextTheme"
@@ -538,10 +428,6 @@ function resetMainWindowPosition() {
 
                     <ControlButtonTooltip disable-hoverable-content>
                       <ControlButton
-                        v-track-button="{
-                          name: 'controls_island_action',
-                          action: alwaysOnTop ? 'unpin_from_top' : 'pin_on_top',
-                        }"
                         :button-style="adjustStyleClasses.button"
                         :aria-label="alwaysOnTop ? t('tamagotchi.stage.controls-island.unpin-from-top') : t('tamagotchi.stage.controls-island.pin-on-top')"
                         @click="toggleAlwaysOnTop"
@@ -573,7 +459,6 @@ function resetMainWindowPosition() {
 
                     <ControlButtonTooltip disable-hoverable-content>
                       <ControlButton
-                        v-track-button="{ name: 'controls_island_action', action: 'close_app' }"
                         :button-style="adjustStyleClasses.button"
                         :aria-label="t('tamagotchi.stage.controls-island.close')"
                         :class="['hover:bg-red-500 hover:text-white']"
@@ -596,27 +481,15 @@ function resetMainWindowPosition() {
         <div ref="mainControls" data-testid="main-controls" :class="['shrink-0', mainControlsLayoutClasses]">
           <ControlButtonTooltip side="inward">
             <ControlButton
-              v-track-button="{
-                name: 'controls_island_action',
-                action: expanded ? 'collapse_controls' : 'expand_controls',
-              }"
               :button-style="adjustStyleClasses.button"
               :aria-expanded="expanded"
               :aria-controls="menuId"
               :aria-label="expanded ? t('tamagotchi.stage.controls-island.collapse') : t('tamagotchi.stage.controls-island.expand')"
-              :class="['relative']"
               @click="toggleControls"
             >
               <div
                 :class="['i-solar:alt-arrow-up-line-duotone scale-110 transition-all duration-300', 'text-neutral-800 dark:text-neutral-300', adjustStyleClasses.icon]"
                 :style="{ transform: `rotate(${arrowRotation}deg)` }"
-              />
-              <!-- Unread Notifications are in the menu. The dot tells the user to open it. -->
-              <Badge
-                v-if="notificationsUnread > 0"
-                dot
-                data-testid="controls-island-notifications-dot"
-                :class="['pointer-events-none absolute right-1 top-1 ring-2 ring-neutral-100 dark:ring-neutral-900']"
               />
             </ControlButton>
             <template #tooltip>
@@ -630,7 +503,18 @@ function resetMainWindowPosition() {
             :icon-class="adjustStyleClasses.icon"
           />
 
-          <ControlsIslandChatButton :button-style="adjustStyleClasses.button" :icon-class="adjustStyleClasses.icon" />
+          <ControlButtonTooltip side="inward">
+            <ControlButton
+              :button-style="adjustStyleClasses.button"
+              :aria-label="t('tamagotchi.stage.controls-island.open-chat')"
+              @click="() => openChat()"
+            >
+              <div :class="['i-solar:chat-line-line-duotone text-neutral-800 dark:text-neutral-300', adjustStyleClasses.icon]" />
+            </ControlButton>
+            <template #tooltip>
+              {{ t('tamagotchi.stage.controls-island.open-chat') }}
+            </template>
+          </ControlButtonTooltip>
 
           <ControlButtonTooltip side="inward">
             <ControlButton

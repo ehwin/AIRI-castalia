@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { Alert, SettingsSearchField } from '@proj-airi/stage-ui/components'
+import { Alert } from '@proj-airi/stage-ui/components'
 import { getAiriCardEditorModuleSettings } from '@proj-airi/stage-ui/services/airi-card-editor'
 import { AiriCardPackageError, importAiriCardPackage } from '@proj-airi/stage-ui/services/airi-card-import-export'
-import { useAuthStore } from '@proj-airi/stage-ui/stores/auth'
 import { useDisplayModelsStore } from '@proj-airi/stage-ui/stores/display-models'
 import { useAiriCardStore } from '@proj-airi/stage-ui/stores/modules/airi-card'
-import { Button } from '@proj-airi/ui'
+import { Button, Input } from '@proj-airi/ui'
 import { ComboboxSelect } from '@proj-airi/ui/components/form'
 import { storeToRefs } from 'pinia'
 import { computed, shallowRef, useTemplateRef, watch } from 'vue'
@@ -16,14 +15,11 @@ import { toast } from 'vue-sonner'
 import CardListItem from './components/card-list-item.vue'
 import WakeWordConflictAlert from './components/wake-word-conflict-alert.vue'
 
-import { formatRelativeTime } from './composables/relative-time'
-
 const { t, locale } = useI18n()
 const cardStore = useAiriCardStore()
 const displayModelsStore = useDisplayModelsStore()
 const { addCard } = cardStore
-const { cards, activeCardId, cardSyncStates, cloudSyncEnabled } = storeToRefs(cardStore)
-const { isAuthenticated } = storeToRefs(useAuthStore())
+const { cards, activeCardId } = storeToRefs(cardStore)
 
 const route = useRoute()
 const router = useRouter()
@@ -86,7 +82,7 @@ watch(inputFiles, async (newFiles) => {
     return
 
   try {
-    await addCard(await importAiriCardPackage({ file, displayModelsStore }), 'import')
+    await addCard(await importAiriCardPackage({ file, displayModelsStore }))
     toast(t('settings.pages.card.imported'))
   }
   catch (error) {
@@ -158,161 +154,18 @@ watch(() => [route.query.cardId, route.query.tab], ([cardId, tab]) => {
     query: edit ? { section } : { tab: section },
   })
 }, { immediate: true })
-
-interface DeletedCard {
-  id: string
-  name: string
-  deletedAt: string
-}
-
-const showDeletedPanel = shallowRef(false)
-const deletedCardsList = shallowRef<DeletedCard[]>([])
-const isLoadingDeleted = shallowRef(false)
-const deletedLoadFailed = shallowRef(false)
-const restoringDeletedId = shallowRef<string | null>(null)
-
-// The server keeps the content of a deleted card for 30 days.
-const DELETED_CARD_RETENTION_DAYS = 30
-
-function formatDeletedRelative(deletedAt: string) {
-  return formatRelativeTime(deletedAt, locale.value)
-}
-
-function restorableDays(deletedAt: string) {
-  const elapsed = Math.floor((Date.now() - new Date(deletedAt).getTime()) / (24 * 60 * 60 * 1000))
-  return Math.max(0, DELETED_CARD_RETENTION_DAYS - elapsed)
-}
-
-async function loadDeletedCards() {
-  isLoadingDeleted.value = true
-  deletedLoadFailed.value = false
-  try {
-    deletedCardsList.value = await cardStore.deletedCards()
-  }
-  catch (error) {
-    console.error('Error loading recently deleted cards:', error)
-    deletedLoadFailed.value = true
-  }
-  finally {
-    isLoadingDeleted.value = false
-  }
-}
-
-async function toggleDeletedPanel() {
-  showDeletedPanel.value = !showDeletedPanel.value
-  if (showDeletedPanel.value)
-    await loadDeletedCards()
-}
-
-async function handleRestoreDeletedCard(card: DeletedCard) {
-  restoringDeletedId.value = card.id
-  try {
-    const restored = await cardStore.restoreDeletedCard(card.id)
-    toast(t(restored ? 'settings.pages.card.sync.deleted.restore_success' : 'settings.pages.card.sync.deleted.restore_failed', { name: card.name }))
-    if (restored)
-      await loadDeletedCards()
-  }
-  catch (error) {
-    console.error('Error restoring a deleted card:', error)
-    toast(t('settings.pages.card.sync.deleted.restore_failed', { name: card.name }))
-  }
-  finally {
-    restoringDeletedId.value = null
-  }
-}
 </script>
 
 <template>
   <div :class="['flex flex-col gap-6 rounded-xl p-4 sm:p-6']">
     <WakeWordConflictAlert />
 
-    <div
-      v-if="isAuthenticated && cloudSyncEnabled"
-      :class="[
-        'flex flex-col gap-3 rounded-xl px-4 py-3',
-        'border border-primary-200/60 dark:border-primary-800/40',
-        'bg-primary-50/50 dark:bg-primary-950/30',
-      ]"
-    >
-      <div :class="['flex flex-row flex-wrap items-center justify-between gap-2']">
-        <p :class="['flex items-center gap-2 text-sm', 'text-neutral-600 dark:text-neutral-300']">
-          <span :class="['i-solar:cloud-check-outline shrink-0', 'text-primary-500 dark:text-primary-400']" />
-          {{ t('settings.pages.card.sync.notice') }}
-        </p>
-        <button
-          type="button"
-          :class="[
-            'flex shrink-0 items-center gap-1 text-sm',
-            'text-primary-600 dark:text-primary-400',
-            'hover:underline',
-          ]"
-          @click="toggleDeletedPanel"
-        >
-          <span class="i-solar:trash-bin-minimalistic-linear" />
-          {{ t('settings.pages.card.sync.deleted.title') }}
-          <span :class="showDeletedPanel ? 'i-solar:alt-arrow-up-linear' : 'i-solar:alt-arrow-down-linear'" />
-        </button>
-      </div>
-
-      <div
-        v-if="showDeletedPanel"
-        :class="[
-          'flex flex-col gap-2 rounded-lg p-3',
-          'bg-white/60 dark:bg-black/30',
-          'border border-neutral-200/50 dark:border-neutral-700/30',
-        ]"
-      >
-        <div v-if="isLoadingDeleted" :class="['py-4 text-center text-sm', 'text-neutral-500 dark:text-neutral-400']">
-          {{ t('settings.pages.card.sync.deleted.loading') }}
-        </div>
-        <div v-else-if="deletedLoadFailed" :class="['py-4 text-center text-sm', 'text-red-500 dark:text-red-400']">
-          {{ t('settings.pages.card.sync.deleted.load_failed') }}
-        </div>
-        <div v-else-if="deletedCardsList.length === 0" :class="['py-4 text-center text-sm', 'text-neutral-500 dark:text-neutral-400']">
-          {{ t('settings.pages.card.sync.deleted.empty') }}
-        </div>
-        <div
-          v-for="card in deletedCardsList"
-          :key="card.id"
-          :class="[
-            'flex flex-row items-center justify-between gap-3 rounded-lg p-3',
-            'bg-white dark:bg-neutral-900',
-            'border border-neutral-200/50 dark:border-neutral-700/30',
-          ]"
-        >
-          <div :class="['flex min-w-0 flex-col gap-0.5']">
-            <span :class="['truncate text-sm font-medium']">{{ card.name }}</span>
-            <span :class="['text-xs', 'text-neutral-500 dark:text-neutral-400']" :title="new Date(card.deletedAt).toLocaleString(locale)">
-              {{ t('settings.pages.card.sync.deleted.deleted_when', { when: formatDeletedRelative(card.deletedAt) }) }}
-              ·
-              {{ t('settings.pages.card.sync.deleted.days_left', { days: restorableDays(card.deletedAt) }) }}
-            </span>
-          </div>
-          <Button
-            size="sm"
-            :class="['shrink-0']"
-            icon="i-solar:restart-line-duotone"
-            :label="t('settings.pages.card.sync.deleted.restore')"
-            :disabled="restoringDeletedId === card.id"
-            @click="handleRestoreDeletedCard(card)"
-          />
-        </div>
-      </div>
-    </div>
-
-    <p v-else-if="isAuthenticated" :class="['flex flex-wrap items-center gap-2 text-sm', 'text-neutral-500 dark:text-neutral-400']">
-      <span :class="['i-solar:cloud-cross-outline shrink-0']" />
-      {{ t('settings.pages.card.sync.off_notice') }}
-      <RouterLink to="/settings/system/experimental" :class="['text-primary-600 dark:text-primary-400 hover:underline']">
-        {{ t('settings.pages.card.sync.off_notice_link') }}
-      </RouterLink>
-    </p>
-
     <div :class="['flex flex-wrap items-center gap-3']">
-      <SettingsSearchField
+      <Input
         v-model="searchQuery"
+        type="search"
         :placeholder="t('settings.pages.card.search')"
-        size="md"
+        :aria-label="t('settings.pages.card.search')"
         :class="['w-full flex-1 sm:max-w-xs']"
       />
       <div :class="['w-full shrink-0 sm:w-40']">
@@ -367,7 +220,6 @@ async function handleRestoreDeletedCard(card: DeletedCard) {
           :is-active="item.id === activeCardId"
           :version="item.version"
           :model-id="item.displayModelId"
-          :sync-state="cardSyncStates[item.id]"
         />
 
         <div

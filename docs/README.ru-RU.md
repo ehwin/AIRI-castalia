@@ -164,11 +164,9 @@
 > RAG, система памяти, встроенная база данных, иконки, утилиты Live2D и многое другое!
 
 > [!TIP]
-> Вы можете переводить AIRI на [Crowdin](https://crowdin.com/project/proj-airi) или открыть pull request, который изменяет `packages/i18n/src/locales/`. Оба способа обновляют одни и те же переводы.
+> Эта ветка включает только английский и упрощённый китайский. Чтобы исправить перевод, откройте pull request, который изменяет `packages/i18n/src/locales/`.
 >
 > Не отправляйте перевод, совпадающий с английским текстом. Ревью отклонит его. Строка без перевода покажет английский текст.
->
-> <a href="https://crowdin.com/project/proj-airi" target="_blank" rel="nofollow"><img style="width: 140px; height: 40px;" src="https://badges.crowdin.net/badge/light/crowdin-on-dark.png" srcset="https://badges.crowdin.net/badge/light/crowdin-on-dark.png 1x, https://badges.crowdin.net/badge/light/crowdin-on-dark@2x.png 2x" alt="Crowdin | Agile localization for tech companies" width="140" height="40" /></a>
 
 Вы когда-нибудь мечтали о кибер-живом существе (кибер-вайфу, цифровом питомце) или цифровом компаньоне, который мог бы играть с вами и разговаривать?
 
@@ -425,14 +423,6 @@ flowchart LR
     Other[Telegram, Factorio, MCP, and others]
   end
 
-  subgraph Hosted[Hosted backend]
-    Edge[Caddy]
-    API[api-server]
-    Auth[auth-server]
-    Database[(PostgreSQL)]
-    Cache[(Redis)]
-  end
-
   Web --> StageUI
   Desktop --> StageUI
   Pocket --> StageUI
@@ -445,12 +435,6 @@ flowchart LR
   Discord --> SDK
   Minecraft --> SDK
   Other -. optional .-> SDK
-  Edge --> API
-  Edge --> Auth
-  API --> Database
-  API --> Cache
-  Auth --> Database
-  Auth --> Cache
 ```
 
 ## Похожие проекты

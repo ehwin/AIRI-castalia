@@ -8,7 +8,6 @@ import type { ServerForm } from './mcp-config'
 
 import { errorMessageFrom } from '@moeru/std'
 import { useHostEventaInvoke } from '@proj-airi/stage-host-context'
-import { useAnalytics } from '@proj-airi/stage-ui/composables'
 import { Button, Callout, Checkbox, GhostButton, SettingsCard, TransitionVertical } from '@proj-airi/ui'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -39,7 +38,6 @@ import {
 import { mcpServerSearchKey } from './mcp.search'
 
 const { t } = useI18n()
-const { trackMcpServerRemoved, trackMcpConnectionTestRun } = useAnalytics()
 const tn = (key: string, params?: Record<string, unknown>) => t(`settings.pages.modules.mcp-server.${key}`, params ?? {})
 
 const invokeOpenConfigFile = useHostEventaInvoke(electronMcpOpenConfigFile)
@@ -220,7 +218,6 @@ function removeServer(rowId: string) {
   const i = servers.value.findIndex(s => s.rowId === rowId)
   if (i >= 0) {
     servers.value.splice(i, 1)
-    trackMcpServerRemoved()
   }
   savedIds.value.delete(rowId)
   expandedIds.value.delete(rowId)
@@ -322,7 +319,6 @@ async function runConnectionTest() {
     testResult.value = { ok: false, error: errorMessageFrom(e) ?? 'Unknown error', durationMs: 0 }
   }
   finally {
-    trackMcpConnectionTestRun({ success: testResult.value?.ok === true })
     testRunning.value = false
   }
 }
@@ -476,7 +472,6 @@ onMounted(async () => {
       </article>
 
       <GhostButton
-        v-track-button="{ name: 'mcp_server_updated', action: 'add' }"
         size="md" block :disabled="isBusy"
         icon="i-solar:add-circle-bold-duotone" :label="tn('actions.add-server')"
         @click="addServer"

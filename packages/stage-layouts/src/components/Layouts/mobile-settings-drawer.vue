@@ -1,14 +1,11 @@
 <script setup lang="ts">
-import { InboxDrawer } from '@proj-airi/stage-ui/components'
-import { useAuthStore } from '@proj-airi/stage-ui/stores/auth'
-import { useInboxStore } from '@proj-airi/stage-ui/stores/inbox'
 import { useSpeechOutputControlStore } from '@proj-airi/stage-ui/stores/speech-output-control'
-import { Avatar, Badge, BasicButton, BottomDrawer, GhostButton, RoundRange, SelectTab, useTheme } from '@proj-airi/ui'
+import { BasicButton, BottomDrawer, GhostButton, RoundRange, SelectTab, useTheme } from '@proj-airi/ui'
 import { useEventListener } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
 import { computed, shallowRef } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RouterLink, useRouter } from 'vue-router'
+import { RouterLink } from 'vue-router'
 
 import ActionAbout from './InteractiveArea/Actions/About.vue'
 
@@ -23,22 +20,12 @@ const emit = defineEmits<{
 const characterVoiceEnabled = defineModel<boolean>('characterVoiceEnabled', { required: true })
 const { t } = useI18n()
 const { themeMode } = useTheme()
-const authStore = useAuthStore()
-const { isAuthenticated, user } = storeToRefs(authStore)
-const router = useRouter()
 const speechOutputControl = useSpeechOutputControlStore()
 const { speechVolume } = storeToRefs(speechOutputControl)
 const backgroundDialogOpen = shallowRef(false)
 const settingsOpen = shallowRef(false)
 const aboutOpen = shallowRef(false)
 const keyboardNavigation = shallowRef(false)
-const { unread } = storeToRefs(useInboxStore())
-const notificationsOpen = shallowRef(false)
-/** The Notifications drawer asked to return here. The menu reopens after that drawer closes. */
-const returnToMenu = shallowRef(false)
-const menuLabel = computed(() => isAuthenticated.value && unread.value > 0
-  ? t('stage.mobile-tools.menu-unread', { count: unread.value })
-  : t('stage.mobile-tools.menu'))
 
 useEventListener('keydown', (event) => {
   if (event.key === 'Tab')
@@ -49,9 +36,9 @@ useEventListener('pointerdown', () => {
 }, { capture: true })
 
 // Finish closing settings before opening a sibling modal, so focus and scroll locks have one owner.
-const nextPanel = shallowRef<'background' | 'about' | 'account' | 'view' | 'notifications'>()
+const nextPanel = shallowRef<'background' | 'about' | 'view'>()
 
-function openPanel(panel: 'background' | 'about' | 'account' | 'view' | 'notifications') {
+function openPanel(panel: 'background' | 'about' | 'view') {
   nextPanel.value = panel
   settingsOpen.value = false
 }
@@ -69,31 +56,10 @@ function finishSettingsClose() {
   else if (nextPanel.value === 'about') {
     aboutOpen.value = true
   }
-  else if (nextPanel.value === 'account') {
-    if (isAuthenticated.value)
-      void router.push('/settings/account')
-    else
-      authStore.needsLogin = true
-  }
   else if (nextPanel.value === 'view') {
     emit('openViewControls')
   }
-  else if (nextPanel.value === 'notifications') {
-    notificationsOpen.value = true
-  }
   nextPanel.value = undefined
-}
-
-function backToMenu() {
-  returnToMenu.value = true
-  notificationsOpen.value = false
-}
-
-function finishNotificationsClose() {
-  if (!returnToMenu.value)
-    return
-  returnToMenu.value = false
-  settingsOpen.value = true
 }
 
 const characterVoiceVolume = computed({
@@ -123,7 +89,7 @@ const characterVoiceIcon = computed(() => {
     <template #trigger>
       <BasicButton
         size="unset"
-        :aria-label="menuLabel"
+        :aria-label="t('stage.mobile-tools.menu')"
         :title="t('stage.mobile-tools.menu')"
         data-testid="mobile-settings-button"
         :class="[
@@ -133,58 +99,9 @@ const characterVoiceIcon = computed(() => {
         ]"
       >
         <span aria-hidden="true" :class="['i-solar:hamburger-menu-outline size-6']" />
-        <!-- Unread Notifications are in this menu. A fixed-size dot keeps the button stable. -->
-        <Badge
-          v-if="isAuthenticated && unread > 0"
-          dot
-          data-testid="mobile-menu-notifications-dot"
-          :class="['pointer-events-none absolute right-1.5 top-1.5 ring-2 ring-neutral-50 dark:ring-neutral-900']"
-        />
       </BasicButton>
     </template>
     <div :class="['mobile-settings-actions select-none', keyboardNavigation && 'keyboard-navigation']">
-      <div :class="['mb-4 overflow-hidden rounded-2xl bg-white dark:bg-neutral-800/60']">
-        <GhostButton
-          block size="unset"
-          :class="[
-            'mobile-tool-row min-h-16 rounded-none px-4 py-3',
-            '[&_.basic-button-content]:w-full [&_.basic-button-content]:gap-3 [&_[aria-hidden]]:shrink-0',
-          ]"
-          @click="openPanel('account')"
-        >
-          <Avatar
-            :src="isAuthenticated ? user?.image : null"
-            :class="[
-              'size-12 shrink-0 rounded-full',
-              isAuthenticated ? 'bg-neutral-200 text-neutral-500 dark:bg-neutral-700' : 'bg-primary-500/10 text-primary-500',
-            ]"
-          >
-            <template #fallback>
-              <span :class="['i-solar:user-rounded-outline size-6']" />
-            </template>
-          </Avatar>
-          <span :class="['min-w-0 flex-1 text-left']">
-            <span :class="['block truncate text-base font-semibold']">{{ isAuthenticated ? user?.name : t('stage.mobile-tools.sign-in') }}</span>
-            <span :class="['block text-xs text-neutral-500 dark:text-neutral-400']">{{ t('stage.mobile-tools.account-description') }}</span>
-          </span>
-          <span aria-hidden="true" :class="['i-solar:alt-arrow-right-outline size-4 shrink-0 text-neutral-400']" />
-        </GhostButton>
-        <template v-if="isAuthenticated">
-          <div :class="['mx-4 border-t border-neutral-100 dark:border-neutral-700/50']" />
-          <GhostButton
-            block size="unset"
-            data-testid="mobile-notifications-row"
-            :aria-label="unread > 0 ? t('stage.notifications.open-unread', { count: unread }) : t('stage.notifications.open')"
-            :class="['mobile-tool-row min-h-13 rounded-none px-4 py-3']"
-            @click="openPanel('notifications')"
-          >
-            <span aria-hidden="true" :class="['i-solar:bell-outline size-5 shrink-0 text-neutral-400']" />
-            <span :class="['flex-1 text-left text-sm']">{{ t('stage.notifications.title') }}</span>
-            <Badge :count="unread" />
-            <span aria-hidden="true" :class="['i-solar:alt-arrow-right-outline size-4 text-neutral-400']" />
-          </GhostButton>
-        </template>
-      </div>
       <section :class="['mb-4']">
         <h3 :class="['mb-2 px-1 text-xs font-semibold text-neutral-500 dark:text-neutral-400']">
           {{ t('stage.mobile-tools.appearance') }}
@@ -300,7 +217,6 @@ const characterVoiceIcon = computed(() => {
   </BottomDrawer>
   <BackgroundDialogPicker v-model="backgroundDialogOpen" class="pointer-events-auto" />
   <ActionAbout v-model="aboutOpen" hide-trigger />
-  <InboxDrawer v-model:open="notificationsOpen" @back="backToMenu" @after-close="finishNotificationsClose" />
 </template>
 
 <style scoped>

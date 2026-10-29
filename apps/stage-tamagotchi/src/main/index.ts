@@ -49,7 +49,7 @@ import { IOTraceRecordingService } from './services/airi/io-trace-recording'
 import { setupMcpManager } from './services/airi/mcp-servers'
 import { setupExtensionHost } from './services/airi/plugins'
 import { setupArtistryBridge } from './services/airi/widgets/artistry-bridge'
-import { isExternallyUpdatedInstall, setupAutoUpdater } from './services/electron/auto-updater'
+import { setupAutoUpdater } from './services/electron/auto-updater'
 import { setupSherpawModelAssetsProtocol } from './services/electron/bundled-sherpaw-assets'
 import { setupGlobalShortcutService } from './services/electron/global-shortcut'
 import { setupPermissionHandlers } from './services/electron/media-permissions'
@@ -271,15 +271,11 @@ app.whenReady().then(async () => {
   const autoUpdater = injeca.provide('services:auto-updater', {
     dependsOn: { appConfig },
     build: ({ dependsOn }) => setupAutoUpdater({
-      enabled: !isExternallyUpdatedInstall(),
+      // This fork has no release feed of its own. The updater in this tree names
+      // the upstream repository, so an enabled updater would offer to replace this
+      // build with the official commercial one. Keep it off for every install.
+      enabled: false,
       getStoredUpdateLane: () => dependsOn.appConfig.get()?.updateChannel,
-      setStoredUpdateLane: (lane) => {
-        const currentConfig = dependsOn.appConfig.get()
-        dependsOn.appConfig.update({
-          ...currentConfig,
-          updateChannel: lane,
-        })
-      },
     }),
   })
 

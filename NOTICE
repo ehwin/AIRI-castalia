@@ -1,0 +1,22 @@
+AIRI licensing notice
+
+Unless a file states another license, AIRI code is licensed under the GNU Affero
+General Public License, version 3 or any later version.
+
+The AGPL applies to AIRI code added after the license change. Earlier AIRI
+releases remain available under the licenses that they carried when published.
+
+Third-party components keep their own licenses:
+
+- Castalia-Anima code adapted into `packages/castalia-plugin` remains under its
+  MIT License and keeps the copyright notice for ehwin. The MIT text and the
+  adapted file list are in `packages/castalia-plugin/THIRD-PARTY-NOTICES.md`.
+- Spine Runtimes remain under the Spine Runtimes License Agreement. They are not
+  covered by the AGPL.
+- Font packages keep their stated SIL Open Font License terms.
+- VRM, Live2D, MMD, audio, model, and dataset assets can have separate terms.
+  Their license files and source notices control their use.
+- The `packages/ccc` Seraphina test fixture carries its stated AGPL-3.0 notice.
+
+The repository does not grant rights to AIRI hosted services, trademarks, or
+third-party accounts and endpoints.

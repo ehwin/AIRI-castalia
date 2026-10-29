@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { Section } from '@proj-airi/stage-ui/components'
-import { useAnalytics } from '@proj-airi/stage-ui/composables'
 import { useAiriCardStore, useBackgroundStore } from '@proj-airi/stage-ui/stores'
 import { Button, Callout } from '@proj-airi/ui'
 import { computed, ref } from 'vue'
@@ -9,7 +8,6 @@ import { useI18n } from 'vue-i18n'
 import { isSceneBackground, sceneBackgroundSearchKey } from './index.search'
 
 const { t } = useI18n()
-const { trackSceneBackgroundSet } = useAnalytics()
 const backgroundStore = useBackgroundStore()
 const cardStore = useAiriCardStore()
 
@@ -32,7 +30,6 @@ const activeBackgroundId = computed({
       ...cardStore.activeCard,
       extensions: extension,
     })
-    trackSceneBackgroundSet({ source: 'scene_settings', cleared: val === 'none' })
   },
 })
 

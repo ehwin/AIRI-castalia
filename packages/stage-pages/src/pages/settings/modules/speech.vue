@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { VoiceType } from '@proj-airi/stage-ui/composables'
 import type { SpeechProviderWithExtraOptions } from '@xsai-ext/providers/utils'
 
 import { errorMessageFrom } from '@moeru/std'
@@ -11,8 +10,6 @@ import {
   TestDummyMarker,
   VoiceCardManySelect,
 } from '@proj-airi/stage-ui/components'
-import { useAnalytics } from '@proj-airi/stage-ui/composables'
-import { OFFICIAL_SPEECH_PROVIDER_ID, OFFICIAL_SPEECH_STREAMING_PROVIDER_ID } from '@proj-airi/stage-ui/libs/providers/providers/official'
 import { useAiriCardStore } from '@proj-airi/stage-ui/stores'
 import { useSpeechStore } from '@proj-airi/stage-ui/stores/modules/speech'
 import { useProviderConfigStore } from '@proj-airi/stage-ui/stores/providers/config'
@@ -31,14 +28,12 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 
-import { moduleModelSearchKey, moduleProviderSearchKey, speechVoiceSearchKey } from './module-model-search'
-
 const { t } = useI18n()
 const providersStore = useProviderStore()
 const providerStore = useProviderConfigStore()
 const speechStore = useSpeechStore()
 const airiCardStore = useAiriCardStore()
-const { moduleSpeechProvidersMetadata } = storeToRefs(providersStore)
+const { allAudioSpeechProvidersMetadata, moduleSpeechProvidersMetadata } = storeToRefs(providersStore)
 const {
   activeSpeechProvider,
   activeSpeechModel,
@@ -56,16 +51,6 @@ const {
   availableVoices,
 } = storeToRefs(speechStore)
 
-const {
-  trackProviderClick,
-  trackOfficialTtsExposed,
-  trackOfficialTtsPreviewStarted,
-  trackOfficialTtsPreviewSucceeded,
-  trackTtsProviderSelected,
-  trackVoicePreviewPlayed,
-  trackVoiceSelected,
-} = useAnalytics()
-
 const voiceSearchQuery = ref('')
 const useSSML = ref(false)
 const testText = ref('Hello, my name is AI Assistant')
@@ -74,28 +59,10 @@ const isGenerating = ref(false)
 const audioUrl = ref('')
 const audioPlayer = ref<HTMLAudioElement | null>(null)
 const errorMessage = ref('')
-let lastOfficialTtsExposureKey = ''
-let previewCancellation = new AbortController()
-
-watch(() => speechStore.enabled, (enabled) => {
-  if (enabled) {
-    previewCancellation = new AbortController()
-  }
-  else {
-    previewCancellation.abort()
-    stopTestAudio()
-    errorMessage.value = ''
-  }
-}, { immediate: true, flush: 'sync' })
-
-const STREAMING_MODEL_OPTION_PREFIX = 'streaming:'
 
 const selectableSpeechSources = computed(() => {
   const configuredSources = moduleSpeechProvidersMetadata.value
-    .filter(metadata =>
-      metadata.id !== 'speech-noop'
-      && metadata.id !== OFFICIAL_SPEECH_STREAMING_PROVIDER_ID,
-    )
+    .filter(metadata => metadata.id !== 'speech-noop')
     .map(metadata => ({
       id: metadata.id,
       providerId: metadata.id,
@@ -104,24 +71,20 @@ const selectableSpeechSources = computed(() => {
     }))
 
   return [
-    {
-      id: 'speech-noop',
-      providerId: 'speech-noop',
-      title: t('settings.pages.modules.availability.none'),
-      description: undefined,
-    },
     ...configuredSources,
+    ...allAudioSpeechProvidersMetadata.value
+      .filter(metadata => metadata.id === 'speech-noop')
+      .map(metadata => ({
+        id: metadata.id,
+        providerId: metadata.id,
+        title: metadata.localizedName || 'Unknown',
+        description: metadata.localizedDescription,
+      })),
   ]
 })
 
 const displayedSpeechSource = computed({
-  get: () => {
-    if (!speechStore.enabled)
-      return 'speech-noop'
-    if (activeSpeechProvider.value === OFFICIAL_SPEECH_STREAMING_PROVIDER_ID)
-      return OFFICIAL_SPEECH_PROVIDER_ID
-    return activeSpeechProvider.value
-  },
+  get: () => activeSpeechProvider.value,
   set: (value: string) => {
     void selectSpeechSource(value).catch((error) => {
       errorMessage.value = errorMessageFrom(error) ?? 'An unknown error occurred'
@@ -129,50 +92,8 @@ const displayedSpeechSource = computed({
   },
 })
 
-const isOfficialSpeechSourceSelected = computed(() => displayedSpeechSource.value === OFFICIAL_SPEECH_PROVIDER_ID)
-
-function streamingModelOptionId(modelId: string) {
-  return `${STREAMING_MODEL_OPTION_PREFIX}${modelId}`
-}
-
-function modelIdFromStreamingOptionId(optionId: string) {
-  return optionId.startsWith(STREAMING_MODEL_OPTION_PREFIX)
-    ? optionId.slice(STREAMING_MODEL_OPTION_PREFIX.length)
-    : null
-}
-
-const displayedProviderModels = computed(() => {
-  if (!isOfficialSpeechSourceSelected.value)
-    return providerModels.value
-
-  const regularModels = providersStore.getModelsForProvider(OFFICIAL_SPEECH_PROVIDER_ID)
-  const streamingModels = providersStore.getModelsForProvider(OFFICIAL_SPEECH_STREAMING_PROVIDER_ID)
-  return [
-    ...regularModels,
-    ...streamingModels.map(model => ({
-      ...model,
-      id: streamingModelOptionId(model.id),
-      name: model.name,
-      description: model.description || 'Low-latency streaming TTS',
-    })),
-  ]
-})
-
-/**
- * The search marker of a model option. The official card lists the models of the regular and the streaming provider,
- * so each option names the provider that owns it, not the active one.
- */
-function speechModelSearchKey(optionId: string) {
-  const streamingModelId = modelIdFromStreamingOptionId(optionId)
-  if (streamingModelId != null)
-    return moduleModelSearchKey('speech', OFFICIAL_SPEECH_STREAMING_PROVIDER_ID, streamingModelId)
-  return moduleModelSearchKey('speech', isOfficialSpeechSourceSelected.value ? OFFICIAL_SPEECH_PROVIDER_ID : activeSpeechProvider.value, optionId)
-}
-
 const displayedSpeechModel = computed({
-  get: () => activeSpeechProvider.value === OFFICIAL_SPEECH_STREAMING_PROVIDER_ID && activeSpeechModel.value
-    ? streamingModelOptionId(activeSpeechModel.value)
-    : activeSpeechModel.value,
+  get: () => activeSpeechModel.value,
   set: (value: string) => {
     void selectSpeechModel(value).catch((error) => {
       errorMessage.value = errorMessageFrom(error) ?? 'An unknown error occurred'
@@ -181,22 +102,6 @@ const displayedSpeechModel = computed({
 })
 
 const currentSpeechModelId = computed(() => activeSpeechModel.value || '')
-
-const displayedModelsLoading = computed(() => {
-  if (!isOfficialSpeechSourceSelected.value)
-    return isLoadingActiveProviderModels.value
-  return providersStore.isLoadingModels[OFFICIAL_SPEECH_PROVIDER_ID]
-    || providersStore.isLoadingModels[OFFICIAL_SPEECH_STREAMING_PROVIDER_ID]
-    || false
-})
-
-const displayedModelError = computed(() => {
-  if (!isOfficialSpeechSourceSelected.value)
-    return activeProviderModelError.value
-  return providersStore.modelLoadError[OFFICIAL_SPEECH_PROVIDER_ID]
-    || providersStore.modelLoadError[OFFICIAL_SPEECH_STREAMING_PROVIDER_ID]
-    || null
-})
 
 const displayedVoiceOptions = computed(() => {
   return (availableVoices.value[activeSpeechProvider.value] ?? [])
@@ -223,148 +128,28 @@ const displayedSpeechVoiceId = computed({
 
 const currentSpeechVoiceId = computed(() => activeSpeechVoiceId.value || '')
 
-/**
- * Resolves the current TTS model id for low-cardinality analytics payloads.
- */
-function currentTtsModelId() {
-  return activeSpeechModel.value || 'unknown'
-}
-
-/**
- * Checks whether the selected provider is one of AIRI's official TTS providers.
- */
-function isOfficialTtsProvider(providerId: string) {
-  return providerId === OFFICIAL_SPEECH_PROVIDER_ID || providerId === OFFICIAL_SPEECH_STREAMING_PROVIDER_ID
-}
-
-/**
- * Classifies the selected voice without sending free-form provider config as a dimension.
- */
-function currentVoiceType(voiceId: string, providerId = activeSpeechProvider.value): VoiceType {
-  const catalogVoice = availableVoices.value[providerId]?.some(voice => voice.id === voiceId)
-  if (catalogVoice)
-    return providerId === OFFICIAL_SPEECH_PROVIDER_ID || providerId === OFFICIAL_SPEECH_STREAMING_PROVIDER_ID ? 'official_selected' : 'custom_configured'
-
-  return 'custom_configured'
-}
-
-/**
- * Builds bounded voice analytics fields for catalog, voice pack, and manual voices.
- */
-function voiceAnalyticsPayload(
-  voiceId: string,
-  providerId = activeSpeechProvider.value,
-): {
-  voice_id: string
-  voice_type: VoiceType
-} {
-  const voiceType = currentVoiceType(voiceId, providerId)
-  const isCatalogVoice = availableVoices.value[providerId]?.some(voice => voice.id === voiceId) ?? false
-  const shouldBucketVoiceId = voiceType === 'custom_configured' && !isCatalogVoice
-
-  return {
-    voice_id: shouldBucketVoiceId ? 'custom' : voiceId,
-    voice_type: voiceType,
-  }
-}
-
-/**
- * Adds server-side TTS analytics metadata to official preview requests.
- */
-function withManualPreviewAnalytics<TProviderConfig extends Record<string, unknown> | undefined>(
-  providerConfig: TProviderConfig,
-  providerId: string,
-  voiceType: VoiceType,
-): TProviderConfig | Record<string, unknown> {
-  if (providerId !== OFFICIAL_SPEECH_PROVIDER_ID && providerId !== OFFICIAL_SPEECH_STREAMING_PROVIDER_ID)
-    return providerConfig
-
-  const baseConfig: Record<string, unknown> = providerConfig ?? {}
-  return {
-    ...baseConfig,
-    extraBody: {
-      ...(baseConfig.extraBody as Record<string, unknown> | undefined),
-      airi_analytics: {
-        trigger: 'manual',
-        source: 'manual_preview',
-        voice_type: voiceType,
-      },
-    },
-  }
-}
-
-/**
- * Tracks explicit voice selection from catalog or custom input controls.
- */
-async function selectSpeechVoice(voiceId: string | undefined) {
+/** Persists the selection after the voice control reports a change. */
+async function selectSpeechVoice() {
   await persistSelection()
-  if (!voiceId)
-    return
-
-  trackVoiceSelected({
-    tts_provider_id: activeSpeechProvider.value || 'unknown',
-    tts_model_id: currentTtsModelId(),
-    ...voiceAnalyticsPayload(voiceId),
-    source: 'settings',
-  })
 }
 
 /** Persists the selection only after the leader commits its provider and model. */
 async function selectSpeechSource(sourceId: string) {
-  const selection = await speechStore.selectSource(sourceId)
-  if (!selection) {
-    stopTestAudio()
-    errorMessage.value = ''
+  const selection = await speechStore.selectProviderModel(sourceId, '')
+  if (!selection)
     return
-  }
-  const providerId = providerStore.providers[sourceId]?.definitionId || sourceId
-  // Use this command's receipt: another selection can reach the store before
-  // this caller resumes, but must not relabel this analytics event.
-  trackTtsProviderSelected({
-    tts_provider_id: providerId,
-    tts_model_id: selection.model || 'unknown',
-    source: 'settings',
-  })
-  // A follower can receive the action receipt before its state snapshot. Persist the committed selection.
-  await airiCardStore.updateActiveCardSpeech(selection)
+  await persistSelection()
 }
 
 /** Resolves the displayed model option before committing it in the leader. */
 async function selectSpeechModel(modelOptionId: string) {
-  const streamingModelId = modelIdFromStreamingOptionId(modelOptionId)
-  const nextProvider = streamingModelId == null
-    ? activeSpeechProvider.value === OFFICIAL_SPEECH_STREAMING_PROVIDER_ID
-      ? OFFICIAL_SPEECH_PROVIDER_ID
-      : activeSpeechProvider.value
-    : OFFICIAL_SPEECH_STREAMING_PROVIDER_ID
-  const nextModel = streamingModelId ?? modelOptionId
-
-  await speechStore.selectProviderModel(nextProvider, nextModel)
+  await speechStore.selectProviderModel(activeSpeechProvider.value, modelOptionId)
   await persistSelection()
-}
-
-/**
- * Tracks that the settings page has shown an official TTS route to the user.
- */
-function trackOfficialTtsExposure(providerId = activeSpeechProvider.value, modelId = currentTtsModelId()) {
-  if (!providerId || !isOfficialTtsProvider(providerId))
-    return
-
-  const exposureKey = `${providerId}:${modelId}`
-  if (lastOfficialTtsExposureKey === exposureKey)
-    return
-
-  lastOfficialTtsExposureKey = exposureKey
-  trackOfficialTtsExposed({
-    tts_provider_id: providerId,
-    tts_model_id: modelId,
-    source: 'settings',
-  })
 }
 
 /** Applies provider defaults in the leader without a follower state proposal. */
 async function syncOpenAICompatibleSettings() {
-  if (!speechStore.enabled || activeSpeechProvider.value !== 'openai-compatible-audio-speech')
+  if (activeSpeechProvider.value !== 'openai-compatible-audio-speech')
     return
 
   const providerConfig = providerStore.getProviderConfig(activeSpeechProvider.value)
@@ -381,7 +166,6 @@ onMounted(async () => {
     await providersStore.loadModelsForConfiguredProviders()
     await speechStore.loadVoicesForProvider(activeSpeechProvider.value, activeSpeechModel.value || undefined)
     await syncOpenAICompatibleSettings()
-    trackOfficialTtsExposure()
   }
   catch (error) {
     // Closing a renderer rejects pending RPCs even after its page unmounts.
@@ -400,7 +184,6 @@ watch(activeSpeechProvider, async (newProvider) => {
     await speechStore.loadVoicesForProvider(newProvider, activeSpeechModel.value || undefined)
     if (newProvider !== activeSpeechProvider.value)
       return
-    trackOfficialTtsExposure(newProvider, currentTtsModelId())
 
     await syncOpenAICompatibleSettings()
   }
@@ -409,13 +192,6 @@ watch(activeSpeechProvider, async (newProvider) => {
     if (newProvider === activeSpeechProvider.value)
       errorMessage.value = errorMessageFrom(error) ?? 'An unknown error occurred'
   }
-})
-
-watch(activeSpeechModel, () => {
-  if (!activeSpeechProvider.value)
-    return
-
-  trackOfficialTtsExposure(activeSpeechProvider.value, currentTtsModelId())
 })
 
 async function persistSelection() {
@@ -428,18 +204,13 @@ async function persistSelection() {
 
 // Function to generate speech
 async function generateTestSpeech() {
-  if (!speechStore.enabled)
-    return
-  const signal = previewCancellation.signal
   if (!testText.value.trim() && !useSSML.value)
     return
 
   if (useSSML.value && !ssmlText.value.trim())
     return
 
-  const provider = await providersStore.getProviderInstance<SpeechProviderWithExtraOptions<string, Record<string, unknown>>>(activeSpeechProvider.value)
-  if (signal.aborted)
-    return
+  const provider = await providersStore.getProviderInstance(activeSpeechProvider.value) as SpeechProviderWithExtraOptions<string, any>
   if (!provider) {
     console.error('Failed to initialize speech provider')
     return
@@ -478,12 +249,6 @@ async function generateTestSpeech() {
     return
   }
 
-  const previewVoice = voice
-  const previewModel = model
-  const previewProvider = activeSpeechProvider.value || 'unknown'
-  const previewAnalytics = voiceAnalyticsPayload(previewVoice.id, previewProvider)
-  const previewStartedAt = performance.now()
-
   isGenerating.value = true
   errorMessage.value = ''
 
@@ -509,58 +274,27 @@ async function generateTestSpeech() {
           supportsSSML: speechStore.supportsSSML,
         })
 
-    if (isOfficialTtsProvider(previewProvider)) {
-      trackOfficialTtsPreviewStarted({
-        tts_provider_id: previewProvider,
-        tts_model_id: previewModel,
-        ...previewAnalytics,
-        source: 'manual_preview',
-      })
-    }
-
     const response = await generateSpeech({
       ...provider.speech(
         model,
-        withManualPreviewAnalytics(speechRequest.providerConfig, previewProvider, previewAnalytics.voice_type),
+        speechRequest.providerConfig,
       ),
       input: speechRequest.input,
       voice: voice.id,
-      abortSignal: signal,
     })
-
-    signal.throwIfAborted()
 
     // Convert the response to a blob and create an object URL
     audioUrl.value = URL.createObjectURL(new Blob([response]))
-    if (isOfficialTtsProvider(previewProvider)) {
-      trackOfficialTtsPreviewSucceeded({
-        tts_provider_id: previewProvider,
-        tts_model_id: previewModel,
-        ...previewAnalytics,
-        source: 'manual_preview',
-        duration_ms: Math.round(performance.now() - previewStartedAt),
-      })
-    }
 
     // Play the audio
     setTimeout(() => {
-      if (!signal.aborted && audioPlayer.value) {
+      if (audioPlayer.value) {
         void audioPlayer.value.play()
-          .then(() => {
-            trackVoicePreviewPlayed({
-              tts_provider_id: previewProvider,
-              tts_model_id: previewModel,
-              ...previewAnalytics,
-              source: 'manual_preview',
-            })
-          })
           .catch(() => {})
       }
     }, 100)
   }
   catch (error) {
-    if (signal.aborted)
-      return
     console.error('Error generating speech:', error)
     errorMessage.value = errorMessageFrom(error) || 'An unknown error occurred'
   }
@@ -585,8 +319,9 @@ function stopTestAudio() {
 
 // Clean up when component is unmounted
 onUnmounted(() => {
-  previewCancellation.abort()
-  stopTestAudio()
+  if (audioUrl.value) {
+    URL.revokeObjectURL(audioUrl.value)
+  }
 })
 
 function updateCustomVoiceName(value: string | undefined) {
@@ -605,13 +340,6 @@ function updateCustomVoiceName(value: string | undefined) {
     provider: activeSpeechProvider.value,
     gender: 'male',
   }
-}
-
-/**
- * Tracks a manual voice after the input value is committed by the user.
- */
-function commitCustomVoiceSelection() {
-  selectSpeechVoice(activeSpeechVoiceId.value)
 }
 
 /** Routes manual model edits through the same leader commit as listed models. */
@@ -640,7 +368,6 @@ async function handleDeleteProvider(providerId: string) {
   <ErrorContainer v-if="errorMessage" :error="errorMessage" />
   <div flex="~ col md:row gap-6">
     <SettingsCard class="md:w-[40%]">
-      <FieldCheckbox v-model="speechStore.enabled" :label="t('settings.pages.modules.speech.title')" />
       <div flex="~ col gap-4">
         <div>
           <h2 class="text-lg text-neutral-500 md:text-2xl dark:text-neutral-400">
@@ -660,16 +387,14 @@ async function handleDeleteProvider(providerId: string) {
               :id="source.id"
               :key="source.id"
               v-model="displayedSpeechSource"
-              :data-settings-search="moduleProviderSearchKey('speech', source.providerId)"
               name="speech-provider"
               :value="source.id"
               :title="source.title"
               :description="source.description"
-              @click="trackProviderClick(source.providerId || source.id, 'speech')"
             >
               <template #topRight>
                 <button
-                  v-if="source.providerId && source.providerId !== 'speech-noop' && !source.providerId.startsWith('official-provider')"
+                  v-if="source.providerId && source.providerId !== 'speech-noop'"
                   type="button"
                   class="rounded bg-neutral-100 p-1 text-neutral-600 transition-colors dark:bg-neutral-800/60 hover:bg-neutral-200 dark:text-neutral-300 dark:hover:bg-neutral-700/60"
                   @click.stop.prevent="handleDeleteProvider(source.providerId)"
@@ -712,7 +437,7 @@ async function handleDeleteProvider(providerId: string) {
       </div>
 
       <!-- Model selection section -->
-      <div v-if="speechStore.enabled && activeSpeechProvider && activeSpeechProvider !== 'speech-noop'">
+      <div v-if="activeSpeechProvider && activeSpeechProvider !== 'speech-noop'">
         <div flex="~ col gap-4">
           <div>
             <h2 class="text-lg md:text-2xl">
@@ -738,7 +463,7 @@ async function handleDeleteProvider(providerId: string) {
           <!-- Model listing for other providers -->
           <div v-else-if="supportsModelListing" class="flex flex-col gap-4">
             <!-- Loading state -->
-            <div v-if="displayedModelsLoading" class="flex items-center justify-center py-4">
+            <div v-if="isLoadingActiveProviderModels" class="flex items-center justify-center py-4">
               <div class="mr-2 animate-spin">
                 <div i-solar:spinner-line-duotone text-xl />
               </div>
@@ -746,10 +471,10 @@ async function handleDeleteProvider(providerId: string) {
             </div>
 
             <!-- Error state -->
-            <template v-else-if="displayedModelError">
+            <template v-else-if="activeProviderModelError">
               <ErrorContainer
                 :title="t('settings.pages.modules.consciousness.sections.section.provider-model-selection.error')"
-                :error="displayedModelError"
+                :error="activeProviderModelError"
               />
 
               <FieldInput
@@ -762,7 +487,7 @@ async function handleDeleteProvider(providerId: string) {
             </template>
 
             <!-- No models available -->
-            <template v-else-if="displayedProviderModels.length === 0 && !displayedModelsLoading">
+            <template v-else-if="providerModels.length === 0 && !isLoadingActiveProviderModels">
               <Alert type="warning">
                 <template #title>
                   {{ t('settings.pages.modules.consciousness.sections.section.provider-model-selection.no_models') }}
@@ -782,12 +507,11 @@ async function handleDeleteProvider(providerId: string) {
             </template>
 
             <!-- Using the new RadioCardManySelect component -->
-            <template v-else-if="displayedProviderModels.length > 0">
+            <template v-else-if="providerModels.length > 0">
               <RadioCardManySelect
                 v-model="displayedSpeechModel"
                 v-model:search-query="modelSearchQuery"
-                :items="displayedProviderModels"
-                :search-key-of="model => speechModelSearchKey(model.id)"
+                :items="providerModels"
                 :searchable="true"
                 :search-placeholder="t('settings.pages.modules.consciousness.sections.section.provider-model-selection.search_placeholder')"
                 :search-no-results-title="t('settings.pages.modules.consciousness.sections.section.provider-model-selection.no_search_results')"
@@ -805,7 +529,7 @@ async function handleDeleteProvider(providerId: string) {
       </div>
 
       <!-- Voice Configuration Section -->
-      <div v-if="speechStore.enabled && activeSpeechProvider && activeSpeechProvider !== 'speech-noop'">
+      <div v-if="activeSpeechProvider && activeSpeechProvider !== 'speech-noop'">
         <div flex="~ col gap-4">
           <div>
             <h2 class="text-lg text-neutral-500 md:text-2xl dark:text-neutral-400">
@@ -852,7 +576,6 @@ async function handleDeleteProvider(providerId: string) {
               v-model:search-query="voiceSearchQuery"
               v-model:voice-id="displayedSpeechVoiceId"
               :voices="displayedVoiceOptions"
-              :search-key-of="voice => speechVoiceSearchKey(activeSpeechProvider, voice.id)"
               :searchable="true"
               :search-placeholder="t('settings.pages.modules.speech.sections.section.provider-voice-selection.search_voices_placeholder')"
               :search-no-results-title="t('settings.pages.modules.speech.sections.section.provider-voice-selection.no_voices')"
@@ -921,7 +644,7 @@ async function handleDeleteProvider(providerId: string) {
               label="Voice Name"
               description="Enter the voice name for your custom voice"
               placeholder="Enter voice name (e.g., 'alloy', 'echo')"
-              @change="commitCustomVoiceSelection"
+              @change="selectSpeechVoice()"
               @update:model-value="updateCustomVoiceName"
             />
 
@@ -993,8 +716,8 @@ async function handleDeleteProvider(providerId: string) {
             <button
               border="neutral-800 dark:neutral-200 solid 2" transition="border duration-250 ease-in-out"
               rounded-lg px-4 text="neutral-100 dark:neutral-900" py-2 text-sm
-              :disabled="!speechStore.enabled || isGenerating || (!testText.trim() && !useSSML) || (useSSML && !ssmlText.trim()) || !activeSpeechVoice"
-              :class="{ 'opacity-50 cursor-not-allowed': !speechStore.enabled || isGenerating || (!testText.trim() && !useSSML) || (useSSML && !ssmlText.trim()) || !activeSpeechVoice }"
+              :disabled="isGenerating || (!testText.trim() && !useSSML) || (useSSML && !ssmlText.trim()) || !activeSpeechVoice"
+              :class="{ 'opacity-50 cursor-not-allowed': isGenerating || (!testText.trim() && !useSSML) || (useSSML && !ssmlText.trim()) || !activeSpeechVoice }"
               bg="neutral-700 dark:neutral-300" @click="generateTestSpeech"
             >
               <div flex="~ row" items-center gap-2>
