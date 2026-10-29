@@ -10,6 +10,7 @@ import { app } from 'electron'
 
 import { castaliaMemoryForget, castaliaMemoryList, castaliaMemoryRecall, castaliaMemorySave } from '../../../shared/eventa/castalia-memory'
 import { createCastaliaEngineMemory, resolveCastaliaEngineOptions } from './castalia-engine'
+import { createInProcessBankMemory } from './castalia-inprocess'
 
 let repository: ReturnType<typeof createCastaliaMemoryRepository> | undefined
 let repositoryPath: string | undefined
@@ -42,8 +43,13 @@ export function setupCastaliaMemoryService(params: {
   const userDataDir = app.getPath('userData')
   const engineOptions = resolveCastaliaEngineOptions(userDataDir)
   if (engineOptions) {
-    const engine = createCastaliaEngineMemory(engineOptions)
-    console.info(`[castalia] memory backend: engine ${engineOptions.engineEntry} bank=${engineOptions.bankDir} project=${engineOptions.project}`)
+    // 默认在主进程内直连记忆库（不再 spawn 子进程、不走 MCP/HTTP）；
+    // CASTALIA_MEMORY_TRANSPORT=stdio 可切回旧的子进程路径做对照/兜底。
+    const transport = process.env.CASTALIA_MEMORY_TRANSPORT === 'stdio' ? 'stdio' : 'in-process'
+    const engine = transport === 'in-process'
+      ? createInProcessBankMemory(engineOptions)
+      : createCastaliaEngineMemory(engineOptions)
+    console.info(`[castalia] memory backend: ${transport} bank=${engineOptions.bankDir} project=${engineOptions.project}`)
     defineInvokeHandler(params.context, castaliaMemoryList, () => engine.list())
     defineInvokeHandler(params.context, castaliaMemorySave, entry => engine.save(entry))
     defineInvokeHandler(params.context, castaliaMemoryForget, entry => engine.forget(entry))

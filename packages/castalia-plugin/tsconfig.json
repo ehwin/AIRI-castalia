@@ -4,5 +4,5 @@
     "lib": ["ESNext"]
   },
   "include": ["src/**/*.ts", "vitest.config.ts"],
-  "exclude": ["dist", "node_modules"]
+  "exclude": ["dist", "node_modules", "src/vendor/engine/**"]
 }
