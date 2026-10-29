@@ -13,6 +13,14 @@
     "./memory": {
       "types": "./src/memory.ts",
       "default": "./src/memory.ts"
+    },
+    "./bank": {
+      "types": "./src/bank/index.ts",
+      "default": "./src/bank/index.ts"
+    },
+    "./bank/store-tools": {
+      "types": "./src/bank/store-tools.ts",
+      "default": "./src/bank/store-tools.ts"
     }
   },
   "scripts": {

@@ -134,3 +134,63 @@ eval_injection        -> 要点 13/14 = 93%，噪音 0/8，平均 3.7 条 / 584 
 ```
 
 注入质量与升级前基线一致；`regression_store_bridge` 覆盖的正是 AIRI app 走的那 4 个 store 工具。
+
+## 8. 进程内插件化：记忆体不再走子进程 / HTTP（2026-10-29）
+
+用户要求：记忆体做成**插件**、尽量放弃 HTTP、不要走引擎自己的记忆路径、**保留 Full 接口**。
+
+### 结论：ABI 曾是唯一硬阻塞，现在绕开了
+
+| 尝试 | 结果 |
+|---|---|
+| Electron 直接用引擎那份 `better-sqlite3` | ❌ `NODE_MODULE_VERSION 137` vs Electron `148`，开库即崩 |
+| Electron 内置 `node:sqlite` 开同一个库 | ✅ 140 条 |
+| `node:sqlite` + `sqlite-vec/vec0.dll` | ✅ `vec_memory` 140、`float[1024]`、KNN 自匹配 0.0000 |
+| shim 把 `better-sqlite3` 换成 `node:sqlite` | ✅ 引擎 `db/store/search` 原样 import，`getRecentMemories` 返回真实记忆 |
+
+所以**不需要**重编原生模块、不需要子进程、不需要 MCP：
+
+```
+apps/stage-tamagotchi (main)
+  └─ castalia-memory.ts        ← setupCastaliaMemoryService（4 个 IPC）
+      ├─ castalia-inprocess.ts ← 默认：进程内（openBank）
+      └─ castalia-engine.ts    ← 回退：stdio 子进程（CASTALIA_MEMORY_TRANSPORT=stdio）
+packages/castalia-plugin
+  ├─ src/bank/index.ts         ← openBank({bankDir, project, charId})：设 env → 加载配置 → 动态载入引擎
+  ├─ src/bank/store-tools.ts   ← 4 个 store 工具的进程内版本（从引擎 index.ts 移植）
+  ├─ src/vendor/sqlite-shim.ts ← better-sqlite3 API → node:sqlite（prepare/exec/pragma/transaction/loadExtension）
+  └─ src/vendor/engine/*.ts    ← 引擎源码镜像（34 文件，index.ts/fedServer.ts 除外）
+```
+
+### 两条必须遵守的规则（都踩过）
+
+1. **打开真实库前必须让引擎读到它自己的 config.json**：光设 `MEMORY_CONFIG` 不够，还要
+   `import('../vendor/engine/configLoader')`。少了这一步，引擎按默认嵌入模型算空间哈希，
+   判定"换了嵌入模型"→ **清空 `vec_memory`/`vec_chunk`**（原文不丢，但检索退化）。
+   实测踩了两次：一次在真实 airi 库（已用 `memory_maintenance repair` 重嵌 159 条/367 段恢复），
+   一次在库副本上（正好验证了这条规则）。
+2. **不能在文件顶部静态 import `vendor/engine/*` 或 `store-tools`**：引擎在模块求值时读
+   `process.env`（CHAR_ID / EMBED_MODE / MEMORY_DB_DIR），必须先 `openBank()` 设好环境再动态加载。
+   `store-tools` 因此改成 `loadEngineDeps()` + `createStoreTools(deps)` 工厂。
+
+### 验证
+
+```
+packages/castalia-plugin: typecheck 0 错 · vitest 16/16
+端到端（库副本，非真实库）: listStore / recallQuery(0.562, 636ms) / save→FOUND / forget→GONE
+                            向量未被清（general 140/141）
+应用构建: turbo 34/34 exit 0
+Full 侧不动: 3310/3312/3314/3316/3318 + 3344/3348 + 3398 全活；
+             memory_search_all(airi) 仍返回 10 条
+```
+
+### 维护
+
+引擎源码改了之后：
+
+```
+node packages/castalia-plugin/scripts/sync-engine.mjs   # 重放：复制 + 改写导入 + 拆类型导入 + 加头
+pnpm -F @proj-airi/castalia-plugin test:run
+```
+
+脚本是幂等的；vendor 里的文件带 `@ts-nocheck`（按上游 tsconfig 校验，本包用单测兜底）。
