@@ -421,6 +421,13 @@ pages:
       open_hint: The console's Memories view is the full browser — unified index over every library, with edit and delete. This page only summarizes the bus and opens it.
       opened_shell: Switched the console window.
       opened_browser: Opened in your browser (the console window is not running).
+      maintain_now: Consolidate now
+      maintaining: Consolidating…
+      maintain_done: Done
+      maintain_facts: new facts
+      maintain_merged: merged
+      maintain_no_llm: No reflection model configured, so only the digest step ran.
+      maintain_failed: Consolidation failed
   data:
     title: Data
     description: Manage stored AIRI data, exports, and resets

@@ -154,6 +154,19 @@ describe('store tools (memory_store_* port)', () => {
     expect(row?.text).toContain('我说话会慢一点')
   })
 
+  it('runs maintenance without a reflection model and reports what it did', async () => {
+    // 维护长在 app 主进程里(这条链只有 app ↔ anima 两段)。这里用的是无 config 的临时库,
+    // 所以反刍通道未配置 —— 正确行为不是抛错,而是如实报告"只跑了 digest"。
+    const report = await bank.maintain({ limit: 5 })
+    expect(report.reflectConfigured).toBe(false)
+    expect(report.ok).toBe(true)
+    expect(report.reflect?.ok).toBe(false)
+    expect(report.digest?.success).toBe(true)
+    expect(report.before).toBeTruthy()
+    expect(report.after).toBeTruthy()
+    expect(typeof report.ms).toBe('number')
+  })
+
   it('refuses a turn with no text on either side', async () => {
     // 纯工具调用轮次可能不产出正文；写进去只会是半句残行。
     expect((await bank.ingestTurn({ user: '有话说', assistant: '   ' })).ok).toBe(false)

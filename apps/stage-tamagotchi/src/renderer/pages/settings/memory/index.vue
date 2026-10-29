@@ -5,7 +5,7 @@ import { useElectronEventaInvoke } from '@proj-airi/electron-vueuse'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { castaliaFullMembers, castaliaFullSearch, castaliaOpenConsole } from '../../../../shared/eventa/castalia-memory'
+import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryMaintain, castaliaOpenConsole } from '../../../../shared/eventa/castalia-memory'
 
 // NOTICE: 这个页面在 app 里覆盖了 stage-pages 的同名 WIP 页（见 electron.vite.config.ts 的 exclude）。
 // 边界: 「记忆体」= Full 总线（跨库只读总览/检索）；「长期记忆」= castalia 本库（进程内插件）。
@@ -19,6 +19,46 @@ const invokeSearch = useElectronEventaInvoke(castaliaFullSearch)
 const invokeOpenConsole = useElectronEventaInvoke(castaliaOpenConsole)
 
 const consoleNote = ref('')
+
+/**
+ * 记忆维护手动入口：抽取 + 整合 + digest 都在主进程内跑（app ↔ anima 两段），
+ * 平时由主进程按天自动跑一次，这里只是「现在就跑一次」。
+ */
+const invokeMaintain = useElectronEventaInvoke(castaliaMemoryMaintain)
+const maintaining = ref(false)
+const maintainNote = ref('')
+
+async function maintainNow() {
+  if (maintaining.value)
+    return
+  maintaining.value = true
+  maintainNote.value = ''
+  try {
+    const report = await invokeMaintain({ limit: 30 })
+    const reflect = report.reflect as Record<string, any> | undefined
+    const merged = report.consolidate as Record<string, any> | undefined
+    if (!report.reflectConfigured) {
+      maintainNote.value = `${t(`${KEY}.maintain_no_llm`)}`
+    }
+    else if (!report.ok) {
+      maintainNote.value = `${t(`${KEY}.maintain_failed`)}: ${report.error ?? (reflect?.errors ?? []).join('; ')}`
+    }
+    else {
+      maintainNote.value = [
+        `${t(`${KEY}.maintain_done`)}`,
+        `${t(`${KEY}.maintain_facts`)} +${reflect?.factsInserted ?? 0}`,
+        `${t(`${KEY}.maintain_merged`)} ${merged?.merged ?? 0}`,
+        `${Math.round((report.ms ?? 0) / 1000)}s`,
+      ].join(' · ')
+    }
+  }
+  catch (error) {
+    maintainNote.value = (error as Error).message
+  }
+  finally {
+    maintaining.value = false
+  }
+}
 
 /** 跨库浏览的完整 UI 在控制台的「记忆总成」里；这里只负责把窗口切过去。 */
 async function openConsole(view: 'agg' | 'mng' | 'viz') {
@@ -137,10 +177,22 @@ onMounted(refresh)
       >
         {{ t(`${KEY}.star_map`) }}
       </button>
+      <button
+        type="button"
+        :disabled="maintaining"
+        :class="['rounded-lg', 'px-3 py-2', 'text-xs', 'bg-neutral-100 dark:bg-neutral-800', 'hover:bg-neutral-200 dark:hover:bg-neutral-700', maintaining ? 'opacity-60' : '']"
+        @click="maintainNow()"
+      >
+        {{ maintaining ? t(`${KEY}.maintaining`) : t(`${KEY}.maintain_now`) }}
+      </button>
       <span v-if="consoleNote === 'opened-shell'" :class="['text-xs', 'text-neutral-400']">{{ t(`${KEY}.opened_shell`) }}</span>
       <span v-else-if="consoleNote === 'opened-browser'" :class="['text-xs', 'text-neutral-400']">{{ t(`${KEY}.opened_browser`) }}</span>
       <span v-else-if="consoleNote && consoleNote !== 'failed'" :class="['text-xs', 'text-amber-600']">{{ consoleNote }}</span>
     </div>
+
+    <p v-if="maintainNote" :class="['text-xs', 'text-neutral-500 dark:text-neutral-400']">
+      {{ maintainNote }}
+    </p>
 
     <p :class="['text-xs', 'text-neutral-400 dark:text-neutral-500']">
       {{ t(`${KEY}.open_hint`) }}

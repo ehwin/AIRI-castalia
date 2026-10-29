@@ -121,6 +121,13 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
       }
     },
 
+    async maintain(options) {
+      if (closing)
+        return { ok: false, startedAt: new Date().toISOString(), ms: 0, reflectConfigured: false, error: 'closing' }
+      const bank = await ensure()
+      return bank.maintain(options)
+    },
+
     async close() {
       closing = true
       const bank = await opened?.catch(() => undefined)

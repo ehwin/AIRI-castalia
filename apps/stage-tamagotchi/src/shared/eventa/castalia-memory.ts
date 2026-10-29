@@ -43,6 +43,21 @@ export interface CastaliaIngestTurnResult {
 }
 export const castaliaMemoryIngest = defineInvokeEventa<CastaliaIngestTurnResult, CastaliaIngestTurnInput>('eventa:invoke:castalia:memory:ingest')
 
+/** 记忆维护（抽取 + 整合 + digest），全部在主进程内跑；失败不抛错，报告里带 error。 */
+export interface CastaliaMaintainReport {
+  ok: boolean
+  startedAt: string
+  ms: number
+  reflectConfigured: boolean
+  reflect?: Record<string, unknown>
+  consolidate?: Record<string, unknown>
+  digest?: Record<string, unknown>
+  before?: Record<string, number>
+  after?: Record<string, number>
+  error?: string
+}
+export const castaliaMemoryMaintain = defineInvokeEventa<CastaliaMaintainReport, { limit?: number } | undefined>('eventa:invoke:castalia:memory:maintain')
+
 // ── Full 总线（fedServer 3314）───────────────────────────────────────────────
 // 记忆体本体走进程内插件；这里只保留"跨库"那一层：总线能一次查所有库，
 // 面板「记忆体」页用它浏览，长期记忆页仍然只看 castalia 本库。
