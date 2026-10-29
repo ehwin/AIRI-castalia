@@ -128,7 +128,26 @@ export interface CastaliaEngineMemory {
    * so the caller appends the block without a relevance check of its own.
    */
   recall: (query: string) => Promise<CastaliaRecalledMemory>
+  /**
+   * Writes one finished turn back into the bank (conversation_log). Optional: the
+   * stdio transport predates it, so a host without it simply does not ingest.
+   */
+  ingest?: (turn: CastaliaIngestTurn) => Promise<CastaliaIngestResult>
   close: () => Promise<void>
+}
+
+/** One finished turn: what the user said and what the model finally answered. */
+export interface CastaliaIngestTurn {
+  user: string
+  assistant: string
+  sessionId?: string
+}
+
+export interface CastaliaIngestResult {
+  ok: boolean
+  id?: string
+  mode?: string
+  error?: string
 }
 
 /** Creates the memory port backed by one engine process (connected on first use). */

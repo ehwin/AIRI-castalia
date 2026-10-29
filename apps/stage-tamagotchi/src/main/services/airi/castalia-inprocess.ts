@@ -104,6 +104,23 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
       }
     },
 
+    async ingest(turn) {
+      if (closing)
+        return { ok: false, error: 'closing' }
+      const bank = await ensure()
+      try {
+        const result = await bank.ingestTurn(turn)
+        if (!result.ok)
+          console.warn('[castalia] ingestTurn failed:', result.error ?? 'unknown')
+        return result
+      }
+      catch (error) {
+        // 写回失败不能影响已经发出去的回复:只记日志,把结果交回调用方。
+        console.warn('[castalia] ingestTurn threw:', (error as Error).message)
+        return { ok: false, error: (error as Error).message }
+      }
+    },
+
     async close() {
       closing = true
       const bank = await opened?.catch(() => undefined)

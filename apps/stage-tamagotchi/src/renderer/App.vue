@@ -45,7 +45,7 @@ import {
   i18nGetLocale,
   i18nSetLocale,
 } from '../shared/eventa'
-import { castaliaMemoryForget, castaliaMemoryList, castaliaMemoryRecall, castaliaMemorySave } from '../shared/eventa/castalia-memory'
+import { castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryRecall, castaliaMemorySave } from '../shared/eventa/castalia-memory'
 import { electronModelAssetCancel, electronModelAssetEnsure, electronModelAssetRemove, electronModelAssetsClear, electronModelAssetsList, electronModelAssetStatusChanged } from '../shared/eventa/model-assets'
 import {
   electronPluginUpdateCapability,
@@ -90,11 +90,14 @@ const listCastaliaMemory = useElectronEventaInvoke(castaliaMemoryList)
 const saveCastaliaMemory = useElectronEventaInvoke(castaliaMemorySave)
 const forgetCastaliaMemory = useElectronEventaInvoke(castaliaMemoryForget)
 const recallCastaliaMemory = useElectronEventaInvoke(castaliaMemoryRecall)
+const ingestCastaliaMemory = useElectronEventaInvoke(castaliaMemoryIngest)
 memoryStore.attachRemote({
   list: listCastaliaMemory,
   save: saveCastaliaMemory,
   forget: async (entry) => { await forgetCastaliaMemory(entry) },
   recall: query => recallCastaliaMemory(query),
+  // 每轮对话的写回入口：没有它，她只说、不记。
+  ingest: turn => ingestCastaliaMemory(turn),
 })
 void memoryStore.hydrate()
 const listModelAssets = useElectronEventaInvoke(electronModelAssetsList)

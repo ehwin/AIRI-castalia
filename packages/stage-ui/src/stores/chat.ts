@@ -1057,6 +1057,14 @@ export const useChatStore = defineStore('chat', () => {
     onAssistantTurnReady: ({ sessionId, messageText, sessionMessages }) => {
       if (!isOwnerTurn(sessionId, sessionMessages))
         return
+      // 自回归结束 → 写回记忆体。这一轮说过的话就是她日后"记得"的唯一来源；
+      // 之前这条链在 app 侧没有任何调用点，airi 库的 conversation_log 自 2026-09-12 起就再没增长过。
+      // 不 await、不抛错：写库慢或失败都不能影响已经显示出来的回复（失败只落 console）。
+      void memory.ingestTurn({
+        user: pendingUserTurns.get(sessionId)?.text ?? lastUserTurn(sessionId)?.text ?? '',
+        assistant: messageText,
+        sessionId,
+      })
       const artistry = sessionCard(sessionId)?.extensions?.airi?.modules?.artistry
       if (artistry?.autonomousEnabled && artistry?.autonomousTarget === 'assistant')
         void artistryAutonomousStore.runArtistTask(messageText, toProviderHistory(sessionMessages))

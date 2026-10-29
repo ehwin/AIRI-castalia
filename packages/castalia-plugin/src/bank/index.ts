@@ -45,7 +45,28 @@ export interface BankHandle {
   orphanSessions: (args: { aliveSessionIds: string[], dryRun?: boolean }) => Array<{ memType: string, orphans: number, orphaned: number }>
   /** 各会话下有多少条活跃记忆(审计用) */
   sessionInventory: () => Array<{ memType: string, sessions: Array<{ sessionId: string, memories: number, latest: string }> }>
+  /**
+   * 一轮对话落库 —— 自回归结束后的写回入口。
+   * 最小路径只写 conversation_log + 用户观察(纯本地,不调 LLM);
+   * MEMORY_AUTO_PROCESS=1 时改走引擎的完整 autoProcess(含 VAD 队列与会话缓冲,那两步要 LLM)。
+   */
+  ingestTurn: (turn: IngestTurn) => Promise<IngestResult>
   close: () => void
+}
+
+/** 一轮对话:自回归结束后交给记忆体的最小单位 */
+export interface IngestTurn {
+  user: string
+  assistant: string
+  /** 会话 ID:仅 MEMORY_AUTO_PROCESS=1 时用于引擎的会话缓冲 */
+  sessionId?: string
+}
+export interface IngestResult {
+  ok: boolean
+  id?: string
+  mode: 'minimal' | 'auto'
+  details?: string[]
+  error?: string
 }
 
 /** 记忆分类库(与引擎 memType 目录一致):孤儿对账要逐库跑 */
@@ -163,6 +184,37 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
       }
       catch { return { memType: mt, sessions: [] } }
     }),
+    ingestTurn: async (turn) => {
+      const user = (turn.user ?? '').trim()
+      const assistant = (turn.assistant ?? '').trim()
+      // 纯工具调用轮次模型可能不产出正文;写进去只会得到 "用户: x\nairi: " 的残句。
+      if (!user || !assistant) return { ok: false, mode: 'minimal', error: 'empty turn' }
+      const fullAuto = process.env.MEMORY_AUTO_PROCESS === '1'
+      try {
+        if (fullAuto) {
+          const auto = await import('../vendor/engine/autoProcessor')
+          const result = await auto.autoProcess({
+            userMessage: user,
+            assistantMessage: assistant,
+            characterId: charId,
+            project,
+            sessionId: turn.sessionId,
+          })
+          return { ok: Boolean(result?.conversationSaved), mode: 'auto', details: result?.details ?? [] }
+        }
+        // 最小路径:conversation_log + 用户观察。两者都是本地计算,离线/无 key 也能跑。
+        const saved = await store.saveConversationTurn(user, assistant, charId, undefined, undefined, project)
+        try {
+          const userLearning = await import('../vendor/engine/userLearning')
+          userLearning.observeUserMessage(charId, 'default', user, project)
+        }
+        catch { /* 观察失败不能影响已落库的对话 */ }
+        return { ok: true, id: (saved as any)?.id, mode: 'minimal' }
+      }
+      catch (e: any) {
+        return { ok: false, mode: fullAuto ? 'auto' : 'minimal', error: e?.message ?? String(e) }
+      }
+    },
     close: () => { current = null },
   }
 
