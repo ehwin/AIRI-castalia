@@ -135,7 +135,15 @@ export const useSettingsStageModel = defineStore('settings-stage-model', () => {
       return
     }
 
-    const model = await displayModelsStore.getDisplayModel(selectedModelId)
+    let model: Awaited<ReturnType<typeof displayModelsStore.ensureDisplayModelAvailable>>
+    try {
+      model = await displayModelsStore.ensureDisplayModelAvailable(selectedModelId)
+    }
+    catch (error) {
+      // The selection stays. A model that cannot be made available now is retried next update.
+      console.error('[stage-model] failed to make the selected display model available:', error)
+      return
+    }
     if (requestId !== stageModelUpdateSequence)
       return
 
