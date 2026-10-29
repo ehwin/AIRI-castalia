@@ -1,11 +1,16 @@
 <script setup lang="ts">
-import { IconItem } from '@proj-airi/stage-ui/components'
+import { IconItem, SettingsNeedsAttention } from '@proj-airi/stage-ui/components'
+import { useSettingsNeedsAttention } from '@proj-airi/stage-ui/composables/use-settings-needs-attention'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
 const { t } = useI18n()
+// Settings that keep a feature in use from working: a provider that never got a key, a character
+// that cannot speak, voice input that cannot transcribe. Local-only; the list is empty when nothing
+// is wrong, and the section hides itself then.
+const { items: needsAttention, dismiss: dismissNeedsAttention } = useSettingsNeedsAttention()
 
 const settings = computed(() => {
   return router
@@ -24,6 +29,12 @@ const settings = computed(() => {
 <template>
   <div :class="['flex flex-col gap-4', 'font-normal']">
     <div />
+    <SettingsNeedsAttention
+      :items="needsAttention"
+      :class="['mb-1']"
+      @fix="item => router.push(item.to)"
+      @dismiss="item => dismissNeedsAttention(item.id)"
+    />
     <div :class="['flex flex-col gap-4', 'pb-12']">
       <IconItem
         v-for="(setting, index) in settings"

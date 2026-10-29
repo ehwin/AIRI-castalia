@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { IconItem, RippleGrid } from '@proj-airi/stage-ui/components'
+import { IconItem, RippleGrid, SettingsNeedsAttention } from '@proj-airi/stage-ui/components'
 import { useRippleGridState } from '@proj-airi/stage-ui/composables/use-ripple-grid-state'
+import { useSettingsNeedsAttention } from '@proj-airi/stage-ui/composables/use-settings-needs-attention'
 import { useSettings } from '@proj-airi/stage-ui/stores/settings'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -10,6 +11,9 @@ const router = useRouter()
 const resolveAnimation = ref<() => void>()
 const { t } = useI18n()
 const { lastClickedIndex, setLastClickedIndex } = useRippleGridState()
+// Settings that keep a feature in use from working (a provider that never got a key, a character
+// that cannot speak, voice input that cannot transcribe). Local-only: it reads the stores, no network.
+const { items: needsAttention, dismiss: dismissNeedsAttention } = useSettingsNeedsAttention()
 
 const settingsStore = useSettings()
 
@@ -43,6 +47,12 @@ const settings = computed(() => {
 <template>
   <div flex="~ col gap-4" font-normal>
     <div pb-12>
+      <SettingsNeedsAttention
+        :items="needsAttention"
+        :class="['mb-4']"
+        @fix="item => router.push(item.to)"
+        @dismiss="item => dismissNeedsAttention(item.id)"
+      />
       <RippleGrid
         :items="settings"
         :get-key="item => item.to"
