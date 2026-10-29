@@ -80,8 +80,10 @@ export interface QualitySource { id: string; text: string }
 export interface QualityPolicy {
   /** 新颖度低于此值且无新增成分 → 判为复述(默认 0.3 = 与基线 80% 分位对齐) */
   minNovelty?: number;
-  /** 近重复阈值(3-gram Jaccard,默认 0.75) */
+  /** 近重复阈值(3-gram Jaccard,默认 0.7) —— 两侧整体相似 */
   dupJaccard?: number;
+  /** 近重复阈值(3-gram 包含度,默认 0.8) —— 一条是另一条的改写/截取 */
+  dupContainment?: number;
   /** 证据原句最短长度(默认 4 字,太短的引文无判别力) */
   minEvidenceChars?: number;
 }
@@ -110,7 +112,7 @@ export function evaluateInsight(input: {
   srcImportance?: number;
   policy?: QualityPolicy;
 }): QualityVerdict {
-  const p = { minNovelty: 0.3, dupJaccard: 0.75, minEvidenceChars: 4, ...(input.policy || {}) };
+  const p = { minNovelty: 0.3, dupJaccard: 0.7, dupContainment: 0.8, minEvidenceChars: 4, ...(input.policy || {}) };
   const reasons: string[] = [];
   const text = String(input.text || '').trim();
   const srcConcat = (input.sources || []).map(s => s.text).join('\n');
@@ -133,8 +135,12 @@ export function evaluateInsight(input: {
   let duplicateOf: string | undefined;
   const g3 = charNgrams(text, 3);
   for (const e of input.existing || []) {
-    const j = jaccard(g3, charNgrams(e.text, 3));
-    if (j >= p.dupJaccard) { duplicateOf = e.id; reasons.push('near-duplicate'); break; }
+    const g3e = charNgrams(e.text, 3);
+    // 两条判据:整体相似(Jaccard) 或 一条被另一条基本覆盖(包含度)。
+    // 只用 Jaccard 会漏掉"同一句话换了语序"这种最常见的重复形态(实测 0.69 < 0.7)。
+    if (jaccard(g3, g3e) >= p.dupJaccard || overlapRatio(g3, g3e) >= p.dupContainment) {
+      duplicateOf = e.id; reasons.push('near-duplicate'); break;
+    }
   }
 
   // 闸 4:验证器重要度(0.5 来源强度 + 0.2 跨源 + 0.3 新颖度)
