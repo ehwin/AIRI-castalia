@@ -92,6 +92,10 @@ export interface ReflectAllResult {
     evidenceMissing: number;
     nearDuplicate: number;
     noveltyMean: number;
+    /** 只统计真正写入的那些的新颖度均值(和"候选"分开,避免被拒的拉低口径) */
+    noveltyWritten?: number;
+    /** 写入的洞察里引用 ≥2 条来源的条数(跨库整合是否真的发生) */
+    crossSource?: number;
     /** 近重复闸是否真的跑了(dryRun 下不读目标库则为 false) */
     dupChecked?: boolean;
   };
@@ -438,7 +442,7 @@ export async function runReflectAll(opts?: ReflectAllOptions): Promise<ReflectAl
     dbs.set(mt, db);
     return db;
   };
-  const quality = { evaluated: 0, written: 0, restatement: 0, evidenceMissing: 0, nearDuplicate: 0, noveltyMean: 0, dupChecked: false };
+  const quality = { evaluated: 0, written: 0, restatement: 0, evidenceMissing: 0, nearDuplicate: 0, noveltyMean: 0, noveltyWritten: 0, crossSource: 0, dupChecked: false };
   const recMeta = new Map<string, { text: string; importance: number }>();
   for (const r of records) recMeta.set(`${r.instance}|${r.project}|${r.id}`, { text: r.text, importance: r.importance });
   const existingByType = new Map<MemType, Array<{ id: string; text: string }>>();
@@ -500,6 +504,8 @@ export async function runReflectAll(opts?: ReflectAllOptions): Promise<ReflectAl
         existingByType.get(mt)!.push({ id, text: ins.text });
         saved++;
         quality.written++;
+        quality.noveltyWritten += verdict.novelty;
+        if (ins.sources.length >= 2) quality.crossSource++;
       } catch (e: any) {
         base.errors.push(`写入洞察失败: ${e.message}`);
       }
@@ -516,6 +522,7 @@ export async function runReflectAll(opts?: ReflectAllOptions): Promise<ReflectAl
   base.quality = {
     ...quality,
     noveltyMean: quality.evaluated ? Number((quality.noveltyMean / quality.evaluated).toFixed(3)) : 0,
+    noveltyWritten: quality.written ? Number((quality.noveltyWritten / quality.written).toFixed(3)) : 0,
   };
   base.ok = base.errors.length === 0;
   // 只把**本轮真正送进 LLM 且成功**的记录记入账本;失败批次不记,下次重跑
