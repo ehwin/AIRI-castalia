@@ -79,6 +79,13 @@ interface ForkOptions {
  * so the two instances never answer the same message twice. A host that never installs one keeps the local path.
  */
 export interface RemoteChatTransport {
+  /**
+   * Whether the remote instance can answer right now.
+   *
+   * A host installs a transport once and leaves it installed while the link comes and goes, so this is checked on
+   * every send. Returning false keeps the turn local instead of failing it.
+   */
+  canSend: () => boolean
   send: (payload: ChatSendPayload) => Promise<ChatSendResult>
 }
 
@@ -1391,7 +1398,8 @@ export const useChatStore = defineStore('chat', () => {
   /** Sends one serializable chat request through the elected leader. */
   async function send(payload: ChatSendPayload): Promise<ChatSendResult> {
     // A remote turn owns its own history and memory on the host, so the local orchestrator must not run it too.
-    if (remoteChatTransport) {
+    // A host that is reachable answers; one that is not falls through to the local path below.
+    if (remoteChatTransport?.canSend()) {
       try {
         return await remoteChatTransport.send(payload)
       }

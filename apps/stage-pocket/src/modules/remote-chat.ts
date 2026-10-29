@@ -90,7 +90,14 @@ export function installRemoteChat() {
   const offComplete = listen('output:gen-ai:chat:complete')
 
   setRemoteChatTransport({
+    // The link drops whenever the phone leaves the tailnet, so the transport stays installed and steps aside.
+    canSend: () => channel.connected,
+
     async send(payload: ChatSendPayload): Promise<ChatSendResult> {
+      // The turn is recorded locally as well, and a session that was never created cannot hold a message.
+      if (!chatSession.sessionMetas[payload.sessionId])
+        throw new Error('This chat session is not ready yet')
+
       const binding = `${BINDING_PREFIX}${payload.sessionId}`
       const assistantId = nanoid()
       const userMessage = {
