@@ -24,6 +24,8 @@ function parseTime(value: string | undefined): number {
 export function createInProcessBankMemory(options: CastaliaEngineOptions): CastaliaEngineMemory {
   let opened: Promise<Awaited<ReturnType<typeof openBank>>> | undefined
   let closing = false
+  // 最近几轮注入过的记忆 id:连续同话题时不重复塞同一段(报告里"连续 3 轮不重复"那条)。
+  let recentIds: string[] = []
 
   function ensure() {
     if (!opened) {
@@ -80,7 +82,9 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
       if (closing)
         return { text: '', count: 0, topSim: 0, chars: 0 }
       const bank = await ensure()
-      const result = await bank.recallQuery(query)
+      const result = await bank.recallQuery(query, { recentIds })
+      const ids = (result.stats as { ids?: string[] } | undefined)?.ids ?? []
+      recentIds = [...recentIds, ...ids].slice(-10)   // 只记最近 10 条,不至于整库都被排掉
       return {
         text: result.text ?? '',
         count: result.stats?.count ?? 0,
