@@ -12,9 +12,26 @@ const here = dirname(fileURLToPath(import.meta.url))
 const pkgRoot = resolve(here, '..')
 const args = process.argv.slice(2)
 const engineIdx = args.indexOf('--engine')
-const engineSrc = resolve(
-  engineIdx >= 0 ? args[engineIdx + 1] : join(pkgRoot, '../../castalia/Castalia-Anima/src'),
-)
+// 源码三仓现在在 D:/AI/castalia（D:/system/AIRI/castalia 只剩兜旧 argv 的 junction）。
+// 依次尝试：--engine 参数 → 旧 junction → 新树，选第一个真的存在且像引擎的目录。
+function pickEngineSrc() {
+  if (engineIdx >= 0)
+    return resolve(args[engineIdx + 1])
+  const candidates = [
+    join(pkgRoot, '../../castalia/Castalia-Anima/src'),
+    'D:/AI/castalia/Castalia-Anima/src',
+  ]
+  for (const candidate of candidates) {
+    try {
+      if (readdirSync(candidate).filter(f => f.endsWith('.ts')).length > 20)
+        return candidate
+    }
+    catch { /* 试下一个 */ }
+  }
+  return candidates[0]
+}
+
+const engineSrc = pickEngineSrc()
 const dest = join(pkgRoot, 'src/vendor/engine')
 
 const SKIP = new Set(['index.ts', 'fedServer.ts'])
@@ -81,13 +98,19 @@ function splitTypeImports(source, typeExports) {
   )
 }
 
+// 先把源读进内存再动目标：源目录不存在时上面会抛错，绝不能先删掉 vendor 目录
+// —— 2026-10-29 实际踩过：源路径失效 + 先 rmSync，38 个 vendor 文件被清空，只能 git checkout 恢复。
+const sources = readdirSync(engineSrc).filter(f => f.endsWith('.ts')).sort()
+if (sources.length < 20)
+  throw new Error(`[sync-engine] 源目录不像引擎（只找到 ${sources.length} 个 .ts）：${engineSrc}`)
+
 rmSync(dest, { recursive: true, force: true })
 mkdirSync(dest, { recursive: true })
 
 const typeExports = collectTypeExports(engineSrc)
 
 let copied = 0
-for (const file of readdirSync(engineSrc).sort()) {
+for (const file of sources) {
   if (!file.endsWith('.ts') || SKIP.has(file)) continue
   const raw = readFileSync(join(engineSrc, file), 'utf8')
   writeFileSync(join(dest, file), `${header(file)}\n${splitTypeImports(rewrite(raw), typeExports)}`, 'utf8')
