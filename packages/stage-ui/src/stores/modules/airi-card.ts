@@ -166,6 +166,38 @@ export const useAiriCardStore = defineStore('airi-card', () => {
     }
   }
 
+  /**
+   * NOTICE: upstream 0.13 also blanks a module selection whose provider was disabled by logging out
+   * (`configuredBy === 'authentication'`). This fork has no account system, so every provider is
+   * local and the selection stands. Restore that branch together with the hosted auth store.
+   */
+  function resolveModules(modules: AiriExtension['modules'], defaults: CardModuleDefaults): CardModuleDefaults {
+    const speechSelection = resolveModuleSelection(modules.speech, defaults.speech)
+    return {
+      consciousness: resolveModuleSelection(modules.consciousness, defaults.consciousness),
+      vision: resolveModuleSelection(modules.vision, defaults.vision),
+      speech: {
+        ...speechSelection,
+        voice_id: modules.speech.voice_id || (
+          speechSelection.provider === defaults.speech.provider && speechSelection.model === defaults.speech.model
+            ? defaults.speech.voice_id
+            : ''
+        ),
+      },
+    }
+  }
+
+  /**
+   * The module selections of every character, resolved against the defaults, by character id.
+   * The settings home reads it to find the providers in use and the characters that cannot speak.
+   */
+  const characterModules = computed<ReadonlyMap<string, CardModuleDefaults>>(() => {
+    const defaults = moduleDefaults.value
+    if (!defaults)
+      return new Map<string, CardModuleDefaults>()
+    return new Map([...cards.value].map(([id, card]) => [id, resolveModules(card.extensions.airi.modules, defaults)]))
+  })
+
   function rememberInheritedSettings() {
     const runtime = readRuntimeModules()
     const defaults = moduleDefaults.value
@@ -952,6 +984,7 @@ export const useAiriCardStore = defineStore('airi-card', () => {
   return {
     cards,
     moduleDefaults,
+    characterModules,
     activeCard,
     activeCardId,
     builtInCard,

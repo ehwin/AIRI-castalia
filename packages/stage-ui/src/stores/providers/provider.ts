@@ -45,6 +45,22 @@ export interface VoiceCatalogIdentity {
 /** Serializable request and model-discovery state for one provider instance. */
 export interface ProviderRuntimeState {
   validatedCredentialHash?: string
+  /**
+   * The outcome of the last check in this session.
+   * - `configured`: the check passed.
+   * - `unconfigured`: required fields are empty, so the check cannot pass.
+   * - `invalid`: the check failed; `validationReason` tells why.
+   * - `undefined`: no check ran in this session.
+   *
+   * NOTICE: upstream 0.13 added these for the settings home's needs-attention list. The fork keeps
+   * them optional and only fills them where its own provider checks run; an absent value means "no
+   * check ran", which the list treats as "nothing to report".
+   */
+  validationOutcome?: 'configured' | 'unconfigured' | 'invalid'
+  /** Why the last check failed. Empty when the check gave no reason; `undefined` when it passed or did not run. */
+  validationReason?: string
+  /** When recent checks finished, oldest first. */
+  validationTimes?: number[]
   models: ModelInfo[]
   defaultModel: string | null
   modelStatus: 'idle' | 'loading' | 'ready' | 'error'

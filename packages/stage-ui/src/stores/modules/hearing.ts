@@ -294,6 +294,9 @@ export const useHearingStore = defineStore('hearing-store', () => {
   const activeCustomModelName = useLocalStorageManualReset('settings/hearing/active-custom-model', '', persistenceOptions)
   const transcriptionModelSearchQuery = refManualReset<string>('')
   const inputMode = useLocalStorageManualReset<HearingInputMode>('settings/hearing/input-mode', 'always-on', persistenceOptions)
+  // NOTICE: upstream 0.13's settings home reads `enabled` to tell "voice input is off on purpose"
+  // from "voice input is on but cannot transcribe". The fork only had the per-feature switches.
+  const enabled = useLocalStorageManualReset<boolean>('settings/hearing/enabled', true, persistenceOptions)
   const autoSendEnabled = useLocalStorageManualReset<boolean>('settings/hearing/auto-send-enabled', false, persistenceOptions)
   const autoSendDelay = useLocalStorageManualReset<number>('settings/hearing/auto-send-delay', 2000, persistenceOptions) // Default 2 seconds
   const confidenceThreshold = useLocalStorageManualReset<number>('settings/hearing/confidence-threshold', CONFIDENCE_THRESHOLD_DISABLED, persistenceOptions)
@@ -557,6 +560,7 @@ export const useHearingStore = defineStore('hearing-store', () => {
   }
 
   return {
+    enabled,
     activeTranscriptionProvider,
     activeTranscriptionModel,
     availableProvidersMetadata,

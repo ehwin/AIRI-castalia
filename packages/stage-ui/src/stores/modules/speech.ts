@@ -17,6 +17,7 @@ import { x } from 'xastscript'
 
 import { injectKeyPiniaSynced } from '../../libs/pinia/synced-context'
 import { useProviderConfigStore } from '../providers/config'
+import { getDefinedProvider } from '../../libs/providers/providers'
 import { useProviderStore } from '../providers/provider'
 
 export function toSignedPercent(value: number): string {
@@ -71,6 +72,10 @@ export const useSpeechStore = defineStore('speech', () => {
   const persistenceOptions = { listenToStorageChanges: false }
 
   // State
+  // NOTICE: upstream 0.13's settings home reads `enabled` to decide whether a silent character is a
+  // problem at all. The fork only had the provider selection; without this flag the needs-attention
+  // list would report a switched-off speech as broken.
+  const enabled = useLocalStorageManualReset<boolean>('settings/speech/enabled', true, persistenceOptions)
   const activeSpeechProvider = useLocalStorageManualReset<string>('settings/speech/active-provider', 'speech-noop', persistenceOptions)
   const activeSpeechModel = useLocalStorageManualReset<string>('settings/speech/active-model', '', persistenceOptions)
   const activeSpeechVoiceId = useLocalStorageManualReset<string>('settings/speech/voice', '', persistenceOptions)
@@ -553,6 +558,7 @@ export const useSpeechStore = defineStore('speech', () => {
   return {
     // State
     configured,
+    enabled,
     activeSpeechProvider,
     activeSpeechModel,
     activeSpeechVoice,
@@ -596,3 +602,75 @@ export const useSpeechStore = defineStore('speech', () => {
     state: true,
   },
 })
+
+/** A field that a speech selection needs before it can speak. */
+export type MissingSpeechField = 'model' | 'voice'
+
+/**
+ * NOTICE: upstream picks this from the official provider registry, whose voice catalog knows which
+ * providers choose a voice for you. This fork has no hosted catalog, so nothing picks a voice
+ * automatically and an empty voice is always missing, never pending. Restore the lookup together
+ * with `libs/providers/providers/official`.
+ */
+function picksSpeechVoiceAutomatically(_providerId: string): boolean {
+  return false
+}
+
+/**
+ * Resolves the model and the voice that a speech selection speaks with.
+ * The provider config can supply them, for example for an OpenAI-compatible provider.
+ * A streaming provider needs a model with a resource path. Without one, it uses `defaultModel`.
+ */
+function resolveSpeechSelection(selection: AiriExtension['modules']['speech'], config: Record<string, unknown>, defaultModel: () => string | null | undefined) {
+  const model = selection.model || (typeof config.model === 'string' ? config.model : '')
+  const voiceId = selection.voice_id || (typeof config.voice === 'string' ? config.voice : '')
+  const streaming = getDefinedProvider(selection.provider)?.capabilities?.speech?.transport === 'bidirectional-ws'
+  const streamingModel = streaming ? (model.includes('/') ? model : defaultModel()) : undefined
+  return { model, voiceId, streaming, streamingModel }
+}
+
+/** The empty fields of a speech selection. */
+export interface SpeechFieldStatus {
+  /** Fields that the speech lacks. Without them, speech keeps the replies text only. */
+  missing: MissingSpeechField[]
+  /** Empty fields that a catalog fills after it loads. Until then it is unknown if the speech can speak. */
+  pending: MissingSpeechField[]
+}
+
+/**
+ * Tells which fields a speech selection lacks before it can speak. Both lists are empty when speech
+ * is off, or when it can speak.
+ *
+ * @param config The config of the selected provider.
+ * @param defaultModel Gives the default model of the selected provider. `null` when there is none, `undefined` while the catalog loads.
+ * @param voiceCatalogLoading Whether the voice catalog of the selected provider is loading now.
+ */
+export function speechFieldStatus(
+  selection: AiriExtension['modules']['speech'],
+  config: Record<string, unknown>,
+  defaultModel: () => string | null | undefined,
+  voiceCatalogLoading: boolean,
+): SpeechFieldStatus {
+  const status: SpeechFieldStatus = { missing: [], pending: [] }
+  if (!selection.provider || selection.provider === 'speech-noop')
+    return status
+  const { model, voiceId, streaming, streamingModel } = resolveSpeechSelection(selection, config, defaultModel)
+  if (streaming ? !streamingModel?.includes('/') : !model)
+    status[streaming && streamingModel === undefined ? 'pending' : 'missing'].push('model')
+  if (!voiceId)
+    status[picksSpeechVoiceAutomatically(selection.provider) && voiceCatalogLoading ? 'pending' : 'missing'].push('voice')
+  return status
+}
+
+/** One key for a set of speech fields, for the strings that name them. `undefined` for no fields. */
+export function speechFieldsKeyOf(fields: readonly MissingSpeechField[]): 'model' | 'voice' | 'model-voice' | undefined {
+  const model = fields.includes('model')
+  const voice = fields.includes('voice')
+  if (model && voice)
+    return 'model-voice'
+  if (model)
+    return 'model'
+  if (voice)
+    return 'voice'
+  return undefined
+}
