@@ -57,7 +57,12 @@ function writeMaintenanceLog(report: Awaited<ReturnType<NonNullable<ReturnType<t
  * 对话期间只做写回（ingestTurn），整理留给夜间。
  * 关闭方式：CASTALIA_MAINTENANCE=off。
  */
+/** setupCastaliaMemoryService 每个窗口注册一次；维护只能有一个调度器，否则会并发整理同一个库 */
+let maintenanceScheduled = false
+
 function scheduleMemoryMaintenance(engine: CastaliaEngineMemory) {
+  if (maintenanceScheduled)
+    return
   if (process.env.CASTALIA_MAINTENANCE === 'off') {
     console.info('[castalia] memory maintenance disabled (CASTALIA_MAINTENANCE=off)')
     return
@@ -105,6 +110,9 @@ function scheduleMemoryMaintenance(engine: CastaliaEngineMemory) {
       running = false
     }
   }
+
+  maintenanceScheduled = true
+  console.info('[castalia] memory maintenance scheduled (daily 04:00-06:00, catch-up 3 min after start)')
 
   // 启动后先让界面稳定 3 分钟，再决定要不要补跑（错过夜间时段的情况）。
   const startupDelay = setTimeout(() => { void run('startup-catchup') }, 3 * 60_000)
