@@ -154,6 +154,28 @@ describe('store tools (memory_store_* port)', () => {
     expect(row?.text).toContain('我说话会慢一点')
   })
 
+  it('brings confirmed facts into the injection block', async () => {
+    // facts 表以前完全不参与注入：76 条事实在库里躺着，用户问"我喜欢什么"照样答不上来。
+    // 这里直接在库里造一条事实，再走注入路径确认它被带进上下文。
+    const { DatabaseSync } = await import('node:sqlite')
+    const db = new DatabaseSync(join(dir, 'testproj', 'general', 'memory.sqlite'))
+    const now = new Date().toISOString()
+    db.prepare(`INSERT INTO facts (id, subject, predicate, object, project, confidence, character_id, is_active, created_at, updated_at, valid_from)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`)
+      .run('fact-probe-1', 'user', '喜好', '月下漫步', 'testproj', 0.9, 'airi', now, now, now)
+    db.close()
+
+    // 引擎模块在求值时读 process.env，必须等 openBank 设好环境之后再动态 import
+    const { recallFactsForQuery } = await import('../vendor/engine/factRecall')
+    const hit = recallFactsForQuery('你还记得我喜欢什么吗', { project: 'testproj', characterId: 'airi' })
+    expect(hit.facts.map((f: { object: string }) => f.object)).toContain('月下漫步')
+    expect(hit.text).toContain('月下漫步')
+
+    // 任务型问句不触发事实路（它是"关于人的稳定事实"，不是万能召回）
+    const task = recallFactsForQuery('帮我写个快速排序', { project: 'testproj', characterId: 'airi' })
+    expect(task.facts).toHaveLength(0)
+  })
+
   it('runs maintenance without a reflection model and reports what it did', async () => {
     // 维护长在 app 主进程里(这条链只有 app ↔ anima 两段)。这里用的是无 config 的临时库,
     // 所以反刍通道未配置 —— 正确行为不是抛错,而是如实报告"只跑了 digest"。

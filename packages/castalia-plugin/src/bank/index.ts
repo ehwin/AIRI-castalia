@@ -329,5 +329,16 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
   }
 
   current = handle
+
+  // 冷启动预热：实测第一次 recall 要 597ms（建连+调用嵌入 API），热了只要 43ms。
+  // 注入层有 300ms 死线，所以会话第一轮的记忆块会被静默丢掉 —— 表现为"她翻遍小本本也没找到"。
+  // 这里在后台焐一次，别让用户的第一句话撞在冷启动上。
+  void (async () => {
+    try {
+      await inject.recallForInjection('预热', { project, characterId: charId, topK: 1 })
+    }
+    catch { /* 预热失败不影响任何功能，真正的召回会再试一次 */ }
+  })()
+
   return handle
 }
