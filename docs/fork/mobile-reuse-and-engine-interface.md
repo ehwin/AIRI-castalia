@@ -194,3 +194,46 @@ pnpm -F @proj-airi/castalia-plugin test:run
 ```
 
 脚本是幂等的；vendor 里的文件带 `@ts-nocheck`（按上游 tsconfig 校验，本包用单测兜底）。
+
+## 9. 运行时切到新树（2026-10-29）
+
+总线的接口一直是活的，但**整套运行时（托盘/5 桥/fedServer/5 星图）跑的还是老树 `D:\AI\castalia`**，
+连的也是老库——而应用侧（进程内插件）连的是新库，两边数据在分叉。原因两处：
+
+1. **自启项 `HKCU\...\Run\Castalia 记忆体` 仍指向 `D:\AI\castalia\run\Castalia\scripts\castalia_tray.py`**
+   （计划任务当时已改新树，所以只有这一处漏网）。
+2. **新树自己的 `run/LobeHub/scripts/castalia.config.json` 里 `paths.home` 还是 `D:/AI/castalia`**
+   （20 处 `D:/AI`）。Guard 加载到这份副本，就把老栈重新拉起来了——修了自启也照样复活。
+
+### 合并（双向差集，不是覆盖）
+
+两棵树**互不包含**：老库独有 252 行、新库独有 110 行，所以按 `id` 双向 `INSERT OR IGNORE` 合并，
+`memory_fts`/`tool_events_fts` 重建索引；新树缺的 `full/reflect`（5 个库、1532 行）整库复制。
+
+| 库 | 老树 | 并入 | 合并后 |
+|---|---|---|---|
+| hermes | 876 | +107 general / +61 project / +9 feedback / +5 reference / +6 user（+68 facts、+1282 tool_events） | 942 |
+| dsh | 608 | +14 / +28 / +4 / +9（+181 facts） | 609 |
+| lobehub | 214 | +9 | 221 |
+| full/reflect | 1532 | 整库复制 | 1532 |
+
+合并后校验：**老库独有的行 = 0**（新库成为超集），新库独有的 110 行保留。
+
+### 切换后状态
+
+```
+进程: 老树 0 条 / 新树 18 条
+端口: 3310 3312 3314 3316 3318 3344 3345 3346 3347 3348 3398 全部 listening
+总线: hermes 942 / dsh 609 / lobehub 776 / airi 262 = 2591，target 全部 D:\system\AIRI\castalia\memory-banks
+向量: 六库 100% 覆盖（hermes 942/942、dsh 609/609、lobehub 221/221、shushu 547、airi 159、reflect 1532）
+检索: airi「尤诺 谕女」14 条；跨库「eGPU 供电」15 条；「MySQL 索引优化」0 条（正确）
+hook: 新树任务在跑，16:24 一轮 embedded=60，游标 last_id=14365
+```
+
+`scripts/memory_maintenance.mjs rebuild-chunks` 正在补片段索引（老库原本 hermes/dsh/lobehub 都是 0 片段，
+只有 airi 有 367，所以这是补历史缺口，不是修回归）。
+
+### 回滚
+
+老树 `D:\AI\castalia` 原样未动（含原 Run 值、原 config），新库切换前快照在
+`castalia/_backups/bank-new-premerge-<ts>`，LobeHub 配置副本有 `.bak-<ts>`。
