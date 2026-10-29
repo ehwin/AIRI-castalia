@@ -101,3 +101,36 @@ mcp-session-id: <initialize 响应头里给的>
 - 不要把 `stage-pocket` 拉回来当手机端：它绑死官方账号与云同步
 - 不要为手机端单独复制一份记忆库：那会让两个人格分叉
 - 不要在引擎里引入常驻 LLM 进程：`reflect`/`triage` 是可选的，key 为空时自动跳过
+
+## 6. 总线 vs 直连：实测对比（2026-10-29）
+
+2026-10-29 把 3314 的 fedServer 重启到新配置后（此前它读的还是迁移前的 `D:\AI\castalia\...`），
+同一批问句分别打总线与 Anima 直连：
+
+| 问句 | Anima 直连（`memory_search`，情感+层级加权） | 总线（`memory_search_all(members:['airi'])`） |
+|---|---|---|
+| 你还记得我耳朵不太好使吗（语义改写） | 命中 5 条相关，score 1.19 | **0 条** |
+| 漂泊者循着手镯（字面片段） | — | 2 条，但是**同一条重复两次** |
+| 尤诺（字面） | — | 18 条 |
+| 普罗米修斯（库里没有） | — | 0 条 |
+| GPU 功耗（airi 无此内容） | — | 14 条，全是 hermes/dsh（作者的工作日志） |
+
+结论：**总线对 airi 成员只有字面命中，没有语义召回**（它按 local-dir 直读 sqlite，不套 Anima 的
+embedding + 情感/层级策略）。所以：
+
+- 她的人设绑定与记忆召回 → 必须走 Anima（`MCP_TOOLS=store` 给 app，`agent` 给只读检索）
+- 总线 → 只适合"知道关键词、跨库找原文"的管理/排查场景
+- 总线跨库会把作者的工作记忆（hermes/dsh）混进她的上下文，人格场景要限定 `members:['airi']` 或干脆不用
+
+## 7. 基本流程回归（0.13.1 升级后）
+
+引擎侧（`CastaliaNode.exe scripts/<name>.mjs .`，注意参数是**仓库根**不是 bank）：
+
+```
+regression_anima_audit / cjk_recall / embed_dim / entities / facts / facts_bitemporal
+/ facts_temporal / memory_injection / role_isolation / store_bridge / superseded_recall
+/ v123_anima          -> 12/12 通过
+eval_injection        -> 要点 13/14 = 93%，噪音 0/8，平均 3.7 条 / 584 字，重复 0
+```
+
+注入质量与升级前基线一致；`regression_store_bridge` 覆盖的正是 AIRI app 走的那 4 个 store 工具。
