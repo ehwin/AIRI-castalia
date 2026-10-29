@@ -43,6 +43,24 @@ describe('in-process bank', () => {
     expect(hits.some(h => String(h.text ?? '').includes('插件化'))).toBe(true)
   })
 
+  it('tags VAD on the write path (no Ollama in-process)', async () => {
+    // 进程内形态没有 autoProcess/digest 周期,所以 bank.save 自己补一次离线词表 VAD。
+    // 这条测试盯的是"情感数据真的落库",不是词表精度。
+    const saved = await bank.save({
+      text: '她跟我说分手，我很难过',
+      project: 'testproj',
+      memType: 'general',
+      characterId: 'airi',
+      skipEmbed: true,
+    })
+    const { DatabaseSync } = await import('node:sqlite')
+    const db = new DatabaseSync(join(dir, 'testproj', 'general', 'memory.sqlite'))
+    const row = db.prepare('SELECT vad_valence, vad_arousal, emotional_impact FROM memory WHERE id = ?').get(saved.id) as any
+    db.close()
+    expect(row?.vad_valence).toBeLessThan(0)
+    expect(Number(row?.emotional_impact)).toBeGreaterThan(0)
+  })
+
   it('reports stats through the same shim', () => {
     const stats = bank.stats()
     const general = stats.find(s => s.memType === 'general')
