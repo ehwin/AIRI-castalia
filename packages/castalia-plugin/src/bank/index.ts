@@ -39,8 +39,15 @@ export interface BankHandle {
   forgetStore: (args: Record<string, unknown>) => { deleted: boolean }
   /** memory_recall 的进程内版本（含注入渲染与门槛） */
   recallQuery: (query: string, args?: Record<string, unknown>) => Promise<any>
+  /** 会话对账:把指向"已不存在会话"的记忆软删(is_active=0),防孤儿。默认 dryRun */
+  orphanSessions: (args: { aliveSessionIds: string[], dryRun?: boolean }) => Array<{ memType: string, orphans: number, orphaned: number }>
+  /** 各会话下有多少条活跃记忆(审计用) */
+  sessionInventory: () => Array<{ memType: string, sessions: Array<{ sessionId: string, memories: number, latest: string }> }>
   close: () => void
 }
+
+/** 记忆分类库(与引擎 memType 目录一致):孤儿对账要逐库跑 */
+const MEM_TYPES = ['general', 'user', 'project', 'reference', 'feedback'] as const
 
 let current: BankHandle | null = null
 
@@ -88,6 +95,7 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
     import('../vendor/engine/version'),
   ])
   const db = await import('../vendor/engine/db')
+  const orphan = await import('../vendor/engine/orphan')
   // store 工具（memory_store_list/save/forget + memory_recall 的进程内版本）
   const { createStoreTools, loadEngineDeps } = await import('./store-tools')
   const storeTools = createStoreTools(await loadEngineDeps())
@@ -125,6 +133,25 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
         }
       })
     },
+    orphanSessions: ({ aliveSessionIds, dryRun = true }) => {
+      const out: Array<{ memType: string, orphans: number, orphaned: number }> = []
+      for (const mt of MEM_TYPES) {
+        try {
+          const conn = (db as any).DatabaseManager.getInstance(project, mt)
+          const r = (orphan as any).orphanMemories(conn, { project, aliveSessionIds, dryRun })
+          out.push({ memType: mt, orphans: r.orphans ?? 0, orphaned: r.orphaned ?? 0 })
+        }
+        catch { /* 该分类库不存在/未建表:跳过 */ }
+      }
+      return out
+    },
+    sessionInventory: () => MEM_TYPES.map((mt) => {
+      try {
+        const conn = (db as any).DatabaseManager.getInstance(project, mt)
+        return { memType: mt, sessions: (orphan as any).sessionInventory(conn, 50) }
+      }
+      catch { return { memType: mt, sessions: [] } }
+    }),
     close: () => { current = null },
   }
 
