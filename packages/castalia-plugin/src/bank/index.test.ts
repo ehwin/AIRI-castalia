@@ -61,6 +61,28 @@ describe('in-process bank', () => {
     expect(Number(row?.emotional_impact)).toBeGreaterThan(0)
   })
 
+  it('reconciles sessions: dry-run by default, soft-delete only anchored rows', async () => {
+    // 写两条带 session 锚点的记忆 + 一条无锚点
+    const a = await bank.save({ text: '会话 A 里的事', project: 'testproj', characterId: 'airi', sessionId: 'sess-a', skipEmbed: true })
+    const b = await bank.save({ text: '会话 B 里的事', project: 'testproj', characterId: 'airi', sessionId: 'sess-b', skipEmbed: true })
+    await bank.save({ text: '手写 lore,无会话锚点', project: 'testproj', characterId: 'airi', skipEmbed: true })
+
+    const dry = bank.orphanSessions({ aliveSessionIds: ['sess-a'] })
+    expect(dry.some(r => r.orphans > 0)).toBe(true)
+    expect(dry.every(r => r.orphaned === 0)).toBe(true)   // 默认 dryRun
+
+    const applied = bank.orphanSessions({ aliveSessionIds: ['sess-a'], dryRun: false })
+    expect(applied.some(r => r.orphaned > 0)).toBe(true)
+
+    const { DatabaseSync } = await import('node:sqlite')
+    const db = new DatabaseSync(join(dir, 'testproj', 'general', 'memory.sqlite'))
+    const rows = db.prepare('SELECT id, is_active FROM memory WHERE id IN (?,?)').all(a.id, b.id) as any[]
+    db.close()
+    const byId = new Map(rows.map(r => [r.id, Number(r.is_active)]))
+    expect(byId.get(a.id)).toBe(1)   // 活会话不动
+    expect(byId.get(b.id)).toBe(0)   // 孤儿被软删
+  })
+
   it('reports stats through the same shim', () => {
     const stats = bank.stats()
     const general = stats.find(s => s.memType === 'general')
