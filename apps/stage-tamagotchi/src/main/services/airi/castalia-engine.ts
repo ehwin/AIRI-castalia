@@ -122,7 +122,7 @@ function unwrapContent(result: unknown): Record<string, unknown> {
 export interface CastaliaEngineMemory {
   list: () => Promise<CastaliaMemoryEntry[]>
   save: (entry: CastaliaMemoryEntry) => Promise<void>
-  forget: (entry: Pick<CastaliaMemoryEntry, 'name' | 'persona'>) => Promise<boolean>
+  forget: (entry: Pick<CastaliaMemoryEntry, 'id' | 'name' | 'persona'>) => Promise<boolean>
   /**
    * Renders a context block for one query. The engine abstains with empty text,
    * so the caller appends the block without a relevance check of its own.

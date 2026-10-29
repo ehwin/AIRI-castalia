@@ -2,6 +2,8 @@ import type { DatabaseSync } from 'node:sqlite'
 
 /** Durable Castalia memory record shared with AIRI's existing memory store. */
 export interface CastaliaMemoryEntry {
+  /** 库里的行 id（castalia bank 的记忆有自己的 id；纯本地 sqlite 仓库没有）。删除时优先用它。 */
+  id?: string
   name: string
   description: string
   body: string

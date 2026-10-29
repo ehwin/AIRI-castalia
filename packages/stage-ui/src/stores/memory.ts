@@ -4,6 +4,8 @@ import { computed, ref } from 'vue'
 
 /** One remembered fact. A character keeps it on its own card. A general memory reaches every card. */
 export interface MemoryEntry {
+  /** Backend row id, when the backend has one. Removal uses it; the name is only the display index. */
+  id?: string
   /** Short name in kebab case, unique within its scope. The index lists it, and tools address the entry by it. */
   name: string
   /** The index line: the fact itself when it fits in one line, or when the entry matters. */
@@ -38,7 +40,7 @@ export interface MemoryRemotePort {
   /** Every entry the remote holds. Replaces the local cache on start. */
   list: () => Promise<MemoryEntry[]>
   save: (entry: MemoryEntry) => Promise<void>
-  forget: (entry: Pick<MemoryEntry, 'name' | 'persona'>) => Promise<void>
+  forget: (entry: Pick<MemoryEntry, 'id' | 'name' | 'persona'>) => Promise<void>
   /**
    * Renders a context block for one query, from the entries the backend ranks.
    *
@@ -176,9 +178,9 @@ export const useMemoryStore = defineStore('memory', () => {
   }
 
   /** Removes one entry, from a tool or from Settings. */
-  function remove(entry: Pick<MemoryEntry, 'name' | 'persona'>) {
+  function remove(entry: Pick<MemoryEntry, 'id' | 'name' | 'persona'>) {
     entries.value = entries.value.filter(existing => existing.name !== entry.name || existing.persona !== entry.persona)
-    void remote?.forget({ name: entry.name, persona: entry.persona }).catch((cause) => {
+    void remote?.forget({ id: entry.id, name: entry.name, persona: entry.persona }).catch((cause) => {
       console.warn('[memory] remote forget failed:', cause)
     })
   }

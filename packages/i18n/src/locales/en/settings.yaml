@@ -401,6 +401,20 @@ pages:
   memory:
     description: Where memories got stored, and organized
     title: Memory
+    bus:
+      title: Full bus
+      description: Every bank in one view. The bus reads each bank read-only, so searching here never writes to your character's memory.
+      members: Members
+      total: '{count} memories across all banks'
+      offline: 'Bus offline ({reason}) — start the Castalia tray, or the fedServer on port 3314 is not up.'
+      refresh: Refresh
+      search_placeholder: Search every bank…
+      search: Search
+      searching: Searching…
+      scope_all: All banks
+      no_results: Nothing matched.
+      empty_hint: Type a keyword to search across every bank.
+      score: Score
   data:
     title: Data
     description: Manage stored AIRI data, exports, and resets

@@ -11,6 +11,7 @@ import type { CastaliaRecalledMemory } from '../../../shared/eventa/castalia-mem
 import type { CastaliaEngineMemory, CastaliaEngineOptions } from './castalia-engine'
 
 import { openBank } from '@proj-airi/castalia-plugin/bank'
+import { parseStoreText } from '@proj-airi/castalia-plugin/bank/store-tools'
 
 /** SQLite `YYYY-MM-DD HH:MM:SS` (UTC) 和 ISO 都转 epoch ms（与 stdio 版行为一致）。 */
 function parseTime(value: string | undefined): number {
@@ -43,16 +44,21 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
       if (closing)
         return []
       const bank = await ensure()
-      const { records } = bank.listStore({ allCharacters: true, source: 'airi', limit: 2000 })
-      return records
-        .filter(row => typeof row.name === 'string' && row.name.length > 0)
-        .map(row => ({
-          name: String(row.name),
-          description: row.description ?? '',
-          body: row.body ?? '',
-          ...(row.general ? {} : { persona: row.characterId || undefined }),
-          updatedAt: parseTime(row.updatedAt ?? row.createdAt),
-        } as CastaliaMemoryEntry))
+      // 长期记忆页要看到"库里的全部记忆"，不是 app 自己写的那几条 store 条目
+      return bank.listMemories(2000)
+        .map((row) => {
+          const raw = String(row.text ?? '')
+          const parsed = parseStoreText(raw)
+          const name = parsed.name ?? `mem-${row.id.slice(0, 8)}`
+          return {
+            id: row.id,
+            name,
+            description: parsed.name ? parsed.description : raw.replace(/\s+/g, ' ').slice(0, 80),
+            body: parsed.name ? parsed.body : raw,
+            ...(row.characterId ? { persona: row.characterId } : {}),
+            updatedAt: parseTime(row.updatedAt),
+          } as CastaliaMemoryEntry
+        })
     },
 
     async save(entry) {
@@ -71,6 +77,11 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
       if (closing)
         return false
       const bank = await ensure()
+      // 有 id 直接按行删（覆盖库里所有记忆）；否则回退到按 store 名删
+      if (entry.id)
+        return Boolean(bank.forget(entry.id))
+      if (!entry.name)
+        return false
       const { deleted } = bank.forgetStore({
         name: entry.name,
         ...(entry.persona ? { characterId: entry.persona } : { general: true }),

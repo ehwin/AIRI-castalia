@@ -367,6 +367,20 @@ pages:
   memory:
     description: 存放记忆的地方，以及策略
     title: 记忆体
+    bus:
+      title: Full 总线
+      description: 一个视图看全部记忆库。总线只读打开各库，这里检索不会写进角色的记忆。
+      members: 成员
+      total: 共 {count} 条记忆
+      offline: 总线未连接（{reason}）—— 启动 Castalia 托盘，或确认 3314 的 fedServer 在跑。
+      refresh: 刷新
+      search_placeholder: 在所有记忆库里搜…
+      search: 搜索
+      searching: 搜索中…
+      scope_all: 全部库
+      no_results: 没有命中。
+      empty_hint: 输入关键词，跨所有库检索。
+      score: 相关度
   data:
     title: 数据
     description: 管理存储 AIRI 数据、导出和重置
