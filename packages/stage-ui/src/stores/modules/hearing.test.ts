@@ -6,7 +6,6 @@ import {
   normalizeGeneratedTranscriptionText,
   resolveActiveTranscriptionModel,
   resolveActiveTranscriptionProviderError,
-  resolveStreamTranscriptionExecutor,
   resolveTranscriptionFileName,
   resolveTranscriptionProviderOptions,
 } from './hearing'
@@ -39,17 +38,9 @@ describe('filterTranscriptionByConfidence', () => {
   })
 })
 
-describe('resolveStreamTranscriptionExecutor', () => {
-  /**
-   * @example
-   * resolveStreamTranscriptionExecutor('official-provider-transcription')
-   */
-  it('routes the official transcription provider through the Aliyun streaming executor', () => {
-    const executor = resolveStreamTranscriptionExecutor('official-provider-transcription')
-
-    expect(executor).toBe(resolveStreamTranscriptionExecutor('aliyun-nls-transcription'))
-  })
-})
+// NOTICE: upstream 0.13 also routes the 'official-provider-transcription' id to the Aliyun
+// streaming executor. That id belongs to the hosted provider platform this fork removed
+// (packages/cloud-client + the official provider registry), so the case is gone with it.
 
 describe('resolveActiveTranscriptionProviderError', () => {
   /**

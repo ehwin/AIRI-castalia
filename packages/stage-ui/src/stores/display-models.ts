@@ -114,6 +114,19 @@ export const useDisplayModelsStore = defineStore('display-models', () => {
     return displayModelsPresets.find(model => model.id === id)
   }
 
+  /**
+   * Resolves a display model that the stage can render *now*.
+   *
+   * NOTICE: upstream 0.13 added this on top of the hosted catalog: a model that is not local is
+   * downloaded from its owner before the stage switches to it, and the stage settings store calls
+   * it instead of `getDisplayModel`. This fork has no hosted catalog, so the local lookup is the
+   * whole contract -- a missing model resolves to `undefined` and the stage disables the renderer
+   * instead of throwing. Keep the name and the `undefined` semantics if the catalog ever returns.
+   */
+  async function ensureDisplayModelAvailable(id: string) {
+    return await getDisplayModel(id)
+  }
+
   const loadLive2DModelPreview = (file: File) => generateLive2DPreview(file)
   const loadVrmModelPreview = (file: File) => generateVrmPreview(file)
   const loadSpineModelPreview = (file: File) => generateSpinePreview(file)
@@ -254,6 +267,7 @@ export const useDisplayModelsStore = defineStore('display-models', () => {
     initialize,
     loadDisplayModelsFromIndexedDB,
     getDisplayModel,
+    ensureDisplayModelAvailable,
     addDisplayModel,
     renameDisplayModel,
     removeDisplayModel,
