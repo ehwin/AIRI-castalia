@@ -415,6 +415,12 @@ pages:
       no_results: Nothing matched.
       empty_hint: Type a keyword to search across every bank.
       score: Score
+      open_console: Open the console
+      manage: Library manager
+      star_map: Star map
+      open_hint: The console's Memories view is the full browser — unified index over every library, with edit and delete. This page only summarizes the bus and opens it.
+      opened_shell: Switched the console window.
+      opened_browser: Opened in your browser (the console window is not running).
   data:
     title: Data
     description: Manage stored AIRI data, exports, and resets

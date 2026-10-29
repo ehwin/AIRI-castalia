@@ -8,7 +8,8 @@ import { defineInvokeHandler } from '@moeru/eventa'
 import { createCastaliaMemoryRepository } from '@proj-airi/castalia-plugin/memory'
 import { app } from 'electron'
 
-import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryForget, castaliaMemoryList, castaliaMemoryRecall, castaliaMemorySave } from '../../../shared/eventa/castalia-memory'
+import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryForget, castaliaMemoryList, castaliaMemoryRecall, castaliaMemorySave, castaliaOpenConsole } from '../../../shared/eventa/castalia-memory'
+import { openCastaliaConsole } from './castalia-console'
 import { createCastaliaEngineMemory, resolveCastaliaEngineOptions } from './castalia-engine'
 import { createCastaliaFullClient, resolveCastaliaFullUrl } from './castalia-full'
 import { createInProcessBankMemory } from './castalia-inprocess'
@@ -47,6 +48,7 @@ export function setupCastaliaMemoryService(params: {
   const full = createCastaliaFullClient({ url: resolveCastaliaFullUrl(userDataDir) })
   defineInvokeHandler(params.context, castaliaFullMembers, () => full.members())
   defineInvokeHandler(params.context, castaliaFullSearch, input => full.search(input))
+  defineInvokeHandler(params.context, castaliaOpenConsole, input => openCastaliaConsole(input))
 
   const engineOptions = resolveCastaliaEngineOptions(userDataDir)
   if (engineOptions) {

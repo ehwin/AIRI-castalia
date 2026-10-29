@@ -5,7 +5,7 @@ import { useElectronEventaInvoke } from '@proj-airi/electron-vueuse'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { castaliaFullMembers, castaliaFullSearch } from '../../../../shared/eventa/castalia-memory'
+import { castaliaFullMembers, castaliaFullSearch, castaliaOpenConsole } from '../../../../shared/eventa/castalia-memory'
 
 // NOTICE: 这个页面在 app 里覆盖了 stage-pages 的同名 WIP 页（见 electron.vite.config.ts 的 exclude）。
 // 边界: 「记忆体」= Full 总线（跨库只读总览/检索）；「长期记忆」= castalia 本库（进程内插件）。
@@ -16,6 +16,22 @@ const KEY = 'settings.pages.memory.bus'
 
 const invokeMembers = useElectronEventaInvoke(castaliaFullMembers)
 const invokeSearch = useElectronEventaInvoke(castaliaFullSearch)
+const invokeOpenConsole = useElectronEventaInvoke(castaliaOpenConsole)
+
+const consoleNote = ref('')
+
+/** 跨库浏览的完整 UI 在控制台的「记忆总成」里；这里只负责把窗口切过去。 */
+async function openConsole(view: 'agg' | 'mng' | 'viz') {
+  try {
+    const result = await invokeOpenConsole({ view })
+    consoleNote.value = result.ok
+      ? (result.via === 'shell' ? 'opened-shell' : 'opened-browser')
+      : 'failed'
+  }
+  catch (error) {
+    consoleNote.value = (error as Error).message
+  }
+}
 
 const members = ref<CastaliaFullMember[]>([])
 const total = ref(0)
@@ -98,6 +114,37 @@ onMounted(refresh)
         {{ t(`${KEY}.refresh`) }}
       </button>
     </div>
+
+    <div :class="['flex flex-wrap items-center', 'gap-2']">
+      <button
+        type="button"
+        :class="['rounded-lg', 'px-4 py-2', 'text-sm', 'font-medium', 'bg-primary-500 text-white', 'hover:bg-primary-600']"
+        @click="openConsole('agg')"
+      >
+        {{ t(`${KEY}.open_console`) }}
+      </button>
+      <button
+        type="button"
+        :class="['rounded-lg', 'px-3 py-2', 'text-xs', 'bg-neutral-100 dark:bg-neutral-800', 'hover:bg-neutral-200 dark:hover:bg-neutral-700']"
+        @click="openConsole('mng')"
+      >
+        {{ t(`${KEY}.manage`) }}
+      </button>
+      <button
+        type="button"
+        :class="['rounded-lg', 'px-3 py-2', 'text-xs', 'bg-neutral-100 dark:bg-neutral-800', 'hover:bg-neutral-200 dark:hover:bg-neutral-700']"
+        @click="openConsole('viz')"
+      >
+        {{ t(`${KEY}.star_map`) }}
+      </button>
+      <span v-if="consoleNote === 'opened-shell'" :class="['text-xs', 'text-neutral-400']">{{ t(`${KEY}.opened_shell`) }}</span>
+      <span v-else-if="consoleNote === 'opened-browser'" :class="['text-xs', 'text-neutral-400']">{{ t(`${KEY}.opened_browser`) }}</span>
+      <span v-else-if="consoleNote && consoleNote !== 'failed'" :class="['text-xs', 'text-amber-600']">{{ consoleNote }}</span>
+    </div>
+
+    <p :class="['text-xs', 'text-neutral-400 dark:text-neutral-500']">
+      {{ t(`${KEY}.open_hint`) }}
+    </p>
 
     <div
       v-if="offline"
