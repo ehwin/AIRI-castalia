@@ -9,8 +9,14 @@ const MEMORY_RECALL_CONTEXT_ID = 'recalled'
 /**
  * How long one turn waits for the memory backend. A slow bank drops the block
  * instead of holding the reply back, because the block is an extra, not the answer.
+ *
+ * Raised from 300 to 800 (2026-10-29) after measuring the real bank: a cold recall
+ * takes 597 ms (connect + embedding API) against 43 ms warm. At 300 ms the first
+ * turn of every session silently lost its memory block -- the character answered
+ * "I looked through my notebook and found nothing" while the bank held the answer.
+ * The bank now warms itself when opened, so 800 is a safety margin, not the norm.
  */
-const RECALL_TIMEOUT_MS = 300
+const RECALL_TIMEOUT_MS = 800
 
 /**
  * Resolves with an empty block when the recall is slower than the deadline.
