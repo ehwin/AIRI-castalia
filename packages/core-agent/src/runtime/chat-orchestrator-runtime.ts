@@ -11,6 +11,7 @@ import type { LlmUsage, StreamEvent, StreamOptions } from '../types/llm'
 import { createQueue } from '@proj-airi/stream-kit'
 
 import { chatMessagesToTurns } from '../messages/chat-completions'
+import { safeClone } from '../utils/safe-clone'
 import { formatTimePrefix } from '../messages/datetime-prefix'
 import { renderConversationPreview } from '../messages/preview'
 import { createChatHooks } from './agent-hooks'
@@ -94,7 +95,7 @@ function resolveReplyTargetId(replyToMessageId: string | undefined, messages: Ch
 
 function cloneStreamingMessage(message: StreamingAssistantMessage): StreamingAssistantMessage {
   try {
-    return structuredClone(message)
+    return safeClone(message, 'session-message')
   }
   catch {
     return JSON.parse(JSON.stringify(message)) as StreamingAssistantMessage
@@ -329,7 +330,13 @@ export interface ChatOrchestratorRuntimeDeps {
    */
   getSystemPrompt?: (sessionId: string) => string | undefined
   /** Runtime context providers ingested immediately before prompt composition. */
-  runtimeContextProviders?: Array<() => ContextMessage | null | undefined>
+  /**
+   * Side context for the coming turn. A provider may be async: the memory recall
+   * reads the bank and answers a promise, and treating that promise as a message
+   * put it into the registry verbatim, where structuredClone rejected it and took
+   * the whole send down.
+   */
+  runtimeContextProviders?: Array<() => ContextMessage | null | undefined | Promise<ContextMessage | null | undefined>>
   /**
    * Tools whose calls show as content of the reply, by tool name. A reply keeps no slice for their calls, and the model
    * still sees the calls in the provider transcript.
@@ -596,11 +603,31 @@ export function createChatOrchestratorRuntime(deps: ChatOrchestratorRuntimeDeps)
       deps.foregroundStream.reset()
   }
 
-  function ingestRuntimeContexts() {
+  async function ingestRuntimeContexts() {
     for (const provider of deps.runtimeContextProviders ?? []) {
-      const contextMessage = provider()
-      if (contextMessage)
+      let contextMessage: ContextMessage | null | undefined
+      try {
+        contextMessage = await provider()
+      }
+      catch (error) {
+        console.warn('[core-agent] runtime context provider failed:', error instanceof Error ? error.message : String(error))
+        continue
+      }
+      if (!contextMessage)
+        continue
+      // 一个 provider 的信封里混进宿主对象(函数/DOM/AbortSignal)时,registry 会按它的契约拒收
+      // 并抛 DataCloneError。以前这个异常会冒到发送调用方,整轮被取消,界面上只剩一条
+      // "核心系统 / Failed to execute 'structuredClone' on 'Window': # could not be cloned."。
+      // 侧上下文本来就是附加物,所以这里只丢这一条,并把是哪一路 contextId 记下来。
+      try {
         deps.context.ingest(contextMessage)
+      }
+      catch (error) {
+        console.warn(
+          `[core-agent] dropped an unclonable runtime context (${contextMessage.contextId ?? 'unknown'}):`,
+          error instanceof Error ? error.message : String(error),
+        )
+      }
     }
   }
 
@@ -617,7 +644,7 @@ export function createChatOrchestratorRuntime(deps: ChatOrchestratorRuntimeDeps)
     const messagesById = new Map(history.flatMap(message => message.id ? [[message.id, message] as const] : []))
     const turns = history.flatMap((message, historyIndex): Turn[] => {
       if (message.role === 'assistant' && message.generationTranscript)
-        return [structuredClone(unwrapMessage(message.generationTranscript))]
+        return [safeClone(unwrapMessage(message.generationTranscript), 'generation-transcript')]
       const noticePrefix = message.role === 'user' && message.notice ? `[Notice from ${message.notice.source}, not a message from the owner.]\n` : ''
       const source = message.role === 'user'
         ? prependTextToContent(unwrapMessage(message), `${formatTimePrefix(getStablePromptTimestamp(message, nowTs))}${noticePrefix}${formatReplyPromptPrefix(message.replyToMessageId, messagesById)}`)
@@ -659,7 +686,7 @@ export function createChatOrchestratorRuntime(deps: ChatOrchestratorRuntimeDeps)
     // It is applied at message-assembly time (see below) as a system-prompt
     // date anchor + per-message [HH:MM] prefixes, which is more KV-cache
     // friendly and less prone to weak models echoing timestamps verbatim.
-    ingestRuntimeContexts()
+    await ingestRuntimeContexts()
 
     const sendingCreatedAt = now()
 
@@ -1052,7 +1079,7 @@ export function createChatOrchestratorRuntime(deps: ChatOrchestratorRuntimeDeps)
         supportsAudioInput: options.supportsAudioInput,
         supportsVisionInput: options.supportsVisionInput,
         abortSignal,
-        onGeneratedTurn: (turn) => { generatedTurn = structuredClone(turn) },
+        onGeneratedTurn: (turn) => { generatedTurn = safeClone(turn, 'generated-turn') },
         requestCorrelation: {
           conversationId: correlation.conversationId,
           turnId: correlation.roundId,
