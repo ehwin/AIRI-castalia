@@ -29,6 +29,20 @@ export interface CastaliaMemoryForgetInput {
 export const castaliaMemoryForget = defineInvokeEventa<boolean, CastaliaMemoryForgetInput>('eventa:invoke:castalia:memory:forget')
 export const castaliaMemoryRecall = defineInvokeEventa<CastaliaRecalledMemory, string>('eventa:invoke:castalia:memory:recall')
 
+/** 一轮对话的写回（自回归结束后调用）。失败不抛错，返回 {ok:false}。 */
+export interface CastaliaIngestTurnInput {
+  user: string
+  assistant: string
+  sessionId?: string
+}
+export interface CastaliaIngestTurnResult {
+  ok: boolean
+  id?: string
+  mode?: string
+  error?: string
+}
+export const castaliaMemoryIngest = defineInvokeEventa<CastaliaIngestTurnResult, CastaliaIngestTurnInput>('eventa:invoke:castalia:memory:ingest')
+
 // ── Full 总线（fedServer 3314）───────────────────────────────────────────────
 // 记忆体本体走进程内插件；这里只保留"跨库"那一层：总线能一次查所有库，
 // 面板「记忆体」页用它浏览，长期记忆页仍然只看 castalia 本库。

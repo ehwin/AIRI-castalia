@@ -48,6 +48,28 @@ export interface MemoryRemotePort {
    * recall reads ranked text, so it never serves the synchronous prompt index.
    */
   recall?: (query: string) => Promise<MemoryRecall>
+  /**
+   * Writes one finished turn into the durable store.
+   *
+   * Optional: a port that only stores edited entries simply does not keep a
+   * conversation log. Never awaited on the reply path — a slow write must not
+   * delay or fail the answer the user already sees.
+   */
+  ingest?: (turn: MemoryIngestTurn) => Promise<MemoryIngestResult>
+}
+
+/** One finished turn: the user's line and the assistant's final answer. */
+export interface MemoryIngestTurn {
+  user: string
+  assistant: string
+  sessionId?: string
+}
+
+export interface MemoryIngestResult {
+  ok: boolean
+  id?: string
+  mode?: string
+  error?: string
 }
 
 /** Turns a free name into the kebab-case key that entries use. */
@@ -217,6 +239,29 @@ export const useMemoryStore = defineStore('memory', () => {
     }
   }
 
+  /**
+   * Records the turn that just finished: what the user said, what she answered.
+   *
+   * This is the only path that keeps a conversation the model did not explicitly
+   * save. It runs after the reply is already shown, so a failure only reaches the
+   * console; the turn stays unsaved rather than the reply breaking.
+   */
+  async function ingestTurn(turn: MemoryIngestTurn): Promise<MemoryIngestResult> {
+    if (!enabled.value || !remote?.ingest)
+      return { ok: false, error: 'memory disabled or backend cannot ingest' }
+    const user = turn.user.trim()
+    const assistant = turn.assistant.trim()
+    if (!user || !assistant)
+      return { ok: false, error: 'empty turn' }
+    try {
+      return await remote.ingest({ user, assistant, ...(turn.sessionId ? { sessionId: turn.sessionId } : {}) })
+    }
+    catch (cause) {
+      console.warn('[memory] remote ingest failed:', cause)
+      return { ok: false, error: String(cause) }
+    }
+  }
+
   function resetState() {
     enabled.reset()
     entries.reset()
@@ -237,6 +282,7 @@ export const useMemoryStore = defineStore('memory', () => {
     forget,
     remove,
     recallForInjection,
+    ingestTurn,
     resetState,
   }
 })

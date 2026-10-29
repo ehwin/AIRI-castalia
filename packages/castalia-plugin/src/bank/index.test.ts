@@ -133,4 +133,30 @@ describe('store tools (memory_store_* port)', () => {
     const after = bank.listStore({ characterId: 'airi', source: 'airi' })
     expect(after.records.find(r => r.name === 'test-entry')).toBeUndefined()
   })
+
+  it('writes one finished turn into conversation_log', async () => {
+    // 这条盯的是"自回归结束后有话落库"：之前 app 里没有任何调用点，
+    // airi 库的 conversation_log 自 2026-09-12 起再没增长过。
+    const result = await bank.ingestTurn({ user: '你还记得我耳朵不太好使吗', assistant: '记得，我说话会慢一点。' })
+    expect(result.ok).toBe(true)
+    expect(result.id).toBeTruthy()
+    expect(result.mode).toBe('minimal')
+
+    const { DatabaseSync } = await import('node:sqlite')
+    const db = new DatabaseSync(join(dir, 'testproj', 'general', 'memory.sqlite'))
+    const row = db.prepare(`SELECT text, source, is_active, type, category FROM memory WHERE id = ?`).get(result.id!) as any
+    db.close()
+    expect(row?.source).toBe('conversation_log')
+    expect(row?.is_active).toBe(1)
+    expect(row?.type).toBe('episodic')
+    expect(row?.category).toBe('conversation')
+    expect(row?.text).toContain('用户: 你还记得我耳朵不太好使吗')
+    expect(row?.text).toContain('我说话会慢一点')
+  })
+
+  it('refuses a turn with no text on either side', async () => {
+    // 纯工具调用轮次可能不产出正文；写进去只会是半句残行。
+    expect((await bank.ingestTurn({ user: '有话说', assistant: '   ' })).ok).toBe(false)
+    expect((await bank.ingestTurn({ user: '', assistant: '有话答' })).ok).toBe(false)
+  })
 })

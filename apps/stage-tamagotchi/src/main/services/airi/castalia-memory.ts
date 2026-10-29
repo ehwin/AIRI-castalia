@@ -8,7 +8,7 @@ import { defineInvokeHandler } from '@moeru/eventa'
 import { createCastaliaMemoryRepository } from '@proj-airi/castalia-plugin/memory'
 import { app } from 'electron'
 
-import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryForget, castaliaMemoryList, castaliaMemoryRecall, castaliaMemorySave, castaliaOpenConsole } from '../../../shared/eventa/castalia-memory'
+import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryRecall, castaliaMemorySave, castaliaOpenConsole } from '../../../shared/eventa/castalia-memory'
 import { openCastaliaConsole } from './castalia-console'
 import { createCastaliaEngineMemory, resolveCastaliaEngineOptions } from './castalia-engine'
 import { createCastaliaFullClient, resolveCastaliaFullUrl } from './castalia-full'
@@ -63,6 +63,11 @@ export function setupCastaliaMemoryService(params: {
     defineInvokeHandler(params.context, castaliaMemorySave, entry => engine.save(entry))
     defineInvokeHandler(params.context, castaliaMemoryForget, entry => engine.forget(entry))
     defineInvokeHandler(params.context, castaliaMemoryRecall, query => engine.recall(query))
+    // 自回归结束后把这一轮写回库：这是"她记得刚才说过什么"的唯一入口。
+    // 没有 ingest 的实现（stdio 旧路径）时返回 ok:false，不抛错、不影响回复。
+    defineInvokeHandler(params.context, castaliaMemoryIngest, turn => engine.ingest
+      ? engine.ingest(turn)
+      : Promise.resolve({ ok: false, error: 'transport has no ingest' }))
     app.once('before-quit', () => {
       void engine.close()
     })
@@ -76,4 +81,6 @@ export function setupCastaliaMemoryService(params: {
   defineInvokeHandler(params.context, castaliaMemoryForget, entry => memory.forget(entry))
   // The local repository holds entries only, so a recall has no ranked text to render.
   defineInvokeHandler(params.context, castaliaMemoryRecall, () => ({ text: '', count: 0, topSim: 0, chars: 0 }))
+  // 本地 sqlite 仓储只有条目、没有对话日志表，所以落库明确返回不可用。
+  defineInvokeHandler(params.context, castaliaMemoryIngest, () => ({ ok: false, error: 'no castalia bank configured' }))
 }
