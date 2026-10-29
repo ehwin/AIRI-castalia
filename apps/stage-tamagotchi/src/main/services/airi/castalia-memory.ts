@@ -8,8 +8,9 @@ import { defineInvokeHandler } from '@moeru/eventa'
 import { createCastaliaMemoryRepository } from '@proj-airi/castalia-plugin/memory'
 import { app } from 'electron'
 
-import { castaliaMemoryForget, castaliaMemoryList, castaliaMemoryRecall, castaliaMemorySave } from '../../../shared/eventa/castalia-memory'
+import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryForget, castaliaMemoryList, castaliaMemoryRecall, castaliaMemorySave } from '../../../shared/eventa/castalia-memory'
 import { createCastaliaEngineMemory, resolveCastaliaEngineOptions } from './castalia-engine'
+import { createCastaliaFullClient, resolveCastaliaFullUrl } from './castalia-full'
 import { createInProcessBankMemory } from './castalia-inprocess'
 
 let repository: ReturnType<typeof createCastaliaMemoryRepository> | undefined
@@ -41,6 +42,12 @@ export function setupCastaliaMemoryService(params: {
   databasePath: string
 }) {
   const userDataDir = app.getPath('userData')
+
+  // Full 总线（跨库总览/检索）：与"本库"后端无关，总线不在线时返回 ok:false 而不是抛错。
+  const full = createCastaliaFullClient({ url: resolveCastaliaFullUrl(userDataDir) })
+  defineInvokeHandler(params.context, castaliaFullMembers, () => full.members())
+  defineInvokeHandler(params.context, castaliaFullSearch, input => full.search(input))
+
   const engineOptions = resolveCastaliaEngineOptions(userDataDir)
   if (engineOptions) {
     // 默认在主进程内直连记忆库（不再 spawn 子进程、不走 MCP/HTTP）；

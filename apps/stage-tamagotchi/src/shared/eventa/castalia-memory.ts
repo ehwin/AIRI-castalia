@@ -20,5 +20,54 @@ export interface CastaliaRecalledMemory {
 
 export const castaliaMemoryList = defineInvokeEventa<CastaliaMemoryEntry[]>('eventa:invoke:castalia:memory:list')
 export const castaliaMemorySave = defineInvokeEventa<void, CastaliaMemoryEntry>('eventa:invoke:castalia:memory:save')
-export const castaliaMemoryForget = defineInvokeEventa<boolean, Pick<CastaliaMemoryEntry, 'name' | 'persona'>>('eventa:invoke:castalia:memory:forget')
+/** 删除一条记忆：有 `id` 按行删（castalia 库），否则按 `name` + `persona` 找 store 条目。 */
+export interface CastaliaMemoryForgetInput {
+  id?: string
+  name?: string
+  persona?: string
+}
+export const castaliaMemoryForget = defineInvokeEventa<boolean, CastaliaMemoryForgetInput>('eventa:invoke:castalia:memory:forget')
 export const castaliaMemoryRecall = defineInvokeEventa<CastaliaRecalledMemory, string>('eventa:invoke:castalia:memory:recall')
+
+// ── Full 总线（fedServer 3314）───────────────────────────────────────────────
+// 记忆体本体走进程内插件；这里只保留"跨库"那一层：总线能一次查所有库，
+// 面板「记忆体」页用它浏览，长期记忆页仍然只看 castalia 本库。
+
+export interface CastaliaFullMember {
+  id: string
+  label?: string
+  variant?: string
+  transport?: string
+  target?: string
+  ok?: boolean
+  memories?: number
+  libraries?: number
+}
+
+export interface CastaliaFullHit {
+  instance: string
+  project?: string
+  score: number
+  text: string
+  memType?: string
+}
+
+export interface CastaliaFullMembersResult {
+  ok: boolean
+  totalMemories: number
+  members: CastaliaFullMember[]
+  error?: string
+}
+
+export interface CastaliaFullSearchResult {
+  ok: boolean
+  count: number
+  results: CastaliaFullHit[]
+  error?: string
+}
+
+/** 总线成员表：每个库的路径、条数、是否可读。 */
+export const castaliaFullMembers = defineInvokeEventa<CastaliaFullMembersResult>('eventa:invoke:castalia:full:members')
+
+/** 跨库检索：一次查所有成员（或指定成员）。 */
+export const castaliaFullSearch = defineInvokeEventa<CastaliaFullSearchResult, { query: string, topK?: number, members?: string[] }>('eventa:invoke:castalia:full:search')

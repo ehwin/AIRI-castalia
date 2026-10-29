@@ -49,6 +49,8 @@ const STORE_NAME_RE = /^#\s+([^\n]+)\n?/
 
 export interface StoreRecord {
   id: string
+  /** 原始正文（未拆 name/description/body），长期记忆页直接展示它 */
+  text?: string
   name: string | null
   fallbackName?: string
   description: string
@@ -127,6 +129,7 @@ export function createStoreTools(deps: EngineDeps) {
     const charId = row.character_id ?? null
     return {
       id: row.id,
+      text: String(row.text ?? ''),
       ...parsed,
       fallbackName: parsed.name ? undefined : `mem-${String(row.id).slice(0, 8)}`,
       characterId: charId ?? '',

@@ -33,6 +33,8 @@ export interface BankHandle {
   forget: (id: string, reason?: string) => any
   restore: (id: string) => any
   stats: () => Array<{ memType: string, active: number, vec: number, chunk: number }>
+  /** 库里所有活跃记忆（全部 memType，带行 id）：长期记忆页展示用 */
+  listMemories: (limit?: number) => Array<{ id: string, text: string, characterId?: string, memType?: string, updatedAt?: string }>
   /** memory_store_list 的进程内版本（源 = 引擎的 store 工具实现） */
   listStore: (args?: Record<string, unknown>) => { records: any[] }
   saveStore: (args: Record<string, unknown>) => Promise<{ id: string, updated: boolean }>
@@ -114,6 +116,15 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
     // 签名: forgetMemory(id, project?, characterId?) —— 第二参是项目名，不是原因
     forget: id => store.forgetMemory(id, project, charId),
     restore: id => store.restoreMemory(id, project, charId),
+    // 不按 source 过滤：长期记忆页要的是"这个库里的全部记忆"，不是 app 自己写的那几条 store 条目
+    listMemories: (limit = 500) => storeTools.listStoreEntries({ project, allCharacters: true, limit })
+      .records.map(record => ({
+        id: record.id,
+        text: record.text ?? record.body,
+        characterId: record.characterId,
+        memType: record.memType,
+        updatedAt: record.updatedAt,
+      })),
     listStore: args => storeTools.listStoreEntries({ project, ...args }),
     saveStore: args => storeTools.saveStoreEntry({ project, ...args } as any),
     forgetStore: args => storeTools.forgetStoreEntry({ project, ...args } as any),
