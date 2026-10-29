@@ -95,6 +95,11 @@ export interface RecallArgs {
   topK?: number
   minSimilarity?: number
   capChars?: number
+  /** 最近几轮已注入的 id(宿主维护):连续同话题不重复塞同一段 */
+  recentIds?: string[]
+  /** top1-top2 落差阈值:只降 uncertainty,不丢结果 */
+  margin?: number
+  log?: boolean
 }
 
 export function parseStoreText(text: string): { name: string | null, description: string, body: string } {
@@ -243,6 +248,9 @@ export function createStoreTools(deps: EngineDeps) {
         topK: options.topK,
         minSimilarity: options.minSimilarity,
         capChars: options.capChars,
+        recentIds: options.recentIds,
+        margin: options.margin,
+        log: options.log,
       })
       return { project, characterId: charId, ...result }
     },
