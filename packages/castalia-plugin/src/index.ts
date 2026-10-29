@@ -1,0 +1,5 @@
+export { AgentState, aggregateMood, currentEnergyFrom, formatAgentStatePrompt } from './agent-state'
+export type { AgentStateSnapshot, MoodEvent } from './agent-state'
+export { decayEmotion, regressEmotionToBaseline } from './emotion'
+export type { DecayedEmotion, VADVector } from './emotion'
+export { useCastaliaPluginStore } from './store'

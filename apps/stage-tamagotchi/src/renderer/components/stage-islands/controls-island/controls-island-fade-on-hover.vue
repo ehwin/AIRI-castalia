@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { useElectronEventaInvoke } from '@proj-airi/electron-vueuse'
-import { useAnalytics } from '@proj-airi/stage-ui/composables/use-analytics'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
@@ -22,7 +21,6 @@ const props = withDefaults(defineProps<Props>(), {
 const uiStore = useControlsIslandStore()
 const enabled = computed(() => uiStore.fadeOnHoverEnabled)
 const { t } = useI18n()
-const { trackControlsIslandAction } = useAnalytics()
 
 const requestNotice = useElectronEventaInvoke(noticeWindowEventa.openWindow)
 const NOTICE_WINDOW_ID = 'fade-on-hover'
@@ -32,10 +30,6 @@ function setFadeOnHoverEnabled(value: boolean) {
     uiStore.enableFadeOnHover()
   else
     uiStore.disableFadeOnHover()
-
-  trackControlsIslandAction({
-    action: value ? 'enable_fade_on_hover' : 'disable_fade_on_hover',
-  })
 }
 
 async function handleToggle() {

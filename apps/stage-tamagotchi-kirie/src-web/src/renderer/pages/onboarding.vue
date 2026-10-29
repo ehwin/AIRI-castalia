@@ -1,37 +1,24 @@
 <script setup lang="ts">
-import { useHostAuth, useHostOnboarding } from '@proj-airi/stage-host-context'
-import { OnboardingScreen, OnboardingStepAnalyticsNotice } from '@proj-airi/stage-ui/components'
-import { isAnalyticsAvailableInBuild } from '@proj-airi/stage-ui/libs/product-signals'
-import { useAuthStore } from '@proj-airi/stage-ui/stores/auth'
+import { useHostOnboarding } from '@proj-airi/stage-host-context'
+import { OnboardingScreen } from '@proj-airi/stage-ui/components'
 import { useOnboardingStore } from '@proj-airi/stage-ui/stores/onboarding'
 import { useTheme } from '@proj-airi/ui'
-import { storeToRefs } from 'pinia'
 import { computed } from 'vue'
 
-import { useOnboardingAuthentication } from '../composables/use-onboarding-authentication'
-
-const authStore = useAuthStore()
-const { needsLogin, isAuthenticated } = storeToRefs(authStore)
 const onboardingStore = useOnboardingStore()
-const { closeRequestId } = storeToRefs(onboardingStore)
 const { isDark } = useTheme()
-const { startLogin } = useHostAuth()
 const { close: closeWindow } = useHostOnboarding()
-const { closeOnboardingWindow } = useOnboardingAuthentication({
-  closeRequestId,
-  closeWindow,
-  isAuthenticated,
-  needsLogin,
-  onCloseError: error => console.error('[Onboarding] Failed to close the onboarding window.', error),
-  startLogin,
-})
 
 const bgClass = computed(() => isDark.value ? 'bg-[#0f0f0f]' : 'bg-white')
-const extraSteps = computed(() => {
-  return isAnalyticsAvailableInBuild()
-    ? [{ id: 'analytics-notice', component: OnboardingStepAnalyticsNotice }]
-    : []
-})
+
+async function closeOnboardingWindow() {
+  try {
+    await closeWindow()
+  }
+  catch (error) {
+    console.error('[Onboarding] Failed to close the onboarding window.', error)
+  }
+}
 
 async function handleSkipped() {
   onboardingStore.markSetupSkipped()
@@ -52,7 +39,7 @@ async function handleConfigured() {
   >
     <div class="min-h-8 w-full flex-shrink-0 select-none" :class="bgClass" />
     <div class="mx-8 mb-8 mt-2 min-h-0 flex flex-1 flex-col">
-      <OnboardingScreen :extra-steps="extraSteps" @skipped="handleSkipped" @configured="handleConfigured" />
+      <OnboardingScreen @skipped="handleSkipped" @configured="handleConfigured" />
     </div>
   </div>
 </template>

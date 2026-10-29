@@ -4,8 +4,6 @@ import { themeColorFromValue, useThemeColor } from '@proj-airi/stage-layouts/com
 import { ToasterRoot } from '@proj-airi/stage-ui/components'
 import { useInferencePreload } from '@proj-airi/stage-ui/composables'
 import { usePiniaSynced } from '@proj-airi/stage-ui/libs/pinia'
-import { initializeAnalytics } from '@proj-airi/stage-ui/libs/product-signals'
-import { useAuthStore } from '@proj-airi/stage-ui/stores/auth'
 import { useChatStore } from '@proj-airi/stage-ui/stores/chat'
 import { useDisplayModelsStore } from '@proj-airi/stage-ui/stores/display-models'
 import { useContextBridgeStore } from '@proj-airi/stage-ui/stores/mods/api/context-bridge'
@@ -14,7 +12,6 @@ import { useConsciousnessStore } from '@proj-airi/stage-ui/stores/modules/consci
 import { useHearingStore } from '@proj-airi/stage-ui/stores/modules/hearing'
 import { useSpeechStore } from '@proj-airi/stage-ui/stores/modules/speech'
 import { useVisionStore } from '@proj-airi/stage-ui/stores/modules/vision'
-import { useOnboardingStore } from '@proj-airi/stage-ui/stores/onboarding'
 import { usePerfTracerBridgeStore } from '@proj-airi/stage-ui/stores/perf-tracer-bridge'
 import { useSettings, useSettingsAudioDevice } from '@proj-airi/stage-ui/stores/settings'
 import { useSettingsStageModel } from '@proj-airi/stage-ui/stores/settings/stage-model'
@@ -32,7 +29,6 @@ import {
   electronSettingsNavigate,
   electronSettingsReady,
 } from '../shared/eventa'
-import { initializeElectronAuthCallbackBridge } from './bridges/electron-auth-callback'
 import { initializeStageThreeRuntimeTraceBridge } from './bridges/stage-three-runtime-trace'
 import { useLanguage } from './composables/use-language'
 import { initializeHostContext, startHostOwnedSpotlightShortcut, startHostTrayLabels, useHostMicrophonePermission } from './host-context'
@@ -111,8 +107,6 @@ const stopLeadershipListener = syncedPinia.onLeadershipChange((isLeader) => {
 })
 
 function createFullStageRuntime() {
-  const authStore = useAuthStore()
-  const onboardingStore = useOnboardingStore()
   const displayModelsStore = useDisplayModelsStore()
   const cardStore = useAiriCardStore()
   const inferencePreload = useInferencePreload()
@@ -124,45 +118,16 @@ function createFullStageRuntime() {
   useSettingsStageModel()
   useVisionStore()
 
-  let stopAuthenticatedSetup: (() => void) | undefined
-  let stopLoggedOutSetup: (() => void) | undefined
-
-  async function removeAuthenticationProviderConfiguration() {
-    if (!syncedPinia.isLeader())
-      return
-
-    await cardStore.configureForAuthentication(false)
-  }
-
-  function registerAuthenticatedSetup() {
-    stopAuthenticatedSetup ??= authStore.onAuthenticated(async () => {
-      if (!syncedPinia.isLeader())
-        return
-
-      await cardStore.configureForAuthentication(true)
-      await onboardingStore.closeAfterAuthentication()
-    })
-    stopLoggedOutSetup ??= authStore.onLogout(removeAuthenticationProviderConfiguration)
-  }
-
   usePerfTracerBridgeStore()
   initializeStageThreeRuntimeTraceBridge()
-  // The native host returns login callbacks to the initiating renderer.
-  // Login windows listen locally. Synchronized auth actions execute in the leader.
-  initializeElectronAuthCallbackBridge()
   stageWindowLifecycleStore.initializeWindowLifecycleBridge().catch((error) => {
     console.error('[App] Failed to initialize native window lifecycle:', error)
   })
 
   return {
     async initialize() {
-      initializeAnalytics()
-      await authStore.initialize()
       await displayModelsStore.initialize()
       await cardStore.initialize()
-      registerAuthenticatedSetup()
-      if (!authStore.isAuthenticated)
-        await removeAuthenticationProviderConfiguration()
 
       await displayModelsStore.loadDisplayModelsFromIndexedDB()
       await settingsStore.initializeStageModel()
@@ -172,10 +137,6 @@ function createFullStageRuntime() {
         return
 
       await inferencePreload.triggerPreload()
-    },
-    dispose() {
-      stopAuthenticatedSetup?.()
-      stopLoggedOutSetup?.()
     },
   }
 }
@@ -257,7 +218,6 @@ onUnmounted(() => {
   stopTrayLabels?.()
   stopLeadershipListener?.()
   chatStore.dispose()
-  fullStageRuntime?.dispose()
   void chatStreamView?.dispose()
 })
 

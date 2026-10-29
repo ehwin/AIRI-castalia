@@ -30,7 +30,6 @@ import {
   noticeWindowEventa,
 } from '../../../../shared/eventa'
 import { createWindowContext } from '../../../libs/electron/window-context'
-import { createAuthService } from '../../../services/airi/auth'
 import { createGodotStageService } from '../../../services/airi/godot-stage'
 import { registerIOTraceRecording } from '../../../services/airi/io-trace-recording/register'
 import { createMcpServersService } from '../../../services/airi/mcp-servers'
@@ -76,7 +75,6 @@ export async function setupMainWindowElectronInvokes(params: {
   createMcpServersService({ context, manager: params.mcpManager })
   createGodotStageService({ context, manager: params.godotStageManager, window: params.window })
   createOnboardingService({ context, onboardingWindowManager: params.onboardingWindowManager, mainWindow: params.window })
-  createAuthService({ context, window: params.window })
   const stopIOTraceRecording = registerIOTraceRecording(context, params.ioTraceRecording)
   params.window.once('closed', stopIOTraceRecording)
 

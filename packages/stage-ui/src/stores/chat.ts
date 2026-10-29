@@ -12,7 +12,8 @@ import { errorMessageFrom } from '@moeru/std'
 import { decodeBase64 } from '@moeru/std/base64'
 import { SpanStatusCode } from '@opentelemetry/api'
 import { fileSource } from '@proj-airi/audio/encoding'
-import { createChatOrchestratorRuntime, isBackgroundRecipe, matchKeywordRecipes, renderConversationPreview } from '@proj-airi/core-agent'
+import { formatAgentStatePrompt, useCastaliaPluginStore } from '@proj-airi/castalia-plugin'
+import { createChatOrchestratorRuntime, isBackgroundRecipe, matchKeywordRecipes, renderConversationPreview, scanRetention } from '@proj-airi/core-agent'
 import { IOAttributes, IOEvents, IOSpanNames, IOSubsystems } from '@proj-airi/stage-shared'
 import { isEqual } from 'es-toolkit'
 import { nanoid } from 'nanoid'
@@ -20,21 +21,15 @@ import { defineStore, storeToRefs } from 'pinia'
 import { computed, shallowRef, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { getConversationAnalyticsSurface } from '../composables'
 import { useAiriRuntimePrompt } from '../composables/use-airi-runtime-prompt'
 import { registerTurnSpan, startSpan, takeComposerVoiceParent, takeVoiceTurnParent } from '../composables/use-io-tracer'
 import { useChatVision } from '../composables/vision/use-chat-vision'
 import { useVisionInference } from '../composables/vision/use-vision-inference'
 import { chatAssetIdFrom, inlineConversationAssets, storeChatAttachments } from '../libs/chat-assets'
-import { extractMessageText, isCloudSyncableMessage } from '../libs/chat-sync'
+import { extractMessageText } from '../libs/chat-sync'
 import { syncedRoles } from '../libs/pinia/synced-context'
-import { createChatAnalyticsHooks, getProviderMode } from '../libs/product-signals/events/chat'
-import {
-  AIRI_CHAT_APP_SURFACE_HEADER,
-  AIRI_CHAT_ROUND_ID_HEADER,
-  AIRI_CHAT_SESSION_ID_HEADER,
-} from '../libs/product-signals/headers'
 import { getSpeechBusContext, voiceGenerationEnded } from '../services/speech/bus'
+import { createCastaliaStateTools } from '../tools/castalia'
 import { composeDrawCardPrompt, createDrawCardTool, DRAW_CARD_TOOL_NAME, drawCardContent } from '../tools/draw-card'
 import { createJudgeRecipeTool, judgmentSkillText } from '../tools/judge-recipe'
 import { composeMemoryPrompt, createMemoryTools } from '../tools/memory'
@@ -46,12 +41,13 @@ import { useLLM } from './ai/chat-llm/llm'
 import { resolveLlmTools } from './ai/chat-llm/tool-resolver'
 import { useLlmToolsStore } from './ai/chat-llm/tools'
 import { useLlmToolsetPromptsStore } from './ai/chat-llm/toolset-prompts'
-import { useAuthStore } from './auth'
-import { createMinecraftContext, createRuntimePromptContext, createUserAccountContext } from './chat/context-providers'
+import { createMinecraftContext, createRuntimePromptContext } from './chat/context-providers'
+import { createMemoryRecallContext } from './chat/context-providers/memory-recall'
+import { createMindStateContext } from './chat/context-providers/mind-state'
+import { createRelationalPolicyContextProvider } from './chat/context-providers/relational-policy'
 import { useChatContextStore } from './chat/context-store'
 import { describeChatImages, replaceToolResultImages } from './chat/image-projection'
 import { composeRecipeSpacePrompt, composeSystemPrompt } from './chat/prompt-recipe'
-import { staysLocal } from './chat/session-locality'
 import { useChatSessionStore } from './chat/session-store'
 import { useChatStreamStore } from './chat/stream-store'
 import { useContextObservabilityStore } from './devtools/context-observability'
@@ -60,6 +56,7 @@ import { useAiriCardStore } from './modules/airi-card'
 import { useAutonomousArtistryStore } from './modules/artistry-autonomous'
 import { useConsciousnessStore } from './modules/consciousness'
 import { useHearingStore } from './modules/hearing'
+import { useMindStore } from './modules/mind'
 import { useStickersStore } from './modules/stickers'
 import { useVisionStore } from './modules/vision'
 import { useWebSearchStore } from './modules/web-search'
@@ -259,7 +256,6 @@ const inSpeechPlayer = { roles: [syncedRoles.speechPlayer] }
 export const useChatStore = defineStore('chat', () => {
   const { t } = useI18n()
   const runtimePrompt = useAiriRuntimePrompt()
-  const authStore = useAuthStore()
   const llmStore = useLLM()
   const llmToolsStore = useLlmToolsStore()
   const llmToolsetPromptsStore = useLlmToolsetPromptsStore()
@@ -276,9 +272,21 @@ export const useChatStore = defineStore('chat', () => {
   const chatSession = useChatSessionStore()
   const chatStream = useChatStreamStore()
   const chatContext = useChatContextStore()
+  const mindStore = useMindStore()
   const cardStore = useAiriCardStore()
   const recipes = useRecipesStore()
   const memory = useMemoryStore()
+  const castalia = useCastaliaPluginStore()
+  const relationalPolicy = createRelationalPolicyContextProvider()
+  const memoryRecallContext = createMemoryRecallContext(query => memory.recallForInjection(query))
+  // The runtime ingests context before it stores the user turn, so the policy reads the pending text.
+  const pendingUserTurns = new Map<string, { id: string, text: string }>()
+
+  /** The last user turn of a session. The policy reads only that turn. */
+  function lastUserTurn(sessionId: string) {
+    const message = chatSession.getSessionMessages(sessionId).findLast(entry => entry.role === 'user' && entry.id)
+    return message?.id ? { id: message.id, text: extractMessageText(message) } : undefined
+  }
 
   /** The persona of a session. A session without one uses the selected card. */
   function personaOf(sessionId: string) {
@@ -292,8 +300,10 @@ export const useChatStore = defineStore('chat', () => {
    */
   function sessionSystemPrompt(sessionId: string) {
     const persona = personaOf(sessionId)
+    castalia.setCharacter(persona)
     const identity = composeSystemPrompt(cardStore.getSystemPrompt(persona))
       + (memory.enabled ? composeMemoryPrompt(memory.indexFor(persona)) : '')
+      + (castalia.enabled ? formatAgentStatePrompt(castalia.snapshotFor(persona)) : '')
       + (drawsCards(sessionId) ? composeDrawCardPrompt() : '')
     const recipeId = chatSession.sessionMetas[sessionId]?.recipeId
     const recipe = recipeId ? recipes.recipes.find(entry => entry.id === recipeId) : undefined
@@ -306,6 +316,20 @@ export const useChatStore = defineStore('chat', () => {
   // the leader shows no tool call. Every window creates the chat store, so the chat store creates the card store too.
   const toolCards = useToolCardsStore()
   const { activeSessionId } = storeToRefs(chatSession)
+
+  /** The policy of the send that owns this request, not of the window's active chat. */
+  function relationalPolicyContext() {
+    const sessionId = activeSessionId.value
+    const pending = pendingUserTurns.get(sessionId)
+    if (pending)
+      return relationalPolicy(sessionId, pending, personaOf(sessionId))
+    // A scene or task session sends while another session stays active in the window.
+    if (pendingUserTurns.size === 1) {
+      const [onlySessionId, turn] = [...pendingUserTurns.entries()][0]!
+      return relationalPolicy(onlySessionId, turn, personaOf(onlySessionId))
+    }
+    return relationalPolicy(sessionId, lastUserTurn(sessionId), personaOf(sessionId))
+  }
   const { streamingMessage } = storeToRefs(chatStream)
 
   const activeTurns = shallowRef<readonly { sessionId: string, turnId: string }[]>([])
@@ -335,18 +359,13 @@ export const useChatStore = defineStore('chat', () => {
    */
   const ownedTurnSpans = new Map<string, { span: ReturnType<typeof startSpan>, unregister: () => void }>()
   let stopLeadershipListener: (() => void) | undefined
-  const analyticsHooks = createChatAnalyticsHooks({
-    getSessionMessages: sessionId => chatSession.getSessionMessages(sessionId),
-  })
 
   /**
    * Initializes chat state and binds local consumers to synchronized leadership.
-   * A promoted renderer restarts the leader-owned cloud consumer.
    */
   async function initialize(syncedPinia: SyncedPiniaRuntime) {
     stopLeadershipListener ??= syncedPinia.onLeadershipChange((isLeader) => {
       if (!isLeader) {
-        chatSession.dispose()
         return
       }
 
@@ -370,7 +389,6 @@ export const useChatStore = defineStore('chat', () => {
   function dispose() {
     stopLeadershipListener?.()
     stopLeadershipListener = undefined
-    chatSession.dispose()
   }
 
   /**
@@ -442,12 +460,6 @@ export const useChatStore = defineStore('chat', () => {
   function isOwnerTurn(sessionId: string, sessionMessages: ChatHistoryItem[]) {
     const lastUserMessage = sessionMessages.findLast(message => message.role === 'user')
     return !isTaskSession(sessionId) && (lastUserMessage?.role !== 'user' || !lastUserMessage.notice)
-  }
-
-  /** Whether a session reaches cloud sync. A local-only session, such as a task or a scene, never syncs. */
-  function syncsToCloud(sessionId: string) {
-    const meta = chatSession.sessionMetas[sessionId]
-    return Boolean(meta && !staysLocal(meta))
   }
 
   /** Runs one task: its own send without voice, then its status and a notice to the parent conversation. */
@@ -632,6 +644,13 @@ export const useChatStore = defineStore('chat', () => {
     const sourceTools = async () => [
       ...(typeof tools === 'function' ? await tools() ?? [] : tools ?? []),
       ...memory.enabled ? await createMemoryTools({ read: name => memory.read(name, persona), write: entry => memory.write(entry, persona), forget: name => memory.forget(name, persona) }) : [],
+      ...castalia.enabled
+        ? await createCastaliaStateTools({
+            recordEmotion: (vad, reason) => castalia.recordEmotion(vad, reason, persona),
+            setDesire: desire => castalia.setDesire(desire, persona),
+            adjustEnergy: change => castalia.boostEnergy(change, persona),
+          })
+        : [],
     ]
     // A recipe's own session runs only that recipe. It cannot start recipes, save them, or choose silence.
     if (isTaskSession(sessionId))
@@ -664,17 +683,6 @@ export const useChatStore = defineStore('chat', () => {
     const turnSpan = correlation
       ? openTurnSpan({ sessionId: correlation.conversationId, turnId: correlation.turnId })
       : undefined
-
-    // Analytics correlation goes only to the official provider. A resolved step can change the provider, so each request rebuilds it.
-    function requestHeaders(providerId: string | undefined) {
-      const headers = { ...options?.headers }
-      if (getProviderMode(providerId ?? activeProvider.value) === 'official' && options?.requestCorrelation) {
-        headers[AIRI_CHAT_SESSION_ID_HEADER] = options.requestCorrelation.conversationId
-        headers[AIRI_CHAT_ROUND_ID_HEADER] = options.requestCorrelation.turnId
-        headers[AIRI_CHAT_APP_SURFACE_HEADER] = getConversationAnalyticsSurface()
-      }
-      return headers
-    }
 
     // Stored messages reference their images and recordings. The provider request carries the bytes.
     context = await inlineConversationAssets(context)
@@ -843,13 +851,7 @@ export const useChatStore = defineStore('chat', () => {
         ...options,
         tools: withRunTools(options?.tools, options?.requestCorrelation),
         prepareStringContent: prepareTextOnlyAudioContext,
-        headers: requestHeaders(options?.providerId),
-        resolveStep: resolveStep
-          ? async () => {
-            const step = await resolveStep()
-            return { ...step, headers: requestHeaders(step.providerId) }
-          }
-          : undefined,
+        resolveStep,
         // Audio projection follows the model of each request. A tool step can switch between audio and text models.
         prepareConversation: async (conversation, target) => {
           if (conversation === providerContext && isInitialTarget(target))
@@ -975,13 +977,7 @@ export const useChatStore = defineStore('chat', () => {
     context: {
       ingest: envelope => chatContext.ingestContextMessage(envelope),
       snapshot: () => {
-        const snapshot = { ...chatContext.getContextsSnapshot() }
-        // Account data belongs to this request, not the persistent context registry.
-        // A signed-out request therefore cannot inherit the previous account snapshot.
-        const account = createUserAccountContext(authStore)
-        if (account)
-          snapshot[account.contextId] = [account]
-        return snapshot
+        return { ...chatContext.getContextsSnapshot() }
       },
     },
     foregroundStream: {
@@ -1002,6 +998,22 @@ export const useChatStore = defineStore('chat', () => {
     getSystemPrompt: sessionSystemPrompt,
     runtimeContextProviders: [
       () => createRuntimePromptContext(runtimePrompt.value),
+      // Her state changes every turn. It goes here, not in the system prompt,
+      // so the cacheable prefix stays byte-stable.
+      () => createMindStateContext(mindStore.stateLineForSend()),
+      // Relationship policy: tone, depth, and when disagreement is allowed.
+      () => relationalPolicyContext(),
+      // What this turn brings back from long-term memory. The engine abstains on
+      // its own, so a block arrives only when it passed the similarity gate.
+      // NOTICE: 0.13's runtime calls every context provider with no arguments, while this
+      // provider destructures `{ text }`. Left as-is it threw "Cannot destructure property 'text'
+      // of 'undefined'" inside performSend, so no message could be sent at all. Hand it the pending
+      // user turn explicitly; `ingest()` records that turn before the runtime ingests contexts.
+      () => {
+        const sessionId = activeSessionId.value
+        const pending = pendingUserTurns.get(sessionId)?.text ?? lastUserTurn(sessionId)?.text ?? ''
+        return memoryRecallContext({ text: pending })
+      },
       createMinecraftContext,
     ],
     // A card that the model draws is part of its answer, so the reply shows the card, not the call.
@@ -1013,43 +1025,9 @@ export const useChatStore = defineStore('chat', () => {
       settleOwnedTurnSpan(event)
       getSpeechBusContext().emit(voiceGenerationEnded, event)
     },
-    ...analyticsHooks,
-    // A background task is not owner activity, so its rounds stay out of product signals.
-    onMessageRound: event => isTaskSession(event.conversationId) ? undefined : analyticsHooks.onMessageRound?.(event),
-    onMessageRoundFailed: event => isTaskSession(event.conversationId) ? undefined : analyticsHooks.onMessageRoundFailed?.(event),
     onLifecycle: record => contextObservability.recordLifecycle(record),
     onPromptProjection: payload => contextObservability.capturePromptProjection(payload),
-    onUserMessageAppended: ({ sessionId, message, messageText, source, model, provider, roundId, turnIndex }) => {
-      if (isTaskSession(sessionId))
-        return
-      analyticsHooks.onUserMessageAppended?.({
-        sessionId,
-        message,
-        messageText,
-        source,
-        model,
-        provider,
-        roundId,
-        turnIndex,
-      })
-      if (isCloudSyncableMessage(message) && syncsToCloud(sessionId)) {
-        void chatSession.pushMessageToCloud(sessionId, {
-          id: message.id,
-          role: 'user',
-          content: messageText,
-          replyToMessageId: message.replyToMessageId,
-        })
-      }
-    },
-    onAssistantMessageAppended: ({ sessionId, message, roundId }) => {
-      const source = chatSession.getSessionMessages(sessionId).find(message => message.role === 'user' && message.id === roundId)
-      if (source && isCloudSyncableMessage(source) && isCloudSyncableMessage(message) && message.id && syncsToCloud(sessionId)) {
-        void chatSession.pushMessageToCloud(sessionId, {
-          id: message.id,
-          role: 'assistant',
-          content: extractMessageText(message),
-        })
-      }
+    onAssistantMessageAppended: ({ message }) => {
       // Each finished call of a saved reply becomes the latest call on the card of its tool.
       for (const slice of message.slices) {
         if (slice.type !== 'tool-call')
@@ -1060,6 +1038,14 @@ export const useChatStore = defineStore('chat', () => {
         toolCards.recordCall(slice.toolCall.toolName, slice.toolCall.args, result.result)
           .catch(error => console.warn('[chat] Failed to keep a tool call on its card:', errorMessageFrom(error)))
       }
+
+      // Scan her own reply too: a red line can still be written when the prompt
+      // forbids it, so the count of what got through is the only honest measure.
+      // Categories and counts reach devtools; the words stay in the message.
+      const spoken = typeof message.content === 'string' ? message.content : ''
+      const scan = scanRetention(spoken)
+      if (scan.hits.length > 0)
+        contextObservability.recordRetentionRedline({ text: spoken, verdict: scan.verdict, categories: scan.hits.map(hit => hit.category), hard: scan.hard })
     },
     onUserTurnReady: ({ sessionId, messageText, sessionMessages }) => {
       if (!isOwnerTurn(sessionId, sessionMessages))
@@ -1111,6 +1097,7 @@ export const useChatStore = defineStore('chat', () => {
       return existing.request.done
 
     const abort = new AbortController()
+    pendingUserTurns.set(sessionId, { id: messageId, text: sendingMessage })
     const captured = {
       ...options,
       messageId,
@@ -1132,7 +1119,11 @@ export const useChatStore = defineStore('chat', () => {
     }
     requests.set(key, { sessionId, abort, request })
     void request.accepted.catch(() => {})
-    void request.done.finally(() => requests.delete(key)).catch(() => {})
+    void request.done.finally(() => {
+      requests.delete(key)
+      if (pendingUserTurns.get(sessionId)?.id === messageId)
+        pendingUserTurns.delete(sessionId)
+    }).catch(() => {})
     return request.done
   }
 
@@ -1319,7 +1310,16 @@ export const useChatStore = defineStore('chat', () => {
     if (existing)
       return existing.request
 
+    // A handoff never reaches the model as a request to do the work. She says her
+    // line and the task is queued for whoever does it. It never means silence.
+    const handoff = mindStore.handoffFor(payload.text)
+    if (handoff) {
+      appendSendError(payload.sessionId, new Error(handoff.line))
+      return { accepted: Promise.resolve({ sessionId: payload.sessionId, messageId }), done: Promise.resolve() }
+    }
+
     const abort = new AbortController()
+    pendingUserTurns.set(payload.sessionId, { id: messageId, text: payload.text })
     // A keyword invokes its recipes like slash commands. A decision among them judges with the judgment tool.
     const invoked = keywordRecipesFor(payload, extra)
     const prepared = prepareSend({ ...payload, messageId }, abort.signal, voice, { ...extra, skills: invokedSkillsOf(invoked) }, invoked)
@@ -1336,7 +1336,11 @@ export const useChatStore = defineStore('chat', () => {
 
     requests.set(key, { sessionId: payload.sessionId, abort, request })
     void request.accepted.catch(() => {})
-    void request.done.finally(() => requests.delete(key)).catch(() => {})
+    void request.done.finally(() => {
+      requests.delete(key)
+      if (pendingUserTurns.get(payload.sessionId)?.id === messageId)
+        pendingUserTurns.delete(payload.sessionId)
+    }).catch(() => {})
 
     return request
   }

@@ -2,7 +2,7 @@ import type { GenerationProvider } from '@proj-airi/provider-inference'
 import type {} from 'pinia-plugin-synced'
 
 import type { ProviderMetadata, ProviderValidationPlan } from '../../libs/providers'
-import type { ChatRequestOptions, ModelInfo, ProviderDefinition, ProviderInstance, ProviderValidationResult, VoiceInfo } from '../../libs/providers/types'
+import type { ChatRequestOptions, ModelInfo, ProviderDefinition, ProviderInstance, VoiceInfo } from '../../libs/providers/types'
 
 import { errorMessageFrom } from '@moeru/std'
 import { getGenerationProvider, withReasoning } from '@proj-airi/provider-inference'
@@ -11,7 +11,7 @@ import { computedAsync, useAsyncState, useIntervalFn } from '@vueuse/core'
 import { listModels } from '@xsai/model'
 import { uniqBy } from 'es-toolkit'
 import { defineStore } from 'pinia'
-import { computed, onScopeDispose, ref, toRaw, watch } from 'vue'
+import { computed, ref, toRaw, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import {
@@ -24,7 +24,6 @@ import {
 } from '../../libs/providers'
 import { selectProviderMetadata, selectProvidersMetadata } from '../../libs/providers/metadata'
 import { getSchemaDefault } from '../../libs/zod'
-import { useAuthStore } from '../auth'
 import { useProviderConfigStore } from './config'
 import { normalizeProviderConfigDefaults } from './config-defaults'
 
@@ -41,31 +40,11 @@ export interface VoiceCatalogIdentity {
   definitionId: string
   model: string | undefined
   configurationFingerprint: string
-  /** Opaque provider ownership. Token renewal preserves it; an owner change invalidates cached voices. */
-  owner: string | undefined
 }
-
-/** How many check times the runtime state keeps for each provider. */
-const VALIDATION_TIMES_KEPT = 10
 
 /** Serializable request and model-discovery state for one provider instance. */
 export interface ProviderRuntimeState {
   validatedCredentialHash?: string
-  /**
-   * What the last check in this session found. The settings home reads it, so a status from the last session shows nothing.
-   * - `configured`: the check passed.
-   * - `unconfigured`: required fields are empty, so the check cannot pass. The settings page also records this while it is edited.
-   * - `invalid`: the check failed. `validationReason` tells why.
-   * - `undefined`: no check ran in this session, or the provider is no longer added.
-   */
-  validationOutcome?: 'configured' | 'unconfigured' | 'invalid'
-  /**
-   * Why the last check in this session failed. It is empty when the check gave no reason,
-   * and `undefined` when the check passed or did not run yet.
-   */
-  validationReason?: string
-  /** When the recent checks finished, oldest first. The developer tools read it to measure how often checks run. */
-  validationTimes?: number[]
   models: ModelInfo[]
   defaultModel: string | null
   modelStatus: 'idle' | 'loading' | 'ready' | 'error'
@@ -81,15 +60,9 @@ Object.freeze(emptyProviderModels)
 // authoritative state by pinia-plugin-synced.
 const useProviderStateStore = defineStore('provider-state', () => {
   const runtime = ref<Record<string, ProviderRuntimeState>>({})
-  const availabilityOverrides = ref<Record<string, boolean>>({})
-  // The developer tools make the checks of these providers fail on purpose. Like the rest of the
-  // runtime state, the list is not stored, so it ends when the app quits.
-  const simulatedValidationFailures = ref<string[]>([])
 
   return {
     runtime,
-    availabilityOverrides,
-    simulatedValidationFailures,
   }
 }, {
   synced: {
@@ -104,7 +77,6 @@ const useProviderStateStore = defineStore('provider-state', () => {
  * configuration remains in {@link useProviderConfigStore}.
  */
 export const useProviderStore = defineStore('provider', () => {
-  const authStore = useAuthStore()
   const providerConfigStore = useProviderConfigStore()
   const providerStateStore = useProviderStateStore()
   const providerCredentials = computed(() => providerConfigStore.configs)
@@ -132,18 +104,6 @@ export const useProviderStore = defineStore('provider', () => {
   const providerDefinitions = Object.fromEntries(
     definedProviders.map(definition => [definition.id, definition]),
   ) as Record<string, ProviderDefinition>
-  // Scalar identity keeps same-session object replacements and token renewal
-  // from invalidating completed catalogs. Consumers do not interpret this key.
-  const catalogOwner = computed(() => JSON.stringify([
-    authStore.isAuthenticated,
-    authStore.session?.id,
-    authStore.user?.id,
-  ]))
-  const voiceCatalogOwners = computed<Record<string, string>>(() => Object.fromEntries(
-    definedProviders
-      .filter(definition => definition.configuredBy === 'authentication')
-      .map(definition => [definition.id, catalogOwner.value]),
-  ))
   const providerValidationIntervalMsById = new Map<string, number>()
   const providerMetadataState = useAsyncState(async () => {
     const metadata = await selectProvidersMetadata(definedProviders, t)
@@ -187,46 +147,8 @@ export const useProviderStore = defineStore('provider', () => {
     set: value => providerStateStore.runtime = value,
   })
   const providerValidationInFlight = new Map<string, Promise<boolean>>()
-  const providerVoiceListInFlight = new Map<string, Promise<VoiceInfo[] | undefined>>()
-  // Authentication epochs are local request ownership, never replicated state.
-  // Logout, account changes, and token replacement invalidate old completions.
-  let voiceSessionEpoch = 0
-  let voiceOwnerEpoch = 0
-  const authenticatedVoiceControllers = new Set<AbortController>()
-  /** Ends authentication-owned requests before a new session can create replacements. */
-  function invalidateVoiceSession() {
-    voiceSessionEpoch++
-    for (const controller of authenticatedVoiceControllers)
-      controller.abort()
-    authenticatedVoiceControllers.clear()
-  }
-  // Compare scalar values, not newly deserialized session or user objects.
-  watch([() => authStore.isAuthenticated, () => authStore.session?.id, () => authStore.user?.id, () => authStore.token], invalidateVoiceSession, { flush: 'sync' })
-  // Token renewal retains request ownership; logout and account changes do not.
-  watch([() => authStore.isAuthenticated, () => authStore.session?.id, () => authStore.user?.id], () => {
-    voiceOwnerEpoch++
-  }, { flush: 'sync' })
-  onScopeDispose(() => {
-    voiceOwnerEpoch++
-    invalidateVoiceSession()
-  })
+  const providerVoiceListInFlight = new Map<string, Promise<VoiceInfo[]>>()
   const providerRevalidationLoops = new Map<string, { pause: () => void, resume: () => void }>()
-
-  // Server-driven availability overrides for providers whose visibility can
-  // only be decided at runtime from the backend (e.g. the streaming TTS
-  // provider, which exists only when `UNSPEECH_UPSTREAM.streaming` is
-  // configured server-side). A `false` entry hides the provider from the
-  // available lists regardless of its static `isAvailableBy`; an absent entry
-  // means no override. Written by the auth-sync glue after it probes the
-  // server. Reactive so the available/configured provider lists re-derive.
-  const providerAvailabilityOverrides = computed({
-    get: () => providerStateStore.availabilityOverrides,
-    set: value => providerStateStore.availabilityOverrides = value,
-  })
-
-  function setProviderAvailabilityOverride(providerId: string, available: boolean) {
-    providerAvailabilityOverrides.value = { ...providerAvailabilityOverrides.value, [providerId]: available }
-  }
 
   function markProviderAdded(providerId: string) {
     providerConfigStore.markProviderAdded(providerId)
@@ -292,12 +214,7 @@ export const useProviderStore = defineStore('provider', () => {
       await runProviderValidation(plan, { t })
 
     const configOnly = !options.onlyChatPingCheck && !plan.shouldValidate
-    const result = {
-      ...validationResultFromPlan(plan, configOnly),
-      // `validationRequiredWhen` accepted the config. When it did not, a failed check means that fields are not filled in yet,
-      // so the recorded status is unconfigured, not invalid.
-      validationRequired: plan.shouldValidate,
-    }
+    const result = validationResultFromPlan(plan, configOnly)
     if (result.valid)
       return result
 
@@ -328,92 +245,6 @@ export const useProviderStore = defineStore('provider', () => {
 
   function supportsModelListing(providerId: string) {
     return findProviderDefinition(providerId) !== undefined
-  }
-
-  /**
-   * A failed check for a provider that the developer tools mark, so the failure notices can be tested
-   * without a broken config. Other providers get `undefined` and run their real check.
-   */
-  function simulatedValidationFailure(providerId: string) {
-    if (!providerStateStore.simulatedValidationFailures.includes(providerId))
-      return undefined
-    return { valid: false, reason: t('settings.pages.system.sections.section.developer.sections.section.needs-attention.simulated-reason'), errors: [] }
-  }
-
-  async function recordValidationResult(
-    providerId: string,
-    result: Pick<ProviderValidationResult, 'valid' | 'reason'> & { validationRequired?: boolean },
-  ) {
-    const runtimeState = providerRuntimeState.value[providerId]
-    if (!runtimeState)
-      return
-
-    let outcome: NonNullable<ProviderRuntimeState['validationOutcome']> = 'invalid'
-    if (result.valid) {
-      outcome = 'configured'
-    }
-    else if (result.validationRequired === false) {
-      // The settings page does not check a config that `validationRequiredWhen` rejects, such as one without its API key.
-      // Background checks still run it, so that providers with default configs become configured. A failure here is
-      // an unfinished config, so it gets no failure reason.
-      outcome = 'unconfigured'
-    }
-
-    providerRuntimeState.value[providerId] = {
-      ...runtimeState,
-      validationOutcome: outcome,
-      validationReason: outcome === 'invalid' ? result.reason : undefined,
-      validationTimes: [...(runtimeState.validationTimes ?? []), Date.now()].slice(-VALIDATION_TIMES_KEPT),
-    }
-    await providerConfigStore.setProviderStatus(providerId, outcome)
-  }
-
-  /**
-   * Records that the required fields of a provider are empty, without a check.
-   * The settings page calls it when `validationRequiredWhen` rejects the edited config, so the settings home learns
-   * that a provider in use lost its API key. The check history does not change, because no check ran.
-   */
-  async function recordUnfinishedConfig(providerId: string) {
-    const runtimeState = providerRuntimeState.value[providerId]
-    if (runtimeState)
-      providerRuntimeState.value[providerId] = { ...runtimeState, validationOutcome: 'unconfigured', validationReason: undefined }
-    await providerConfigStore.setProviderStatus(providerId, 'unconfigured')
-  }
-
-  /**
-   * Checks an initialized provider's settings and records the result for failure notices and developer tools.
-   * Settings pages and background checks share this entry. It skips the billable chat probe.
-   * Candidate configs use `validateProviderConfig` without changing the current provider's status or check history.
-   */
-  async function validateProviderSettings(providerId: string, config: Record<string, unknown>) {
-    let result
-    try {
-      result = simulatedValidationFailure(providerId) ?? await validateProviderConfig(providerId, config, {
-        skipChatPingCheck: true,
-      })
-    }
-    catch (error) {
-      await recordValidationResult(providerId, { valid: false, reason: errorMessageFrom(error) ?? '' })
-      throw error
-    }
-
-    await recordValidationResult(providerId, result)
-    return result
-  }
-
-  /**
-   * Makes the check of a provider fail on purpose, or stop failing, and runs the check again.
-   * The developer tools use it to test the failure notices. It lasts until the app quits.
-   */
-  async function setSimulatedValidationFailure(providerId: string, simulated: boolean) {
-    const rest = providerStateStore.simulatedValidationFailures.filter(id => id !== providerId)
-    providerStateStore.simulatedValidationFailures = simulated ? [...rest, providerId] : rest
-    return validateProvider(providerId, { force: true })
-  }
-
-  /** How often the provider checks itself in the background, in milliseconds. It is 0 when it has no periodic check. */
-  function getValidationIntervalMs(providerId: string) {
-    return providerValidationIntervalMsById.get(providerId) ?? 0
   }
 
   // Configuration validation functions
@@ -454,10 +285,23 @@ export const useProviderStore = defineStore('provider', () => {
     const runValidation = async () => {
       providerConfigStore.setProviderStatus(providerId, 'validating')
 
-      const validationResult = await validateProviderSettings(providerId, config || {})
+      // PITFALL: Please consider skip chat ping check during automatic/background validation,
+      // since this can consume API tokens and may only be triggered
+      // by user action (e.g. "Ping API" button on settings pages) or other user intentions.
+      let validationResult
+      try {
+        validationResult = await validateProviderConfig(providerId, config || {}, {
+          skipChatPingCheck: true,
+        })
+      }
+      catch (error) {
+        providerConfigStore.setProviderStatus(providerId, 'invalid')
+        throw error
+      }
 
       if (providerRuntimeState.value[providerId]) {
         providerRuntimeState.value[providerId].validatedCredentialHash = configString
+        providerConfigStore.setProviderStatus(providerId, validationResult.valid ? 'configured' : 'invalid')
         // Auto-mark Web Speech API as added if valid and available
         if (validationResult.valid && ['browser-web-speech-api', 'player2'].includes(providerId)) {
           markProviderAdded(providerId)
@@ -539,8 +383,6 @@ export const useProviderStore = defineStore('provider', () => {
         continue
       providerConfigStore.setProviderStatus(providerId, 'unconfigured')
       runtimeState.validatedCredentialHash = undefined
-      runtimeState.validationOutcome = undefined
-      runtimeState.validationReason = undefined
     }
   }
 
@@ -572,8 +414,8 @@ export const useProviderStore = defineStore('provider', () => {
       .map(async ([providerId]) => {
         try {
           initializeProviderRuntimeState(providerId)
-          // The check records the status itself. An unfinished config stays unconfigured, not invalid.
-          await validateProvider(providerId)
+          const isValid = await validateProvider(providerId)
+          providerConfigStore.setProviderStatus(providerId, isValid ? 'configured' : 'invalid')
         }
         catch {
           providerConfigStore.setProviderStatus(providerId, 'invalid')
@@ -587,13 +429,7 @@ export const useProviderStore = defineStore('provider', () => {
     startPeriodicRuntimeValidation()
   }
 
-  providerConfigStore.onRemoteWorking(async (row) => {
-    const result = await validateProviderConfig(row.definitionId, row.config, { skipChatPingCheck: true })
-    return result.valid
-  })
-
-  // Follower windows never run onAfterSync. Drop stale local clients when
-  // replicated credentials change.
+  // Drop stale local clients when replicated credentials change.
   watch(providerCredentials, () => {
     for (const providerId of [...providerInstanceCache.keys()]) {
       const current = providerCredentials.value[providerId]
@@ -602,8 +438,6 @@ export const useProviderStore = defineStore('provider', () => {
       void disposeProviderInstance(providerId)
     }
   }, { deep: true, flush: 'sync' })
-
-  providerConfigStore.onAfterSync(refreshListedProviderValidation)
 
   // Available providers (only those that are properly configured)
   const availableProviders = computed(() => Object.values(providerConfigStore.providers)
@@ -647,8 +481,6 @@ export const useProviderStore = defineStore('provider', () => {
   async function setProviderUnconfigured(providerId: string) {
     if (providerRuntimeState.value[providerId]) {
       providerRuntimeState.value[providerId].validatedCredentialHash = undefined
-      providerRuntimeState.value[providerId].validationOutcome = undefined
-      providerRuntimeState.value[providerId].validationReason = undefined
     }
     await providerConfigStore.setProviderStatus(providerId, 'unconfigured')
     await unmarkProviderAdded(providerId)
@@ -738,9 +570,8 @@ export const useProviderStore = defineStore('provider', () => {
     }
   }
 
-  /** Captures ownership before hashing so a concurrent owner change cannot relabel an old request. */
+  /** Captures the discovery inputs so voice RPCs do not depend on snapshot delivery order. */
   async function getVoiceCatalogIdentity(model: string | undefined, configuration: VoiceCatalogConfiguration): Promise<VoiceCatalogIdentity> {
-    const owner = voiceCatalogOwners.value[configuration.definitionId]
     const selectConfig = getProviderDefinition(configuration.definitionId).extraMethods?.voiceCatalogConfig
     // Discovery inputs belong to the adapter. Synthesis controls must not clear
     // a voice selection; unknown adapters conservatively retain the full config.
@@ -750,65 +581,35 @@ export const useProviderStore = defineStore('provider', () => {
       definitionId: configuration.definitionId,
       model,
       configurationFingerprint: Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join(''),
-      owner,
     }
   }
 
-  /** Returns undefined when an authentication transition invalidates this request. */
-  async function listProviderVoices(providerId: string, model?: string, configuration?: VoiceCatalogConfiguration): Promise<VoiceInfo[] | undefined> {
+  async function listProviderVoices(providerId: string, model?: string, configuration?: VoiceCatalogConfiguration): Promise<VoiceInfo[]> {
     const request = configuration ?? getVoiceCatalogConfiguration(providerId)
     const definition = getProviderDefinition(request.definitionId)
-    if (!hasProviderVoiceCatalogAccess(request.definitionId))
-      return []
     const listVoices = definition.extraMethods?.listVoices
     if (!listVoices)
       return []
 
     const config = request.config
-    const ownerEpoch = voiceOwnerEpoch
-    const sessionEpoch = definition.configuredBy === 'authentication' ? voiceSessionEpoch : undefined
-    const requestKey = JSON.stringify([providerId, request.definitionId, model ?? null, config, sessionEpoch])
+    const requestKey = JSON.stringify([providerId, request.definitionId, model ?? null, config])
     const pending = providerVoiceListInFlight.get(requestKey)
     if (pending)
       return pending
 
     const task = (async () => {
-      const controller = sessionEpoch === undefined ? undefined : new AbortController()
-      if (controller)
-        authenticatedVoiceControllers.add(controller)
       let provider: ProviderInstance | undefined
       try {
         provider = await definition.createProvider(config)
-        // Provider creation can yield across logout before the network call starts.
-        if (sessionEpoch !== undefined && sessionEpoch !== voiceSessionEpoch)
-          return undefined
-        const voices = await listVoices(config, provider, model, controller?.signal)
-        if (sessionEpoch !== undefined && sessionEpoch !== voiceSessionEpoch)
-          return undefined
-        return voices
-      }
-      catch (error) {
-        // An expired session's 401 must not replace the new session's catalog error.
-        if (sessionEpoch !== undefined && sessionEpoch !== voiceSessionEpoch)
-          return undefined
-        throw error
+        return await listVoices(config, provider, model)
       }
       finally {
-        if (controller)
-          authenticatedVoiceControllers.delete(controller)
         if (provider)
           await disposeTemporaryProvider(provider)
       }
     })()
     const result = task.finally(() => {
       providerVoiceListInFlight.delete(requestKey)
-    }).then((voices) => {
-      // A token-only transition has no login hook to replace the aborted load.
-      // Retry under the current token, but never carry work into another session
-      // or revive requests after this store is disposed.
-      if (voices === undefined && ownerEpoch === voiceOwnerEpoch && hasProviderVoiceCatalogAccess(request.definitionId))
-        return listProviderVoices(providerId, model, request)
-      return voices
     })
     providerVoiceListInFlight.set(requestKey, result)
     return result
@@ -906,8 +707,7 @@ export const useProviderStore = defineStore('provider', () => {
           },
         }
       }
-      const lastKnownAvailable = providerAvailabilityOverrides.value[providerId]
-        ?? (providerConfigStore.configuredProviders[providerId] ? true : undefined)
+      const lastKnownAvailable = providerConfigStore.configuredProviders[providerId] ? true : undefined
       return { models: [], lastKnownAvailable }
     }
   }
@@ -1080,17 +880,9 @@ export const useProviderStore = defineStore('provider', () => {
   }
 
   const availableProvidersMetadata = computedAsync<ProviderMetadata[]>(async () => {
-    // Spread-read the overrides synchronously so this re-runs when a
-    // server-driven availability flips: computedAsync uses watchEffect, which
-    // only tracks reactive reads before the first `await` — the per-provider
-    // `isAvailableBy()` below runs after one, so reads inside it aren't tracked.
-    const overrides = { ...providerAvailabilityOverrides.value }
     const providers: ProviderMetadata[] = []
 
     for (const provider of allProvidersMetadata.value) {
-      if (overrides[provider.id] === false)
-        continue
-
       const definition = getProviderDefinition(provider.id)
       if (isCustomProvidersDisabled() && definition.requiresCredentials !== false)
         continue
@@ -1156,38 +948,17 @@ export const useProviderStore = defineStore('provider', () => {
   }
 
   function isProviderAvailableWithoutConfiguration(providerId: string) {
-    return providerConfiguredBy(providerId) !== 'authentication'
-      && getProviderDefinition(providerId).requiresCredentials === false
-  }
-
-  function providerConfiguredBy(providerId: string) {
-    const configuredProvider = providerConfigStore.providers[providerId]
-    if (configuredProvider)
-      return configuredProvider.configuredBy
-
-    return getProviderDefinition(providerId).configuredBy ?? 'user'
-  }
-
-  /** Returns whether this session can start a voice-catalog request. */
-  function hasProviderVoiceCatalogAccess(providerId: string): boolean {
-    if (providerConfiguredBy(providerId) !== 'authentication')
-      return true
-
-    return authStore.isAuthenticated && !!authStore.token
+    return getProviderDefinition(providerId).requiresCredentials === false
   }
 
   function isProviderConfiguredForModule(providerId: string) {
     return providerConfigStore.configuredProviders[providerId]
-      && (providerConfiguredBy(providerId) !== 'authentication' || authStore.isAuthenticated)
   }
 
-  // Authentication-owned providers do not require a user-supplied API key,
-  // but they do require an authenticated session. Browser and local providers
-  // remain available without a persisted configuration record.
   const moduleChatProvidersMetadata = computed(() => {
     return allChatProvidersMetadata.value.filter(metadata =>
       isProviderConfiguredForModule(metadata.id)
-      || (providerConfiguredBy(metadata.id) !== 'authentication' && shouldListProvider(metadata.id))
+      || shouldListProvider(metadata.id)
       || isProviderAvailableWithoutConfiguration(metadata.id)
       || shouldListProviderForPromptApi(metadata.id),
     )
@@ -1210,7 +981,7 @@ export const useProviderStore = defineStore('provider', () => {
   const moduleVisionProvidersMetadata = computed(() => {
     return allVisionProvidersMetadata.value.filter(metadata =>
       isProviderConfiguredForModule(metadata.id)
-      || (providerConfiguredBy(metadata.id) !== 'authentication' && shouldListProvider(metadata.id))
+      || shouldListProvider(metadata.id)
       || isProviderAvailableWithoutConfiguration(metadata.id),
     )
   })
@@ -1230,21 +1001,15 @@ export const useProviderStore = defineStore('provider', () => {
   return {
     deleteProvider,
     providerRuntimeState,
-    providerAvailabilityOverrides,
     getProviderDefinition,
     findProviderDefinition,
     getDefaultProviderConfig,
     validateProviderConfig,
-    validateProviderSettings,
-    recordUnfinishedConfig,
     hasManualProviderValidators,
     supportsModelListing,
     getTranscriptionFeatures,
     initializeProvider,
     validateProvider,
-    getValidationIntervalMs,
-    simulatedValidationFailures: computed(() => providerStateStore.simulatedValidationFailures),
-    setSimulatedValidationFailure,
     refreshListedProviderValidation,
     refreshModelsForChangedCredentials,
     isLoadingModels,
@@ -1255,7 +1020,6 @@ export const useProviderStore = defineStore('provider', () => {
     listProviderVoices,
     getVoiceCatalogConfiguration,
     getVoiceCatalogIdentity,
-    voiceCatalogOwners,
     loadProviderModel,
     loadModelsForConfiguredProviders,
     getProviderInstance,
@@ -1264,7 +1028,6 @@ export const useProviderStore = defineStore('provider', () => {
     resetProviderSettings,
     forceProviderConfigured,
     setProviderUnconfigured,
-    setProviderAvailabilityOverride,
     availableProvidersMetadata,
     allChatProvidersMetadata,
     allAudioSpeechProvidersMetadata,
@@ -1291,16 +1054,12 @@ export const useProviderStore = defineStore('provider', () => {
       'listProviderVoices',
       'loadModelsForConfiguredProviders',
       'loadProviderModel',
-      'recordUnfinishedConfig',
       'refreshListedProviderValidation',
       'refreshModelsForChangedCredentials',
       'resetProviderSettings',
-      'setProviderAvailabilityOverride',
       'setProviderUnconfigured',
-      'setSimulatedValidationFailure',
       'validateProvider',
       'validateProviderConfig',
-      'validateProviderSettings',
     ],
     state: false,
   },

@@ -76,3 +76,10 @@ export type {
   StreamOptions,
 } from './types/llm'
 export * from './voice'
+
+// NOTICE: the fork's stores import persona/mind helpers straight from the package root
+// (scanRetention, advanceDrives, blindSense, composeThought). Upstream's 0.13 entry never
+// re-exported these sub-entries, so the merged tree lost them and the app build failed with
+// MISSING_EXPORT. Re-export both sub-entries; drop these lines once upstream's entry does it.
+export * from './mind'
+export * from './persona'

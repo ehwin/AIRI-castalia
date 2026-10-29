@@ -9,8 +9,6 @@ animations:
     title: 是否使用页面特定过场动画
 dialogs:
   onboarding:
-    official:
-      title: AIRI 官方提供商
     title: 欢迎来到 AIRI！
     description: 让我们设置您的第一个服务来源来开始使用。
     selectProvider: 选择服务来源
@@ -41,13 +39,9 @@ dialogs:
     enableChatCheck: >-
       允许 AIRI 向第一个可用的聊天模式发送「ping」消息以检查可用性
     start: 开始吧！
-    loginPrompt: 登录并使用 AIRI 官方提供的服务以获得最佳体验。
     loginAction: 登录
     setupWithoutSigningIn: 配置您自己的 AI 服务来源
-    pricingLink: 价格
     termsLink: 服务条款
-    flux: Flux 电量
-    buyFlux: 补充 Flux 电量
     select-model: 选择模型
     no-models: 找不到可用模型
     no-models-help: >-
@@ -91,20 +85,6 @@ controls-island:
     auto: 自动（响应式）
     large: 大（默认）
     small: 小
-analytics:
-  notice:
-    title: 使用数据及崩溃分析
-    description: >-
-      AIRI 开发者将会收集脱敏的匿名使用数据，以及崩溃及错误细节，以帮助我们了解应用程序是如何使用和提高稳定性的，不会收集任何个人数据。
-    privacyPrefix: 阅读
-    privacyLink: 隐私政策
-    onboardingHint: 您可以稍后在「设置」>「系统」>「通用」中关闭使用数据及崩溃分析。
-    settingsHint: 您可以随时关闭使用数据及崩溃分析。
-  toggle:
-    title: 允许收集使用数据及崩溃分析
-    description: 关闭任何非必要使用数据及崩溃分析的采集与上传
-  disabled:
-    title: 此开发版本的使用数据及崩溃分析功能已禁用
 model-select:
   panel-callout:
     support-status-header: 我们同时支持 2D 和 3D 模型
@@ -118,17 +98,6 @@ model-select:
     select: 选择
     import: 导入
     remove: 移除
-    sync:
-      upload: 上传到云端
-      delete-cloud: 从云端删除
-      status:
-        local-only: 仅在本设备
-        queued: 等待上传
-        uploading: 上传中
-        synced: 已同步到云端
-        cloud-only: 在云端，未下载
-        downloading: 下载中
-        failed: 同步失败
     confirm: 确认
   live2d-report:
     title: 导入前检查
@@ -258,173 +227,11 @@ live2d:
 microphone: 麦克风
 models: 模型
 pages:
-  account:
-    title: 账号
-    description: 查看您的个人资料并管理您的帐户
-    notLoggedIn: 登录以查看您的帐户并访问所有功能
-    login: 登录
-    logout: 登出
-    fluxBalance: 剩余通量
-    viewFluxDetails: 查看详情
-    viewCapacitor: 查看
-    signedInAs: 登录 为
-    profile:
-      tab: 个人资料
-      title: 个人资料
-      description: 管理您的昵称
-      name:
-        label: 昵称
-        placeholder: 别人如何看到你
-      avatar:
-        gravatarNotice: Gravatar头像。
-        gravatarLink: 在 gravatar.com 上管理
-      action:
-        save: 保存更改
-      message:
-        saved: 个人资料已更新
-      error:
-        fallback: 保存失败了，之后再试试？
-    connections:
-      tab: 已关联的帐户
-      title: 已关联的账户
-      description: 可以通过第三方帐户登录至 AIRI。解除关联即可撤回对第三方帐户的授权，也可以通过解除关联来关联至另一个帐户。
-      status:
-        linked: 已关联
-        notLinked: 未关联
-        linkedSince: 关联于 {date}
-      action:
-        link: 关联
-        unlink: 取消关联
-      message:
-        loading: 正在加载已关联的帐户...
-        unlinked: '解除了 {provider} 的关联'
-        linked: '关联到了 {provider}'
-        linkStarted: 正在重定向到 {provider}...
-      error:
-        listFailed: 暂时无法加载已关联的帐户
-        unlinkFailed: 无法解除此帐户的关联
-        linkFailed: 暂时无法开始关联的流程，要之后再试试吗？
-        accountAlreadyLinkedToDifferentUser: 这个 OAuth 帐户已经关联到另一个 AIRI 帐户了。请选择另一个第三方帐户，或者先在另一个 AIRI 帐户中解除关联。
-        oauthCallbackFailed: 暂时无法关联这个 OAuth 帐户。请重试，或选择另一个第三方帐户。
-        lastAccount: 这是你当前唯一的登录方式，请务必先设置密码再解除关联哦
-    security:
-      tab: 安全
-      title: 安全
-      description: 更新密码后，其他已登入的设备将会被自动登出
-      setDescription: 由于先前是通过其他的第三方平台登录的，暂时没有设置的密码，我们将会发送一个安全的重设链接来帮助你设定一个
-      currentPassword:
-        label: 当前密码
-        placeholder: 输入你当前的密码
-      newPassword:
-        label: 新密码
-        placeholder: 最少 8 个字符
-      confirmPassword:
-        label: 确认新密码
-        placeholder: 再次输入新密码
-      action:
-        changePassword: 更新密码
-        sendSetLink: 发送密码重设链接到邮箱
-      message:
-        changed: 密码已更新，其他的设备会话都会自动登出。
-        setLinkSent: 检查 {email} 的收件箱以寻找用于重设密码的链接
-      error:
-        fallback: 暂时无法更新密码
-        setLinkFailed: 暂时无法发送用于重设密码的链接
-        passwordMismatch: 新密码和确认密码不匹配
-        passwordSameAsCurrent: 新密码和当前密码应当是不同的
-    danger:
-      tab: 危险操作
-      title: 危险操作
-      description: 不可逆的账户操作位于此处。
-      deleteAccount:
-        title: 删除帐户
-        description: 永久删除您的帐户和所有个人数据。
-        action: 删除帐户
-        modal:
-          title: 删除账户？
-          warning: 此操作无法撤销。现存的 Flux 余额会被清除。如有生效中的订阅，请先取消。
-          confirmEmail:
-            label: 请再次输入电子邮箱以确认删除
-            mismatch: 邮箱不匹配。
-          confirm: 发送确认邮件
-          deleteNow: 永久删除
-          confirmPhrase: 请输入 DELETE 以确认删除
-          signInAgain: 重新登录
-          cancel: 取消
-        message:
-          deleted: 你的账号已删除。
-          emailSent: 请查看 {email} 中的删除链接。
-        error:
-          reauthenticate: 请重新登录，再回到此处确认删除。无需接收邮件。
-          fallback: 无法开始删除操作，请稍后重试。
-          subscriptionActive: 您的订阅仍在生效。请先在 Capacitor 页面取消订阅，再删除帐户。
   card:
     wake-word-conflicts:
       title: '{count} 个共享的唤醒词发音需要选择角色'
       description: 两张角色卡使用了相同的发音。选择角色之前，没有角色会回应它。
       action: 选择回应的角色
-    sync:
-      notice: 角色卡会同步到账号。删除的角色卡可在 30 天内恢复。
-      off_notice: 你已登录，但角色卡同步还没有打开。
-      off_notice_link: 去实验性特性里打开。
-      state:
-        synced: 已同步到账号
-        pending: 等待上传
-        refused: 未上传。账号里没有空间再存角色卡，这张卡只保留在这台设备。
-      conflict_copy_name: '{name}（冲突副本）'
-      conflict_notice: 另一台设备修改了同一个角色，已将本设备的版本另存为副本。
-      history:
-        tab: 历史版本
-        empty: 这张角色卡还没有历史版本。
-        loading: 正在加载历史版本……
-        load_failed: 无法加载这张角色卡的历史版本。
-        current: 当前版本
-        changed_label: 改动
-        removed_label: 移除
-        fields:
-          name: 名称
-          nickname: 昵称
-          version: 版本
-          creator: 作者
-          description: 描述
-          personality: 性格
-          scenario: 场景
-          systemPrompt: 系统提示词
-          postHistoryInstructions: 历史后指令
-          notes: 创作者备注
-          greetings: 问候语
-          tags: 标签
-          metadata: 元数据
-          assets: 资源
-          characterBook: 世界书
-          source: 来源
-          wakeWords: 唤醒词
-          agents: 智能体
-          consciousness: 意识模型
-          vision: 视觉模型
-          speech: 语音模型
-          vrm: VRM 模型
-          live2d: Live2D 模型
-          displayModelId: 展示模型
-          activeBackgroundId: 固定背景
-          artistry: 绘画
-        restore: 恢复到此版本
-        restore_confirm_title: 恢复到此版本？
-        restore_confirm_body: 这会用 {date} 的内容替换 {name} 当前的内容。
-        restore_confirm_confirm: 恢复
-        restore_confirm_cancel: 取消
-        restore_success: 已将 {name} 恢复到较早的版本。
-        restore_failed: 无法恢复到此版本，服务端可能已不再保留它。
-      deleted:
-        title: 最近删除
-        empty: 没有最近删除的角色卡。
-        loading: 正在加载最近删除的角色卡……
-        load_failed: 无法加载最近删除的角色卡。
-        deleted_when: '删除于 {when}'
-        days_left: '还可恢复，剩余 {days} 天'
-        restore: 恢复
-        restore_success: 已恢复 {name}。
-        restore_failed: 无法恢复这张角色卡，服务端可能已不再保留它的内容。
     activate: 激活
     active: 已激活
     active_badge: 当前使用中
@@ -1061,6 +868,33 @@ pages:
     memory-short-term:
       description: 短期记忆
       title: 短期记忆
+    autoregressive-motion:
+      title: 自回归动作
+      description: 配置 MAGIC Live2D 驱动器使用的 AR-HMM 动作模型
+      method: 动作模型
+      method-description: VAR 保持现有默认行为；AR-HMM 使用按状态区分的自回归动态生成动作。
+      states: 隐状态数
+      states-description: AR-HMM 可以切换的动作状态数量。
+      order: 自回归阶数
+      order-description: 预测每一帧时参考的历史帧数。
+      noise: 动作变化幅度
+      noise-description: 调整采样动作的噪声强度；数值越低越平稳，越高越多变。
+      activation: 这些设置在 Live2D 动作驱动器选择 MAGIC 时生效。
+    castalia:
+      title: Castalia 长期记忆与自我状态
+      description: Castalia 长期记忆、情感与自我状态整合
+      enable: 启用 Castalia
+      enable-description: 为角色维护独立的情绪、愿望和精力状态。
+      mood: 当前情绪
+      desire: 当前愿望
+      no-desire: 暂无记录
+      energy: 精力
+      tsundere-level: 傲娇浓度
+      tsundere-level-description: 数值越高，已记录情绪衰减得越慢。此设置按角色分别保存。
+      status-description: AIRI 对话接入情绪或愿望事件后才会更新状态。插件副本独立于 AIRI 核心更新。
+      short-term-memory: 短期记忆
+      short-term-memory-description: 下一轮对话会带入的最近心情事件。
+      no-short-term-memory: 暂无记录。
     messaging-discord:
       description: Discord 发消息和语音聊天
       enable: 启用Discord集成
@@ -1144,6 +978,38 @@ pages:
         thinking:
           label: 思考（Ollama）
           description: '开启时，通过 Ollama 发送的视觉请求带有 `think: true`；关闭时带有 `think: false`。'
+    diary:
+      title: 日记
+      description: 没人问的时候，她在想什么
+      summary: '{days} 天，其中 {said} 条说出口过'
+      privacy: 这些是她自己写的。里面的内容，她都没有对你说过。
+      loading: 正在翻开她的日记…
+      empty: 还没写。她只在有事值得琢磨的时候才写。
+      day-count: '{count} 条记录'
+      hidden: '{count} 条她留着没说'
+      distill: 记住这一天
+      distilled: 已记住
+      reveal:
+        label: 显示她写过的全部
+        description: 默认关闭。藏起来，日记才是她的。
+        warning: 打开后你会读到她没有选择说出口的内容。它就不再是日记了。
+      shared:
+        title: 她说出口的
+        empty: 还没有。几乎所有事她都自己留着。
+    perception:
+      title: 感知
+      description: 她能看什么
+      enable-screen:
+        label: 允许她看屏幕
+        description: 抓到的画面会交给视觉模型，转成一行简短的描述。只有当你接受这些内容发往已配置的视觉提供商时，才开启。
+      enable-camera:
+        label: 允许她用摄像头
+        description: 摄像头采集还没做，开关会一直关着，直到有对应的管道。
+      status:
+        title: 状态
+        summary: 屏幕复用现有的抓帧器和 `screen:interpret` 工作负载。在接上某个感知之前，她是看不见的。
+        screen-missing: 请先在「视觉」页配置视觉模型。
+        camera-missing: 还没有摄像头管道。
     x:
       description: X / Twitter 的浏览和使用
       enable: 启用X / Twitter集成
@@ -1173,7 +1039,7 @@ pages:
       description: 为聊天回复添加可选的图片表情
       enable: 启用表情包
       enable-description: 允许角色根据名称和情绪标签，为适合的回复选择一张表情。
-      local-only: 图片保留在当前设备。云端聊天同步目前仅传输文字。
+      local-only: 图片保留在当前设备。
       catalog: 可用表情
       unavailable: 表情不可用
       import: '导入图片'
@@ -1241,7 +1107,7 @@ pages:
         placeholder: 粘贴 Home Assistant 个人资料里的令牌
         description: 在 Home Assistant 个人资料的「安全」里创建一个。
         saved: 已保存令牌。留空则保持不变。更改地址时需要重新填写。
-      note: 令牌只保存在这台设备上，不会同步到你的账号。
+      note: 令牌只保存在这台设备上。
       actions:
         save: 保存
         test: 测试
@@ -1535,64 +1401,6 @@ pages:
         opened: 已经在文件管理器里打开 {path} 啦
         json-applied: JSON 已经解析完成了，点「保存并重启」就写到磁盘上啦。
         restarted: 重启好啦！启动了 {started} 个，失败 {failed} 个，跳过 {skipped} 个
-  flux:
-    title: Flux 电量
-    buy: 充值
-    currency: 币种
-    description: 充值 Flux
-    terms: 使用条款
-    privacy: 隐私政策
-    packagesError: 暂时无法获取可用的 Flux 电量包。可以之后再试试吗？
-    checkout:
-      success: 谢谢你！你的 Flux 通量已经更新好啦～
-      canceled: 支付被取消
-      error: 哎呀，出错了，请稍后再试
-    audit:
-      title: 使用记录
-      time: 时间
-      type: 类型
-      detail: 明细
-      amount: 金额
-      typeAddition: 充电
-      typeConsumption: 用量
-      typeInitial: 初始额度
-      typePromo: 活动赠送
-      loading: 加载历史...
-      empty: 暂无消耗记录
-      loadMore: 更多信息
-      delayHint: Flux 电量历史记录是缓慢更新的，可能有延迟
-      ttsRequests: 请求
-    packages:
-      title: Flux 电池包
-      buy: 充值
-      description: 可以选择购入的 Flux 电池包
-  capacitor:
-    statusError: 暂时无法获取 Capacitor 的状态，可以之后再试试吗？
-    packagesError: 暂时无法获取可用的 Capacitor，可以之后再试试吗？
-    preferenceError: 偏好保存失败，请稍后再试。
-    remaining: '剩余 {percent}'
-    ofQuota: 共 {quota} Flux
-    rechargesAt: '{date} 充满'
-    renewsAt: '{date} 续订'
-    expiresAt: '{date} 到期'
-    change: 更换 Capacitor
-    quota:
-      day: '每天 {quota} Flux'
-      week: '每周 {quota} Flux'
-      month: '每月 {quota} Flux'
-    perMonth: / 月
-    currentPackage: 当前
-    install: 装配
-    upgrade: 升级
-    downgrade: 降级
-    manageSubscription: 管理订阅
-    fallbackToFlux: Capacitor 放空后使用 Flux
-    fallbackToFluxHint: 关闭后，对话和语音会暂停，直到 Capacitor 充满。
-    checkout:
-      success: Capacitor 已装配并充满。
-      pending: 已收到付款，Capacitor 稍后充满。
-      canceled: 购买被取消
-      error: 哎呀，出错了，请稍后再试
   providers:
     catalog:
       edit:
@@ -1710,10 +1518,6 @@ pages:
           title: 声音配置
     labels:
       recommended: 推荐
-    sync:
-      synced: 已同步
-      pending: 等待上传
-      not-uploaded: 未上传。请先在这台设备上完成这个提供商。
     filters:
       pricing: 价格
       deployment: 部署
@@ -2140,26 +1944,15 @@ pages:
         failed: 扫描或连接二维码失败。
   system:
     experimental:
-      refresh: 刷新策略
       title: 实验性特性
       description: 体验开发中的功能，管理你的实验选择。
       notice: 实验性特性可能变更或移除。你的选择仅保存在此设备上。
       empty-title: 暂无可用实验
-      load-error: 云端功能暂不可用，本地功能不受影响。
-      retry: 重试
       reset: 使用默认值
       sources:
         default: 应用默认值
         local: 此设备的选择
-        global: 已向登录账户开放
-        account: 已向你的账户开放
       features:
-        character_card_sync:
-          title: 角色卡云同步
-          description: 登录后把角色卡同步到账号，方便在其他设备上使用。默认关闭。删除的角色卡会在账号里保留 30 天。
-        display_model_sync:
-          title: 模型云同步
-          description: 登录后把导入的 Live2D 和 VRM 模型上传到账号，方便在其他设备上使用。默认关闭。
         fullscreen_workspace:
           title: 全屏工作区
           description: 在铺满屏幕的工作区里打开设置和聊天，角色在左边。默认关闭。
@@ -2398,8 +2191,6 @@ pages:
       open-devtools:
         title: 打开开发者工具
         button: 打开
-  credits:
-    buy: 购买
   scene:
     title: 场景
     description: 自定义角色的虚拟环境。
@@ -2599,4 +2390,4 @@ wip:
     此功能正在开发中，尚未公开发布。请在未来的更新中再次查看此功能。
 streamer-mode:
   title: 直播模式
-  description: 隐藏角色窗口中的麦克风和登录提示。
+  description: 隐藏角色窗口中的麦克风提示。

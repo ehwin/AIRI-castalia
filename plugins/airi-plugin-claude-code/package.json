@@ -4,6 +4,7 @@
   "version": "0.13.1",
   "private": true,
   "description": "manifest.json description",
+  "license": "AGPL-3.0-or-later",
   "bin": {
     "tsdown": "./dist/run.js"
   },

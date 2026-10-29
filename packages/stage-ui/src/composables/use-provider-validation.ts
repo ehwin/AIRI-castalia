@@ -1,7 +1,5 @@
 import type { RemovableRef } from '@vueuse/core'
 
-import type { ProviderMode } from './use-analytics'
-
 import { errorMessageFrom } from '@moeru/std'
 import { computedAsync, useDebounceFn } from '@vueuse/core'
 import { cloneDeep } from 'es-toolkit'
@@ -13,29 +11,12 @@ import { useRouter } from 'vue-router'
 import { selectProviderMetadata } from '../libs/providers/metadata'
 import { useProviderConfigStore } from '../stores/providers/config'
 import { useProviderStore } from '../stores/providers/provider'
-import { useAnalytics } from './use-analytics'
-
-/**
- * Classifies provider ids into bounded analytics buckets.
- */
-function providerModeForAnalytics(providerId: string): ProviderMode {
-  if (!providerId)
-    return 'unknown'
-
-  return providerId.startsWith('official-provider') || providerId.startsWith('vision-official-provider')
-    ? 'official'
-    : 'custom'
-}
 
 export function useProviderValidation(providerId: string) {
   const { t } = useI18n()
   const router = useRouter()
   const providersStore = useProviderStore()
   const providerStore = useProviderConfigStore()
-  const {
-    trackProviderConnectionTestCompleted,
-    trackProviderConnectionTestStarted,
-  } = useAnalytics()
   const { configs: providers } = storeToRefs(providerStore) as { configs: RemovableRef<Record<string, any>> }
 
   const providerMetadata = computedAsync(async () => {
@@ -90,13 +71,6 @@ export function useProviderValidation(providerId: string) {
   const isManualTesting = ref(false)
   const manualTestPassed = ref(false)
   const manualTestMessage = ref('')
-
-  function providerConnectionTestAnalyticsBase() {
-    return {
-      provider_id: providerId,
-      provider_mode: providerModeForAnalytics(providerId),
-    }
-  }
 
   /**
    * `validateProviderConfig` is a synchronized action. A follower renderer posts
@@ -157,40 +131,18 @@ export function useProviderValidation(providerId: string) {
 
     isManualTesting.value = true
     manualTestMessage.value = ''
-    const startedAt = performance.now()
-    trackProviderConnectionTestStarted(providerConnectionTestAnalyticsBase())
 
     try {
       const result = await providersStore.validateProviderConfig(providerId, configToValidate(), {
         onlyChatPingCheck: true,
       })
       manualTestPassed.value = result.valid
-      if (result.valid) {
-        trackProviderConnectionTestCompleted({
-          ...providerConnectionTestAnalyticsBase(),
-          duration_ms: Math.round(performance.now() - startedAt),
-          success: true,
-        })
-      }
-      else {
+      if (!result.valid)
         manualTestMessage.value = result.reason
-        trackProviderConnectionTestCompleted({
-          ...providerConnectionTestAnalyticsBase(),
-          error_code: 'validation_failed',
-          duration_ms: Math.round(performance.now() - startedAt),
-          success: false,
-        })
-      }
     }
     catch (error) {
       manualTestPassed.value = false
       manualTestMessage.value = errorMessageFrom(error) ?? 'Generic error (e56ae24f)'
-      trackProviderConnectionTestCompleted({
-        ...providerConnectionTestAnalyticsBase(),
-        error_code: 'provider_error',
-        duration_ms: Math.round(performance.now() - startedAt),
-        success: false,
-      })
     }
     finally {
       isManualTesting.value = false

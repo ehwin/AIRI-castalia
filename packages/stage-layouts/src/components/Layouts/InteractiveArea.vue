@@ -4,7 +4,6 @@ import type { ChatHistoryItem } from '@proj-airi/stage-ui/types/chat'
 
 import { ChatBackgroundTasks, ChatHistory } from '@proj-airi/stage-ui/components'
 import { useChatComposer } from '@proj-airi/stage-ui/components/scenarios/chat'
-import { useAnalytics } from '@proj-airi/stage-ui/composables/use-analytics'
 import { useChatStore } from '@proj-airi/stage-ui/stores/chat'
 import { useChatSessionStore } from '@proj-airi/stage-ui/stores/chat/session-store'
 import { useChatStreamStore } from '@proj-airi/stage-ui/stores/chat/stream-store'
@@ -44,7 +43,6 @@ const isActiveSessionSending = computed(() => (
   || isReceivingRemoteStream.value
 ))
 const visibleStreamingMessage = streamingMessage
-const { trackChatMessageDeleted } = useAnalytics()
 const { rerunToolCall } = useChatToolCallRerun()
 
 async function handleDeleteMessage(payload: { message: ChatHistoryItem, index: number }) {
@@ -53,10 +51,6 @@ async function handleDeleteMessage(payload: { message: ChatHistoryItem, index: n
     sessionId: activeSessionId.value,
     messageId: message?.id,
     index,
-  })
-  trackChatMessageDeleted({
-    source: 'history',
-    message_role: message?.role ?? 'unknown',
   })
   clearReplyForMessage(message)
 }

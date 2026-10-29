@@ -149,8 +149,8 @@ __screenshots__
 .alint/
 .alintcache
 
-# Generated from packages/i18n/glossary/terms.yaml at upload time. Never committed, so it
-# cannot drift from its source.
+# Generated from packages/i18n/glossary/terms.yaml when a caller exports it. Never committed,
+# so it cannot drift from its source.
 packages/i18n/glossary/glossary.tbx
 
 /airi-docs/
@@ -162,3 +162,16 @@ apps/*/src/renderer/public/sherpaw/
 
 # Vieval caches and report artifacts
 .vieval
+
+# Deployment payload that lives beside the repo (migrated 2026-10-29)
+/castalia/
+/lobehub/
+/_legacy-0.11/
+/AIRI/
+/viz/
+/Uninstall*
+/scripts/castalia.config.json.bak-*
+*.bak-20261029-migrate
+
+# upgrade scratch
+.upgrade-logs/

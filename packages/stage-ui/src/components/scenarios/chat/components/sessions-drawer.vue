@@ -10,14 +10,11 @@ import { useI18n } from 'vue-i18n'
 
 import SessionsDialog from './sessions-dialog.vue'
 
-import { useAnalytics } from '../../../../composables/use-analytics'
 import { useBreakpoints } from '../../../../composables/use-breakpoints'
 import { extractMessageText } from '../../../../libs/chat-sync'
-import { useAuthStore } from '../../../../stores/auth'
 import { useChatStore } from '../../../../stores/chat'
 import { useChatSessionStore } from '../../../../stores/chat/session-store'
 import { useAiriCardStore } from '../../../../stores/modules/airi-card'
-import { useConsciousnessStore } from '../../../../stores/modules/consciousness'
 
 const props = withDefaults(defineProps<{
   desktopMode?: 'dialog' | 'popover'
@@ -35,19 +32,14 @@ const chatSession = useChatSessionStore()
 const chat = useChatStore()
 const { sessionMetas, sessionMessages, activeSessionId } = storeToRefs(chatSession)
 const { activeCardId } = storeToRefs(useAiriCardStore())
-const { userId } = storeToRefs(useAuthStore())
-const { activeModel } = storeToRefs(useConsciousnessStore())
-const { trackChatSessionSelected, trackChatSessionStarted } = useAnalytics()
 
-// Creating includes persistence and cloud reconciliation, so prevent a
-// second click from creating an orphan session while the first is pending.
+// Creating persists the session, so prevent a second click from creating an
+// orphan session while the first is pending.
 const isCreatingSession = ref(false)
 
-// Keep another account's sessions hidden while an account swap rehydrates.
-// Background recipe sessions are hidden too. Their results reach the conversation as notices.
+// Background recipe sessions are hidden. Their results reach the conversation as notices.
 const ownedSessions = computed(() => {
-  const effectiveUserId = userId.value || 'local'
-  return Object.values(sessionMetas.value).filter(meta => meta.userId === effectiveUserId && !meta.hidden)
+  return Object.values(sessionMetas.value).filter(meta => meta.userId === 'local' && !meta.hidden)
 })
 
 /**
@@ -100,14 +92,6 @@ const rows = computed<SessionRow[]>(() => {
 })
 
 async function selectSession(sessionId: string) {
-  const selectedRow = rows.value.find(row => row.meta.sessionId === sessionId)
-  if (sessionId !== activeSessionId.value && selectedRow) {
-    trackChatSessionSelected({
-      source: 'sessions_drawer',
-      message_count: (sessionMessages.value[sessionId] ?? []).filter(message => message.role !== 'system').length,
-      cloud_synced: !!selectedRow.meta.cloudChatId,
-    })
-  }
   await chatSession.setActiveSession(sessionId)
   showDialog.value = false
 }
@@ -126,9 +110,6 @@ async function startNewSession() {
     // not let that stale continuation replace a newer local user selection.
     if (activeSessionId.value === selectionBeforeCreation)
       await chatSession.setActiveSession(sessionId)
-    // Store-created sessions also include restore and fork flows; only this
-    // user action belongs in the retention denominator.
-    trackChatSessionStarted(activeModel.value || 'unknown')
     showDialog.value = false
   }
   finally {

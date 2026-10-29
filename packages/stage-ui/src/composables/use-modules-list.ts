@@ -1,19 +1,23 @@
 import type { BeatSyncDetectorState } from '@proj-airi/stage-shared/beat-sync'
 
+import { useCastaliaPluginStore } from '@proj-airi/castalia-plugin'
 import { getBeatSyncState, isBeatSyncSupported, listenBeatSyncStateChange } from '@proj-airi/stage-shared/beat-sync'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import factorioIcon from '../assets/factorio-simple.png'
 
+import { useLive2DMotionMagicSettings } from '../features/motions/live2d'
 import { useMemoryStore } from '../stores/memory'
 import { useArtistryStore } from '../stores/modules/artistry'
 import { useConsciousnessStore } from '../stores/modules/consciousness'
+import { useDiaryStore } from '../stores/modules/diary'
 import { useDiscordStore } from '../stores/modules/discord'
 import { useFactorioStore } from '../stores/modules/gaming-factorio'
 import { useMinecraftStore } from '../stores/modules/gaming-minecraft'
 import { useHearingStore } from '../stores/modules/hearing'
 import { useHomeAssistantStore } from '../stores/modules/home-assistant'
+import { usePerceptionStore } from '../stores/modules/perception'
 import { useSpeechStore } from '../stores/modules/speech'
 import { useStickersStore } from '../stores/modules/stickers'
 import { useTwitterStore } from '../stores/modules/twitter'
@@ -50,6 +54,10 @@ export function useModulesList() {
   const homeAssistantStore = useHomeAssistantStore()
   const artistryStore = useArtistryStore()
   const memoryStore = useMemoryStore()
+  const castaliaStore = useCastaliaPluginStore()
+  const autoregressiveSettings = useLive2DMotionMagicSettings()
+  const perceptionStore = usePerceptionStore()
+  const diaryStore = useDiaryStore()
   const toolCardsStore = useToolCardsStore()
   const beatSyncState = ref<BeatSyncDetectorState>()
   const beatSyncSupported = isBeatSyncSupported()
@@ -94,6 +102,24 @@ export function useModulesList() {
       category: 'essential',
     },
     {
+      id: 'perception',
+      name: t('settings.pages.modules.perception.title'),
+      description: t('settings.pages.modules.perception.description'),
+      icon: 'i-solar:eye-bold-duotone',
+      to: '/settings/modules/perception',
+      configured: perceptionStore.anyEnabled,
+      category: 'essential',
+    },
+    {
+      id: 'diary',
+      name: t('settings.pages.modules.diary.title'),
+      description: t('settings.pages.modules.diary.description'),
+      icon: 'i-solar:notebook-bold-duotone',
+      to: '/settings/modules/diary',
+      configured: diaryStore.thoughts.length > 0,
+      category: 'essential',
+    },
+    {
       id: 'stickers',
       name: t('settings.pages.modules.stickers.title'),
       description: t('settings.pages.modules.stickers.description'),
@@ -121,6 +147,15 @@ export function useModulesList() {
       category: 'essential',
     },
     {
+      id: 'autoregressive-motion',
+      name: t('settings.pages.modules.autoregressive-motion.title'),
+      description: t('settings.pages.modules.autoregressive-motion.description'),
+      icon: 'i-solar:graph-up-bold-duotone',
+      to: '/settings/modules/autoregressive-motion',
+      configured: autoregressiveSettings.method === 'ar-hmm',
+      category: 'essential',
+    },
+    {
       id: 'memory-short-term',
       name: t('settings.pages.modules.memory-short-term.title'),
       description: t('settings.pages.modules.memory-short-term.description'),
@@ -136,6 +171,15 @@ export function useModulesList() {
       icon: 'i-solar:book-bookmark-bold-duotone',
       to: '/settings/modules/memory-long-term',
       configured: memoryStore.enabled,
+      category: 'essential',
+    },
+    {
+      id: 'castalia',
+      name: t('settings.pages.modules.castalia.title'),
+      description: t('settings.pages.modules.castalia.description'),
+      icon: 'i-solar:heart-pulse-bold-duotone',
+      to: '/settings/modules/castalia',
+      configured: castaliaStore.enabled,
       category: 'essential',
     },
     {

@@ -1,0 +1,71 @@
+/**
+ * The background lane: what the companion thinks about when nobody asks.
+ *
+ * A companion with no background lane has an empty inner stream, so there is
+ * nothing to be lost in thought about. This turns observations into private
+ * thoughts, and none of them reach the user unless they poke the companion.
+ *
+ * Source: Generative Agents (Park et al., UIST 2023) runs reflection on a
+ * schedule, not on every step. The rate matters more than the prompt.
+ *
+ * A thought every few minutes is a diary, not chatter. The lane writes often on
+ * purpose: an inner life that only ticks once an hour reads as empty. What keeps
+ * this from feeling noisy is that `visibility` stays `private`, so the stream is
+ * never spoken.
+ */
+import type { Drives } from '../mind/drives'
+import type { Thought } from './inner-stream'
+
+export interface LaneInput {
+  now: number
+  drives: Drives
+  /** Things the host noticed, oldest first. The lane does not collect them. */
+  observations: string[]
+  /** A number in 0 to 1 from the caller, so this stays pure. */
+  roll: number
+}
+
+export interface LaneConfig {
+  /** Boredom needed before a thought about the observations feels natural. */
+  minBoredom: number
+  /** Chance that a tick with observations produces a thought. */
+  chance: number
+}
+
+export const defaultLaneConfig: LaneConfig = {
+  minBoredom: 25,
+  chance: 0.25,
+}
+
+/**
+ * Returns one private thought, or `undefined` when this tick stays quiet.
+ *
+ * Three gates, in order: there is something to think about, the companion is
+ * bored enough to dwell on it, and the roll passes. A thought here is never
+ * spoken. It waits in the stream until the user asks what she is thinking.
+ */
+export function composeThought(
+  input: LaneInput,
+  config: LaneConfig = defaultLaneConfig,
+): Thought | undefined {
+  const observations = input.observations.filter(text => text.trim().length > 0)
+  if (observations.length === 0)
+    return undefined
+
+  if (input.drives.boredom < config.minBoredom)
+    return undefined
+
+  if (input.roll >= config.chance)
+    return undefined
+
+  // Spread the roll across the observations so a caller can make the pick vary.
+  const spread = Math.min(0.999, input.roll / config.chance)
+  const pick = observations[Math.floor(spread * observations.length)]
+
+  return {
+    id: `thought-${input.now}`,
+    at: input.now,
+    text: `noticed: ${pick}`,
+    visibility: 'private',
+  }
+}

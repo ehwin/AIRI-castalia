@@ -1,9 +1,7 @@
 <script setup lang="ts">
-import { OnboardingDialog, OnboardingStepAnalyticsNotice, StartupOverlay, ToasterRoot } from '@proj-airi/stage-ui/components'
+import { OnboardingDialog, StartupOverlay, ToasterRoot } from '@proj-airi/stage-ui/components'
 import { useStartupResourceTimeout } from '@proj-airi/stage-ui/composables/use-startup-resource-timeout'
 import { usePiniaSynced } from '@proj-airi/stage-ui/libs/pinia'
-import { initializeAnalytics, isAnalyticsAvailableInBuild } from '@proj-airi/stage-ui/libs/product-signals'
-import { useAuthStore } from '@proj-airi/stage-ui/stores/auth'
 import { useCharacterOrchestratorStore } from '@proj-airi/stage-ui/stores/character'
 import { useDisplayModelsStore } from '@proj-airi/stage-ui/stores/display-models'
 import { useModsServerChannelStore } from '@proj-airi/stage-ui/stores/mods/api/channel-server'
@@ -31,7 +29,6 @@ import OnboardingPermissionsStep from './components/onboarding/step-permissions.
 import { getHostWebSocketConnector } from './modules/websocket-bridge'
 
 const contextBridgeStore = useContextBridgeStore()
-const authStore = useAuthStore()
 const i18n = useI18n()
 const router = useRouter()
 const displayModelsStore = useDisplayModelsStore()
@@ -47,7 +44,7 @@ const { isDark } = useTheme()
 const cardStore = useAiriCardStore()
 const startup = useStartupResourcesStore()
 startup.reset()
-startup.register(['auth', 'modelIndex', 'card', 'services', 'modelData', 'modelSelection', 'audio', 'route', 'model'])
+startup.register(['modelIndex', 'card', 'services', 'modelData', 'modelSelection', 'audio', 'route', 'model'])
 useStartupResourceTimeout('model', 120_000, () => i18n.t('stage.startup.model-timeout'))
 const startupOnboarding = ref(false)
 watch(showingSetup, (visible) => {
@@ -61,34 +58,26 @@ useSpeechStore()
 useSettingsStageModel()
 useVisionStore()
 
-let stopAuthenticatedSetup: (() => void) | undefined
-let stopLoggedOutSetup: (() => void) | undefined
+const primaryColor = computed(() => {
+  return isDark.value
+    ? `color-mix(in srgb, oklch(95% var(--chromatic-chroma-900) calc(var(--chromatic-hue) + ${0})) 70%, oklch(50% 0 360))`
+    : `color-mix(in srgb, oklch(95% var(--chromatic-chroma-900) calc(var(--chromatic-hue) + ${0})) 90%, oklch(90% 0 360))`
+})
 
-async function removeAuthenticationProviderConfiguration() {
-  if (!syncedPinia.isLeader())
-    return
+const secondaryColor = computed(() => {
+  return isDark.value
+    ? `color-mix(in srgb, oklch(95% var(--chromatic-chroma-900) calc(var(--chromatic-hue) + ${180})) 70%, oklch(50% 0 360))`
+    : `color-mix(in srgb, oklch(95% var(--chromatic-chroma-900) calc(var(--chromatic-hue) + ${180})) 90%, oklch(90% 0 360))`
+})
 
-  await cardStore.configureForAuthentication(false)
-}
-
-function registerAuthenticatedSetup() {
-  stopAuthenticatedSetup ??= authStore.onAuthenticated(async () => {
-    if (!syncedPinia.isLeader())
-      return
-
-    await cardStore.configureForAuthentication(true)
-    await onboardingStore.closeAfterAuthentication()
-  })
-  stopLoggedOutSetup ??= authStore.onLogout(removeAuthenticationProviderConfiguration)
-}
-
-// Defined in `styles/main.css`, so they follow the theme hue (including `dynamic-hue`) and dark mode.
-const primaryColor = 'var(--stage-transition-primary)'
-const secondaryColor = 'var(--stage-transition-secondary)'
-const tertiaryColor = 'var(--stage-transition-tertiary)'
+const tertiaryColor = computed(() => {
+  return isDark.value
+    ? `color-mix(in srgb, oklch(95% var(--chromatic-chroma-900) calc(var(--chromatic-hue) + ${60})) 70%, oklch(50% 0 360))`
+    : `color-mix(in srgb, oklch(95% var(--chromatic-chroma-900) calc(var(--chromatic-hue) + ${60})) 90%, oklch(90% 0 360))`
+})
 
 const colors = computed(() => {
-  return [primaryColor, secondaryColor, tertiaryColor, isDark.value ? '#121212' : '#FFFFFF']
+  return [primaryColor.value, secondaryColor.value, tertiaryColor.value, isDark.value ? '#121212' : '#FFFFFF']
 })
 
 watch(settings.language, () => {
@@ -105,15 +94,8 @@ watch(settings.themeColorsHueDynamic, () => {
 
 async function loadStartup() {
   try {
-    initializeAnalytics()
-    await startup.run('auth', () => authStore.initialize())
     await startup.run('modelIndex', () => displayModelsStore.initialize())
-    await startup.run('card', async () => {
-      await cardStore.initialize()
-      registerAuthenticatedSetup()
-      if (!authStore.isAuthenticated)
-        await removeAuthenticationProviderConfiguration()
-    })
+    await startup.run('card', () => cardStore.initialize())
     await startup.run('services', () => {
       void serverChannelStore.initialize({ possibleEvents: ['ui:configure'], connector: getHostWebSocketConnector }).catch(error => console.error('Mods server initialization failed:', error))
       contextBridgeStore.initialize()
@@ -144,8 +126,6 @@ watch(() => [startup.resources.find(resource => resource.id === 'modelSelection'
 
 onUnmounted(() => {
   characterOrchestratorStore.dispose()
-  stopAuthenticatedSetup?.()
-  stopLoggedOutSetup?.()
   contextBridgeStore.dispose()
 })
 
@@ -162,11 +142,6 @@ function openOnboardingAfterStartup() {
 }
 
 const extraSteps = computed(() => [
-  ...(
-    isAnalyticsAvailableInBuild()
-      ? [{ id: 'analytics-notice', component: OnboardingStepAnalyticsNotice }]
-      : []
-  ),
   {
     id: 'step-permissions',
     component: OnboardingPermissionsStep,

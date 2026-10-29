@@ -1,4 +1,3 @@
-import type { AuthorizationHandler } from '@proj-airi/stage-ui/libs/auth'
 import type { ChatSessionMeta } from '@proj-airi/stage-ui/types/chat-session'
 import type { Component } from 'vue'
 
@@ -7,7 +6,6 @@ import MobileInteractiveArea from '@proj-airi/stage-layouts/components/Layouts/M
 
 import { PiniaColada } from '@pinia/colada'
 import { useThreeViewControl } from '@proj-airi/stage-ui-three'
-import { browserAuthorizationHandler, registerAuthorizationHandler } from '@proj-airi/stage-ui/libs/auth'
 import { useChatStore } from '@proj-airi/stage-ui/stores/chat'
 import { useChatSessionStore } from '@proj-airi/stage-ui/stores/chat/session-store'
 import { useChatStreamStore } from '@proj-airi/stage-ui/stores/chat/stream-store'
@@ -237,17 +235,6 @@ describe('interactive area synchronized state', () => {
 
     await trigger.click()
     await expect.element(screen.getByRole('dialog', { name: 'stage.mobile-tools.title' })).toBeVisible()
-    await expect.element(screen.getByText('stage.mobile-tools.sign-in', { exact: true })).toBeVisible()
-    const account = screen.getByRole('button', { name: 'stage.mobile-tools.sign-in stage.mobile-tools.account-description' }).element()
-    const actions = account.parentElement!
-    const accountContent = account.querySelector<HTMLElement>('.basic-button-content')
-    expect(accountContent).not.toBeNull()
-    const accountStyle = getComputedStyle(account)
-    const contentWidth = account.clientWidth - Number.parseFloat(accountStyle.paddingLeft) - Number.parseFloat(accountStyle.paddingRight)
-    expect(account.getBoundingClientRect().left).toBe(actions.getBoundingClientRect().left)
-    expect(accountContent!.getBoundingClientRect().width).toBe(contentWidth)
-    expect(account.getBoundingClientRect().height).toBeGreaterThanOrEqual(44)
-    expect(account.querySelector('[data-avatar-fallback]')).not.toBeNull()
     await expect.element(screen.getByText('stage.mobile-tools.cleanup', { exact: true })).not.toBeInTheDocument()
     await expect.element(screen.getByRole('slider', { name: 'stage.mobile-tools.character-voice' })).toBeVisible()
     const mute = screen.getByRole('button', { name: 'stage.speech-output.mute', exact: true })
@@ -396,25 +383,6 @@ describe('interactive area synchronized state', () => {
     const bubbleBounds = bubble.getBoundingClientRect()
     const inputBounds = input.getBoundingClientRect()
     expect(inputBounds.top - bubbleBounds.top).toBe(bubbleBounds.bottom - inputBounds.bottom)
-  })
-
-  it('closes mobile settings before requesting sign-in', async () => {
-    let openDialogAtSignIn = true
-    const authorize = vi.fn<AuthorizationHandler>(async () => {
-      openDialogAtSignIn = document.querySelector('[role="dialog"][data-state="open"]') !== null
-    })
-    registerAuthorizationHandler(authorize)
-    try {
-      const { screen } = await renderArea(MobileInteractiveArea)
-      await screen.getByTestId('mobile-settings-button').click()
-      await screen.getByRole('button', { name: 'stage.mobile-tools.sign-in stage.mobile-tools.account-description' }).click()
-      await expect.poll(() => authorize.mock.calls.length).toBe(1)
-      expect(openDialogAtSignIn).toBe(false)
-      await expect.element(screen.getByRole('dialog', { name: 'stage.mobile-tools.title' })).not.toBeInTheDocument()
-    }
-    finally {
-      registerAuthorizationHandler(browserAuthorizationHandler)
-    }
   })
 
   it('closes hearing and restores focus to the mobile voice button', async () => {

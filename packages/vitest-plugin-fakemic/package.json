@@ -9,7 +9,7 @@
     "email": "airi@moeru.ai",
     "url": "https://github.com/moeru-ai"
   },
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "exports": "./src/index.ts",
   "scripts": {
     "test:run": "vitest run --config vitest.config.ts",

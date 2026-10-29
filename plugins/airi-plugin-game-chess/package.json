@@ -4,6 +4,7 @@
   "version": "0.13.1",
   "private": true,
   "description": "Chess plugin for AIRI gamelet/widget runtime",
+  "license": "AGPL-3.0-or-later",
   "scripts": {
     "dev:ui": "vite --host 127.0.0.1 --port 5174",
     "test": "vitest run --root . --config vitest.config.ts",

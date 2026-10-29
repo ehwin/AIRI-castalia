@@ -5,10 +5,13 @@ import type { BrowserWindow, BrowserWindowConstructorOptions, Rectangle } from '
 import type { I18n } from '../../libs/i18n'
 import type { ServerChannel } from '../../services/airi/channel-server'
 
+import { join } from 'node:path'
+
 import { isRendererUnavailable } from '@proj-airi/electron-vueuse/main'
-import { shell } from 'electron'
+import { app, shell } from 'electron'
 import { isMacOS, isWindows } from 'std-env'
 
+import { setupCastaliaMemoryService } from '../../services/airi/castalia-memory'
 import { createServerChannelService } from '../../services/airi/channel-server'
 import { createI18nService } from '../../services/airi/i18n'
 import { createAppService, createAppVersionService, createPowerMonitorService, createScreenService, createSystemPreferencesService, createWindowService } from '../../services/electron'
@@ -183,6 +186,7 @@ export async function setupBaseWindowElectronInvokes(params: {
   createAppVersionService({ window: params.window })
   createPowerMonitorService({ context: params.context, window: params.window })
   createSystemPreferencesService({ context: params.context, window: params.window })
+  setupCastaliaMemoryService({ context: params.context, databasePath: join(app.getPath('userData'), 'castalia', 'memory.sqlite') })
   WindowBackdropService.install(params.window)
 
   await createI18nService({ context: params.context, window: params.window, i18n: params.i18n })

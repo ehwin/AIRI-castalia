@@ -36,7 +36,6 @@ packages:
   - engines/**
   - evals/**
   - apps/**
-  - server/**
   - '!**/dist/**'
 
 overrides:
@@ -111,6 +110,7 @@ catalog:
   '@fontsource-variable/nunito': ^5.3.0
   '@fontsource-variable/quicksand': ^5.3.0
   '@fontsource-variable/urbanist': ^5.3.0
+  '@fontsource/dm-mono': ^5.3.0
   '@fontsource/dm-serif-display': ^5.3.0
   '@fontsource/gugi': ^5.3.0
   '@fontsource/kiwi-maru': ^5.3.0

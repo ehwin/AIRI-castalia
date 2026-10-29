@@ -9,6 +9,7 @@
     "email": "airi@moeru.ai",
     "url": "https://github.com/moeru-ai"
   },
+  "license": "AGPL-3.0-or-later",
   "homepage": "https://airi.moeru.ai/docs/",
   "main": "./out/launcher/index.mjs",
   "scripts": {
@@ -41,6 +42,7 @@
     "@auv-js/cli": "catalog:",
     "@auv-js/sdk": "catalog:",
     "@ergosphere-it/electron": "catalog:",
+    "@fontsource/dm-mono": "catalog:",
     "@napi-rs/image": "catalog:",
     "@proj-airi/electron-native-backdrop": "workspace:^",
     "@xsai-apple-speech/transcription-native": "catalog:",
@@ -94,6 +96,7 @@
     "@pinia/colada": "catalog:",
     "@pnpm/find-workspace-dir": "catalog:",
     "@proj-airi/audio": "workspace:^",
+    "@proj-airi/castalia-plugin": "workspace:^",
     "@proj-airi/ccc": "workspace:^",
     "@proj-airi/drizzle-duckdb-wasm": "catalog:",
     "@proj-airi/electron-eventa": "workspace:^",

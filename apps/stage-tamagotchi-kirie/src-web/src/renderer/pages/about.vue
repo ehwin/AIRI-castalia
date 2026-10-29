@@ -1,21 +1,17 @@
 <script setup lang="ts">
 import type { BugReportDialogSubmitPayload } from '@proj-airi/stage-ui/components'
 
-import type { ElectronUpdaterChannel } from '../../shared/eventa'
-
 import semver from 'semver'
 
-import { useHostAutoUpdater, useHostEventaInvoke } from '@proj-airi/stage-host-context'
+import { useHostAutoUpdater } from '@proj-airi/stage-host-context'
 import { AboutContent, BugReportDialog, createBugReportPageContext, MarkdownRenderer } from '@proj-airi/stage-ui/components'
-import { useAnalytics, useBreakpoints, useBuildInfo } from '@proj-airi/stage-ui/composables'
-import { Button, ContainerError, DoubleCheckButton, FieldSelect, Progress, ScrollableArea } from '@proj-airi/ui'
+import { useBreakpoints, useBuildInfo } from '@proj-airi/stage-ui/composables'
+import { Button, ContainerError, DoubleCheckButton, Progress, ScrollableArea } from '@proj-airi/ui'
 import { useClipboard } from '@vueuse/core'
 import { DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui'
 import { DrawerContent, DrawerDescription, DrawerHandle, DrawerOverlay, DrawerPortal, DrawerRoot, DrawerTitle } from 'vaul-vue'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-
-import { electronGetUpdaterPreferences, electronSetUpdaterPreferences } from '../../shared/eventa'
 
 const buildInfo = useBuildInfo()
 const { t } = useI18n()
@@ -24,17 +20,10 @@ const { copy: copyToClipboard, isSupported: isClipboardSupported } = useClipboar
 const {
   state: updateState,
   isBusy,
-  isSupported: isUpdaterSupported,
   checkForUpdates,
   downloadUpdate,
   quitAndInstall,
 } = useHostAutoUpdater()
-
-const {
-  trackUpdateDownloaded,
-  trackUpdateInstallClicked,
-  trackSettingsChanged,
-} = useAnalytics()
 
 const isDisabled = computed(() => updateState.value.status === 'disabled')
 const isStoreManaged = import.meta.env.VITE_DISTRIBUTION === 'steam'
@@ -61,16 +50,6 @@ const updaterErrorMessage = computed(() => {
 const showChangelog = ref(false)
 const showBugReportDialog = ref(false)
 const { isDesktop } = useBreakpoints()
-const updateChannelOptions = ['auto', 'latest', 'stable', 'alpha', 'beta', 'nightly', 'canary'] as const
-type UpdateChannelOption = typeof updateChannelOptions[number]
-const updateChannelSelectOptions = computed(() => updateChannelOptions.map(channel => ({
-  label: channel === 'latest'
-    ? 'Latest (any release)'
-    : t(`tamagotchi.stage.about.update.channels.${channel}`),
-  value: channel,
-})))
-const selectedUpdateChannel = ref<UpdateChannelOption>('auto')
-const isUpdateChannelUpdating = ref(false)
 const bugReportDescription = ref('')
 const includeBugReportTriageContext = ref(false)
 const uploadBugReportMediaFromLibrary = ref(false)
@@ -119,21 +98,6 @@ const isDowngradeUpdate = computed(() => {
     return false
 
   return semver.lt(targetVersion, currentVersion)
-})
-
-const getUpdaterPreferences = useHostEventaInvoke(electronGetUpdaterPreferences)
-const setUpdaterPreferences = useHostEventaInvoke(electronSetUpdaterPreferences)
-
-function handleQuitAndInstall() {
-  trackUpdateInstallClicked({ channel: selectedUpdateChannel.value, version: updateState.value.info?.version })
-  quitAndInstall()
-}
-
-// Fires on the state transition (not the download click) so the event means
-// "an update binary actually landed on this machine".
-watch(() => updateState.value.status, (status) => {
-  if (status === 'downloaded')
-    trackUpdateDownloaded({ channel: selectedUpdateChannel.value, version: updateState.value.info?.version })
 })
 
 function handleDownloadClick() {
@@ -187,34 +151,6 @@ async function onBugReportSubmit(payload: BugReportDialogSubmitPayload) {
   }
 }
 
-async function refreshUpdaterChannelPreference() {
-  const preferences = await getUpdaterPreferences()
-  selectedUpdateChannel.value = preferences?.channel ?? 'auto'
-}
-
-async function setUpdateChannelPreference(channel: UpdateChannelOption) {
-  if (isUpdateChannelUpdating.value)
-    return
-
-  isUpdateChannelUpdating.value = true
-  try {
-    const previousChannel = selectedUpdateChannel.value
-    const nextChannel = channel === 'auto' ? undefined : channel as ElectronUpdaterChannel
-    const preferences = await setUpdaterPreferences({ channel: nextChannel })
-    selectedUpdateChannel.value = preferences?.channel ?? 'auto'
-    trackSettingsChanged({
-      setting_name: 'update_channel',
-      previous_value: previousChannel,
-      new_value: selectedUpdateChannel.value,
-      source: 'settings',
-    })
-    await checkForUpdates()
-  }
-  finally {
-    isUpdateChannelUpdating.value = false
-  }
-}
-
 // Ensure releaseNotes is a string for the renderer
 const releaseNotesContent = computed(() => {
   const notes = updateState.value.info?.releaseNotes
@@ -222,13 +158,6 @@ const releaseNotesContent = computed(() => {
     return notes.map(n => typeof n === 'string' ? n : n?.note ?? '').join('\n\n')
   }
   return typeof notes === 'string' ? notes : ''
-})
-
-onMounted(() => {
-  if (!isUpdaterSupported)
-    return
-
-  void refreshUpdaterChannelPreference()
 })
 </script>
 
@@ -279,17 +208,6 @@ onMounted(() => {
                 <div>{{ buildInfo.builtOn }}</div>
               </div>
             </div>
-
-            <FieldSelect
-              v-if="!isStoreManaged && isUpdaterSupported"
-              :model-value="selectedUpdateChannel"
-              :disabled="isUpdateChannelUpdating || isBusy"
-              :label="t('tamagotchi.stage.about.update.lane.label')"
-              :description="t('tamagotchi.stage.about.update.lane.description')"
-              :placeholder="t('tamagotchi.stage.about.update.lane.placeholder')"
-              :options="updateChannelSelectOptions"
-              @update:model-value="setUpdateChannelPreference($event as UpdateChannelOption)"
-            />
 
             <!-- Update Logic -->
             <div :class="['flex flex-col gap-4']">
@@ -354,7 +272,7 @@ onMounted(() => {
                   <DoubleCheckButton
                     color="neutral"
                     variant="secondary"
-                    @confirm="handleQuitAndInstall()"
+                    @confirm="quitAndInstall()"
                   >
                     {{ restartButtonLabel }}
                     <template #confirm>
@@ -382,7 +300,6 @@ onMounted(() => {
 
                 <div :class="['flex flex-wrap gap-2']">
                   <Button
-                    v-track-button="{ name: 'update_check_clicked', channel: selectedUpdateChannel }"
                     :color="isError ? 'orange' : 'neutral'"
                     :variant="isError ? 'primary' : 'secondary'"
                     :loading="isBusy"

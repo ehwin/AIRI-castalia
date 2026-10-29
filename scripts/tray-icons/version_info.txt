@@ -1,0 +1,30 @@
+# PyInstaller 版本资源(2026-09-15)
+# 开源口径:CompanyName 填项目名(不虚构公司),版权按仓库 LICENSE(MIT)+ 贡献者表述。
+# 打进 Castalia.exe:任务管理器、文件属性 → 详细信息 都显示这些字段
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(1, 22, 0, 0),
+    prodvers=(1, 22, 0, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable(
+        '080404B0',
+        [StringStruct('CompanyName', 'Castalia 记忆体项目'),
+         StringStruct('FileDescription', 'Castalia 记忆体 · 记忆体联邦控制台与运行时看护'),
+         StringStruct('FileVersion', '1.22.0.0'),
+         StringStruct('InternalName', 'Castalia'),
+         StringStruct('LegalCopyright', 'Copyright (c) 2026 Castalia contributors · MIT License'),
+         StringStruct('OriginalFilename', 'Castalia.exe'),
+         StringStruct('ProductName', 'Castalia 记忆体'),
+         StringStruct('ProductVersion', '1.22.0')])
+    ]),
+    VarFileInfo([VarStruct('Translation', [2052, 1200])])
+  ]
+)
