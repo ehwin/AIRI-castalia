@@ -71,3 +71,15 @@ export const castaliaFullMembers = defineInvokeEventa<CastaliaFullMembersResult>
 
 /** 跨库检索：一次查所有成员（或指定成员）。 */
 export const castaliaFullSearch = defineInvokeEventa<CastaliaFullSearchResult, { query: string, topK?: number, members?: string[] }>('eventa:invoke:castalia:full:search')
+
+/** 打开 Castalia 控制台的某一栏（agg=记忆总成 / mng=库管理 / viz=星图）。 */
+export interface CastaliaOpenConsoleInput {
+  view?: 'agg' | 'mng' | 'viz'
+  url?: string
+}
+export interface CastaliaOpenConsoleResult {
+  ok: boolean
+  via: 'shell' | 'browser'
+  error?: string
+}
+export const castaliaOpenConsole = defineInvokeEventa<CastaliaOpenConsoleResult, CastaliaOpenConsoleInput>('eventa:invoke:castalia:console:open')

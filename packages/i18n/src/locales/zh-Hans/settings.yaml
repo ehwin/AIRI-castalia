@@ -381,6 +381,12 @@ pages:
       no_results: 没有命中。
       empty_hint: 输入关键词，跨所有库检索。
       score: 相关度
+      open_console: 打开控制台
+      manage: 库管理
+      star_map: 星图
+      open_hint: 完整的跨库浏览在控制台的「记忆体 / 记忆总成」里（统一索引、可改可删）。这一页只做总线概览和跳转。
+      opened_shell: 已把控制台窗口切到记忆体。
+      opened_browser: 控制台窗口没开，已用浏览器打开。
   data:
     title: 数据
     description: 管理存储 AIRI 数据、导出和重置
