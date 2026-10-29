@@ -1,6 +1,8 @@
 import type { ProjectionEntry } from './turns'
 import type { HistoryItem, MessageHistoryBlockSegment, RawMessage } from './types'
 
+import { safeClone } from '../utils/safe-clone'
+
 /**
  * Options for compacting projected conversation history.
  */
@@ -107,7 +109,7 @@ export function compactConversationEntries(input: CompactConversationEntriesOpti
       return entry
 
     // Only history blocks change. Keep role-dependent segment types intact.
-    const compacted = structuredClone(entry)
+    const compacted = safeClone(entry, 'compaction-entry')
     for (const segment of compacted.segments) {
       if (segment.type === 'history-block')
         Object.assign(segment, compactHistoryBlock(segment, input.recentTurnLimit, input.summarizeCompactedHistory))

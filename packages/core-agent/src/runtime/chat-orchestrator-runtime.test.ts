@@ -17,7 +17,7 @@ const provider: GenerationProvider = {
   generation: model => ({ protocol: 'chat-completions', config: { model, baseURL: 'https://example.com/' } }),
 }
 
-function createHarness(getActiveProvider = () => 'mock-provider') {
+function createHarness(getActiveProvider = () => 'mock-provider', extraDeps: Record<string, unknown> = {}) {
   const sessionMessages: Record<string, ChatHistoryItem[]> = {
     'session-1': [
       {
@@ -29,6 +29,7 @@ function createHarness(getActiveProvider = () => 'mock-provider') {
     ],
   }
   const contextSnapshot: Record<string, ContextMessage[]> = {}
+  const contextIngest = vi.fn()
   const foregroundPatches: StreamingAssistantMessage[] = []
   const foregroundResets: StreamingAssistantMessage[] = []
   const lifecycleRecords: unknown[] = []
@@ -81,7 +82,7 @@ function createHarness(getActiveProvider = () => 'mock-provider') {
       getSessionGeneration: () => generation,
     },
     context: {
-      ingest: vi.fn(),
+      ingest: contextIngest,
       snapshot: () => structuredClone(contextSnapshot),
     },
     foregroundStream: {
@@ -119,7 +120,8 @@ function createHarness(getActiveProvider = () => 'mock-provider') {
     onLlmGeneration: event => telemetry.llmGeneration.push(event),
     onMessageRound: event => telemetry.messageRound.push(event),
     onMessageRoundFailed: event => telemetry.messageRoundFailed.push(event),
-  })
+    ...extraDeps,
+  } as Parameters<typeof createChatOrchestratorRuntime>[0])
 
   return {
     settled,
@@ -131,6 +133,7 @@ function createHarness(getActiveProvider = () => 'mock-provider') {
       },
     },
     assistantTurns,
+    contextIngest,
     contextSnapshot,
     foregroundPatches,
     foregroundResets,
@@ -1985,5 +1988,49 @@ it('isolates sticker catalogs, providers, and supplements across concurrent and 
   expect(harness.sessionMessages['session-2']!.at(-1)).toMatchObject({
     slices: [{ type: 'text', text: 'Reply ' }, { type: 'sticker', stickerId: 'dog' }],
     categorization: { speech: 'Reply ' },
+  })
+})
+
+describe('runtime context providers', () => {
+  // 真实事故(2026-10-29): 记忆回召的 provider 是 async 的,而这里只当同步 provider 用,
+  // 于是把 Promise 本身塞进 context registry → structuredClone 抛 DataCloneError →
+  // 整轮发送被取消,界面只剩一条 "核心系统 / ... '#<Promise>' could not be cloned."。
+  it('awaits an async provider instead of storing its promise', async () => {
+    const recalled: ContextMessage = {
+      id: 'recalled-1',
+      contextId: 'recalled',
+      strategy: ContextUpdateStrategy.ReplaceSelf,
+      metadata: { source: { id: 'recalled' } },
+      text: '<memory>她记得耳朵的事</memory>',
+      createdAt: 1,
+    }
+    const harness = createHarness(undefined, {
+      runtimeContextProviders: [async () => recalled],
+    })
+
+    await harness.runtime.ingest('hello', { model: 'gpt-test', chatProvider: provider })
+
+    expect(harness.contextIngest).toHaveBeenCalledTimes(1)
+    const ingested = harness.contextIngest.mock.calls[0]?.[0] as ContextMessage
+    expect(ingested).toMatchObject({ contextId: 'recalled', text: '<memory>她记得耳朵的事</memory>' })
+    expect(ingested).not.toBeInstanceOf(Promise)
+  })
+
+  it('keeps the turn when one provider throws', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const harness = createHarness(undefined, {
+      runtimeContextProviders: [
+        () => { throw new Error('provider exploded') },
+        () => ({ id: 'ok-1', contextId: 'extra', strategy: ContextUpdateStrategy.ReplaceSelf, text: 'still here', createdAt: 1 }),
+      ],
+    })
+
+    await harness.runtime.ingest('hello', { model: 'gpt-test', chatProvider: provider })
+
+    const reply = harness.sessionMessages['session-1']!.findLast(message => message.role === 'assistant')
+    expect(reply?.content).toBe('assistant reply')
+    expect(harness.contextIngest).toHaveBeenCalledTimes(1)
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
   })
 })

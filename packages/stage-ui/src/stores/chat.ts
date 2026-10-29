@@ -279,6 +279,22 @@ export const useChatStore = defineStore('chat', () => {
   const castalia = useCastaliaPluginStore()
   const relationalPolicy = createRelationalPolicyContextProvider()
   const memoryRecallContext = createMemoryRecallContext(query => memory.recallForInjection(query))
+
+  /**
+   * 模型输出里的控制标记不属于她说的话。
+   *
+   * 实测落库的助手正文长这样: `<|ACT {"emotion":"awkward"}|><|DELAY 1|>嗯……我又翻了一遍小本本`。
+   * 这些标记是给前端做动作/停顿的,进了记忆体就会污染检索与蒸馏,所以写回前剥掉。
+   * NOTICE: 标记语法由模型适配层决定;新增标记时同步这里,别让原始控制串进库。
+   */
+  function stripAssistantMarkers(text: string) {
+    return text
+      .replace(/<think>[\s\S]*?<\/think>/gi, ' ')
+      .replace(/<\|[^|]*\|>/g, ' ')
+      .replace(/[ \t]{2,}/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+  }
   // The runtime ingests context before it stores the user turn, so the policy reads the pending text.
   const pendingUserTurns = new Map<string, { id: string, text: string }>()
 
@@ -1061,8 +1077,8 @@ export const useChatStore = defineStore('chat', () => {
       // 之前这条链在 app 侧没有任何调用点，airi 库的 conversation_log 自 2026-09-12 起就再没增长过。
       // 不 await、不抛错：写库慢或失败都不能影响已经显示出来的回复（失败只落 console）。
       void memory.ingestTurn({
-        user: pendingUserTurns.get(sessionId)?.text ?? lastUserTurn(sessionId)?.text ?? '',
-        assistant: messageText,
+        user: (pendingUserTurns.get(sessionId)?.text ?? lastUserTurn(sessionId)?.text ?? '').trim(),
+        assistant: stripAssistantMarkers(messageText).slice(0, 8_000),
         sessionId,
       })
       const artistry = sessionCard(sessionId)?.extensions?.airi?.modules?.artistry
