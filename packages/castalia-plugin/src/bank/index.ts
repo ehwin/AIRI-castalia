@@ -97,6 +97,7 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
     project,
     charId,
     engineVersion: (version as any).VERSION ?? 'unknown',
+    // VAD 由引擎 store.saveMemory 在写路径补(见 vendor/engine/store.ts),宿主层不重复写一次。
     save: params => store.saveMemory(params as any),
     search: options2 => search.searchMemory(options2 as any),
     // 签名: getRecentMemories(characterId, limit, hoursBack, project?, memType?)
