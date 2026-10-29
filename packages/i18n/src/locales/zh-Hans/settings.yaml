@@ -387,6 +387,13 @@ pages:
       open_hint: 完整的跨库浏览在控制台的「记忆体 / 记忆总成」里（统一索引、可改可删）。这一页只做总线概览和跳转。
       opened_shell: 已把控制台窗口切到记忆体。
       opened_browser: 控制台窗口没开，已用浏览器打开。
+      maintain_now: 现在整理一次
+      maintaining: 整理中…
+      maintain_done: 整理完成
+      maintain_facts: 新增事实
+      maintain_merged: 合并
+      maintain_no_llm: 没配置反刍模型，只跑了 digest。
+      maintain_failed: 整理失败
   data:
     title: 数据
     description: 管理存储 AIRI 数据、导出和重置

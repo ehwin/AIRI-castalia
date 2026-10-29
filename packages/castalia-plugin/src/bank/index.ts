@@ -39,6 +39,13 @@ export interface BankHandle {
   listStore: (args?: Record<string, unknown>) => { records: any[] }
   saveStore: (args: Record<string, unknown>) => Promise<{ id: string, updated: boolean }>
   forgetStore: (args: Record<string, unknown>) => { deleted: boolean }
+  /**
+   * 记忆维护:反刍抽取 + 整合合并 + digest,全部在进程内跑(引擎自带 LLM 通道,key 来自 config.json)。
+   *
+   * 为什么放在 app 里而不是托盘:这条链只有 AIRI 主进程 ↔ castalia-anima 两段,维护必须长在
+   * 同一进程、同一份引擎上;托盘那套是另一个运行时,挂过去就是跨进程漂移。
+   */
+  maintain: (options?: MaintainOptions) => Promise<MaintainReport>
   /** memory_recall 的进程内版本（含注入渲染与门槛） */
   recallQuery: (query: string, args?: Record<string, unknown>) => Promise<any>
   /** 会话对账:把指向"已不存在会话"的记忆软删(is_active=0),防孤儿。默认 dryRun */
@@ -52,6 +59,29 @@ export interface BankHandle {
    */
   ingestTurn: (turn: IngestTurn) => Promise<IngestResult>
   close: () => void
+}
+
+export interface MaintainOptions {
+  /** 单次反刍处理的对话上限,默认 30 */
+  limit?: number
+  /** 跳过整合(只抽取) */
+  skipConsolidate?: boolean
+  /** 跳过 digest */
+  skipDigest?: boolean
+}
+
+export interface MaintainReport {
+  ok: boolean
+  startedAt: string
+  ms: number
+  /** 引擎是否配了反刍通道(没配就只跑 digest,不报错) */
+  reflectConfigured: boolean
+  reflect?: { ok: boolean, mode?: string, conversationCount?: number, actions?: number, applied?: number, factsInserted?: number, factsUpdated?: number, errors: string[], deferred?: number }
+  consolidate?: { ok: boolean, scanned?: number, candidates?: number, merged?: number, deleted?: number, kept?: number, invalidated?: number, errors: string[] }
+  digest?: { success: boolean, cleaned?: number, restored?: number, vadUpdated?: boolean, errors: string[] }
+  before?: Record<string, number>
+  after?: Record<string, number>
+  error?: string
 }
 
 /** 一轮对话:自回归结束后交给记忆体的最小单位 */
@@ -214,6 +244,86 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
       catch (e: any) {
         return { ok: false, mode: fullAuto ? 'auto' : 'minimal', error: e?.message ?? String(e) }
       }
+    },
+    maintain: async (options = {}) => {
+      const startedAt = new Date().toISOString()
+      const t0 = Date.now()
+      const report: MaintainReport = { ok: true, startedAt, ms: 0, reflectConfigured: false }
+      const snapshot = () => {
+        const out: Record<string, number> = {}
+        for (const mt of MEM_TYPES) {
+          try {
+            const conn = (db as any).DatabaseManager.getInstance(project, mt)
+            const one = (sql: string) => { try { return Number(conn.prepare(sql).get()?.c ?? 0) } catch { return 0 } }
+            out[`${mt}.active`] = one('SELECT COUNT(*) c FROM memory WHERE is_active=1')
+            out[`${mt}.facts`] = one('SELECT COUNT(*) c FROM facts')
+            out[`${mt}.entities`] = one('SELECT COUNT(*) c FROM entities')
+          }
+          catch { /* 该分类库不存在 */ }
+        }
+        return out
+      }
+      try {
+        report.before = snapshot()
+        const [driver, digestMod] = await Promise.all([
+          import('../vendor/engine/reflectDriver'),
+          import('../vendor/engine/digest'),
+        ])
+        report.reflectConfigured = Boolean((driver as any).isReflectConfigured?.())
+
+        if (report.reflectConfigured) {
+          // 反刍:从 conversation_log 里取未分析的对话,抽事实/洞察,写 memory+facts+entities。
+          const reflect = await (driver as any).runAutoReflect(charId, options.limit ?? 30, project)
+          report.reflect = {
+            ok: Boolean(reflect?.ok),
+            mode: reflect?.mode,
+            conversationCount: reflect?.conversationCount,
+            actions: reflect?.actions,
+            applied: reflect?.applied,
+            factsInserted: reflect?.factsInserted,
+            factsUpdated: reflect?.factsUpdated,
+            errors: reflect?.errors ?? [],
+            deferred: reflect?.deferredCount,
+          }
+          if (!options.skipConsolidate) {
+            // 整合:合并近重复、时间衰减、升格。critical/locked/identity_locked 不参与。
+            const merged = await (driver as any).runConsolidate(charId, project, undefined, undefined, { force: true })
+            report.consolidate = {
+              ok: Boolean(merged?.ok),
+              scanned: merged?.scanned,
+              candidates: merged?.candidates,
+              merged: merged?.merged,
+              deleted: merged?.deleted,
+              kept: merged?.kept,
+              invalidated: merged?.invalidated,
+              errors: merged?.errors ?? [],
+            }
+          }
+        }
+        else {
+          report.reflect = { ok: false, errors: ['未配置反刍 LLM（config.json 的 reflect.api_key 为空）'] }
+        }
+
+        if (!options.skipDigest) {
+          const digest = await (digestMod as any).runDigest(charId, project)
+          report.digest = {
+            success: Boolean(digest?.success),
+            cleaned: digest?.cleaned,
+            restored: digest?.restored,
+            vadUpdated: digest?.vadUpdated,
+            errors: digest?.errors ?? [],
+          }
+        }
+
+        report.after = snapshot()
+        report.ok = (report.reflect?.ok ?? false) || !report.reflectConfigured
+      }
+      catch (e: any) {
+        report.ok = false
+        report.error = e?.message ?? String(e)
+      }
+      report.ms = Date.now() - t0
+      return report
     },
     close: () => { current = null },
   }

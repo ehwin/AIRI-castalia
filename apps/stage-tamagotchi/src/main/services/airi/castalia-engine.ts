@@ -133,6 +133,8 @@ export interface CastaliaEngineMemory {
    * stdio transport predates it, so a host without it simply does not ingest.
    */
   ingest?: (turn: CastaliaIngestTurn) => Promise<CastaliaIngestResult>
+  /** 进程内维护：抽取 + 整合 + digest。没有实现的后端就不跑（返回 ok:false）。 */
+  maintain?: (options?: { limit?: number }) => Promise<CastaliaMaintainReport>
   close: () => Promise<void>
 }
 
@@ -147,6 +149,19 @@ export interface CastaliaIngestResult {
   ok: boolean
   id?: string
   mode?: string
+  error?: string
+}
+
+export interface CastaliaMaintainReport {
+  ok: boolean
+  startedAt: string
+  ms: number
+  reflectConfigured: boolean
+  reflect?: Record<string, unknown>
+  consolidate?: Record<string, unknown>
+  digest?: Record<string, unknown>
+  before?: Record<string, number>
+  after?: Record<string, number>
   error?: string
 }
 
