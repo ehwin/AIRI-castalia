@@ -239,6 +239,22 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
           userLearning.observeUserMessage(charId, 'default', user, project)
         }
         catch { /* 观察失败不能影响已落库的对话 */ }
+
+        // 临时反思(会话滚动快照)的原料：buffer 攒到 BUFFER_SIZE(默认 5) 轮或 4000 token 后
+        // 后台跑 runIncrementalReflection，写 source='session_memory' 的滚动快照(tier=temporary，
+        // 7 天 TTL，由 sweepExpiredSessionMemories 清)。
+        // 以前只有引擎的 autoProcess 会喂它，而 app 走的是这条最小路径 —— 实测 6 轮对话之后
+        // session_memory 仍是 0 条，等于"临时反思"这条线一直空转。这里补上。
+        if (turn.sessionId) {
+          try {
+            const buffer = await import('../vendor/engine/buffer')
+            buffer.getBuffer(project, turn.sessionId, charId).onNewMessage([
+              { role: 'user', content: user },
+              { role: 'assistant', content: assistant },
+            ])
+          }
+          catch { /* 缓冲失败不影响本轮落库；正常反思仍从 conversation_log 拿原料 */ }
+        }
         return { ok: true, id: (saved as any)?.id, mode: 'minimal' }
       }
       catch (e: any) {
