@@ -22,6 +22,8 @@
 | `tray_launcher.py` | 打包入口(PyInstaller 薄壳:品牌资源 + 依赖,真代码仍从磁盘读) |
 | `build_tray.cmd` | 重新打包 `Castalia.exe`(**只在新增第三方依赖时才需要**) |
 | `patch_mcp_proxy.py` | 给 mcp-proxy 打补丁:避免 Windows Terminal 弹出控制台窗口 |
+| `anima_event_digest.mjs` | 事件层(`daily_event`)的**主机侧触发**:给 `variant=anima` 的实例跑一次 `runEventDigest`。计划任务每 10 分钟叫一次,脚本自带节流(默认 10 分钟)与"没有待整理对话就直接退"(零 LLM 调用)。`--force` / `--dry` / `--days N` / `--bank id` / `--status` |
+| `run_anima_event_digest.vbs` | 上面那个脚本的**无窗口**启动器(wscript 是 GUI 子系统,不会弹控制台) |
 | `make_brand_icons.py` | 从原图生成三变体图标库(PNG 多尺寸 + .ico + 托盘图) |
 
 ## 快速开始
