@@ -50,7 +50,7 @@ try:
 except Exception:
     pass
 
-DEFAULT_SCRIPT = r"D:\AI\castalia\run\Castalia\scripts\castalia_tray.py"
+DEFAULT_SCRIPT = r"D:\castalia\run\Castalia\scripts\castalia_tray.py"
 
 
 def _pick_script():
