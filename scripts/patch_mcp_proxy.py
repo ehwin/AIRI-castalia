@@ -27,7 +27,7 @@ import time
 import tempfile
 import re
 
-PROXY = r"D:\AI\castalia\run\LobeHub\node_modules\mcp-proxy\dist\bin\mcp-proxy.mjs"
+PROXY = r"D:\castalia\run\LobeHub\node_modules\mcp-proxy\dist\bin\mcp-proxy.mjs"
 BAK_DIR = r"D:\AI\castalia\_归档\mcp-proxy-patch"
 
 ANCHOR = ("\t\t\t\tshell: this._serverParams.shell ?? false,\n"
