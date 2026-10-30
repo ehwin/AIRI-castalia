@@ -201,6 +201,31 @@ describe('store tools (memory_store_* port)', () => {
     expect(recallTemporalForQuery('帮我写个快速排序', { project: 'testproj' }).hits).toHaveLength(0)
   })
 
+  it('does not count an injection as a recall', async () => {
+    // 注入不算强化（nooa-memory 的口径）：注入路径以前照样 accessed_count+1、刷新
+    // last_accessed_at，于是 被注入 → 排名更高 → 更常被注入，真实库里 lore 行滚到 200~306 次。
+    // 这条盯的是"注入不记账、用户主动检索照常记账"这两半，缺一半都算坏。
+    const { DatabaseSync } = await import('node:sqlite')
+    const db = new DatabaseSync(join(dir, 'testproj', 'general', 'memory.sqlite'))
+    await bank.ingestTurn({ user: '用户说他喜欢安安静静的月下散步', assistant: '记住了，月光好的时候我不吵你。' })
+    const read = () => db.prepare(`SELECT id, accessed_count FROM memory`).all() as any[]
+    const before = read()
+
+    const recalled = await bank.recallQuery('用户喜欢安安静静的月下散步')
+    const injected = (recalled.stats as any)?.ids ?? []
+    const afterInjection = read()
+    expect(injected.length).toBeGreaterThan(0)   // 没命中，下面的断言就是空转
+    for (const row of afterInjection) {
+      const old = before.find(b => b.id === row.id)!
+      expect(row.accessed_count).toBe(old.accessed_count)
+    }
+
+    await bank.search({ query: '用户喜欢安安静静的月下散步', topK: 3, minScore: 0, profile: 'deep', includeGeneral: true })
+    const afterSearch = read()
+    db.close()
+    expect(afterSearch.some(row => row.accessed_count > (before.find(b => b.id === row.id)?.accessed_count ?? 0))).toBe(true)
+  })
+
   it('runs maintenance without a reflection model and reports what it did', async () => {
     // 维护长在 app 主进程里(这条链只有 app ↔ anima 两段)。这里用的是无 config 的临时库,
     // 所以反刍通道未配置 —— 正确行为不是抛错,而是如实报告"只跑了 digest"。
