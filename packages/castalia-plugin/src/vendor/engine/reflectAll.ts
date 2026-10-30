@@ -91,6 +91,8 @@ export interface ReflectAllResult {
     restatement: number;
     evidenceMissing: number;
     nearDuplicate: number;
+    /** 自报 summary 且正文无新增成分 → 不写(摘要不是洞察) */
+    summaryOnly?: number;
     noveltyMean: number;
     /** 只统计真正写入的那些的新颖度均值(和"候选"分开,避免被拒的拉低口径) */
     noveltyWritten?: number;
@@ -442,7 +444,7 @@ export async function runReflectAll(opts?: ReflectAllOptions): Promise<ReflectAl
     dbs.set(mt, db);
     return db;
   };
-  const quality = { evaluated: 0, written: 0, restatement: 0, evidenceMissing: 0, nearDuplicate: 0, noveltyMean: 0, noveltyWritten: 0, crossSource: 0, dupChecked: false };
+  const quality = { evaluated: 0, written: 0, restatement: 0, evidenceMissing: 0, nearDuplicate: 0, summaryOnly: 0, noveltyMean: 0, noveltyWritten: 0, crossSource: 0, dupChecked: false };
   const recMeta = new Map<string, { text: string; importance: number }>();
   for (const r of records) recMeta.set(`${r.instance}|${r.project}|${r.id}`, { text: r.text, importance: r.importance });
   const existingByType = new Map<MemType, Array<{ id: string; text: string }>>();
@@ -465,6 +467,7 @@ export async function runReflectAll(opts?: ReflectAllOptions): Promise<ReflectAl
         const verdict = evaluateInsight({
           text: ins.text,
           evidence: ins.evidence,
+          adds: ins.adds,
           sources: ins.sources.map((s, i) => ({ id: String(s.id || ''), text: srcTexts[i] || '' })),
           existing: existingByType.get(mt)!,
           srcImportance: srcImps.length ? srcImps.reduce((a, b) => a + b, 0) / srcImps.length : 0.5,
@@ -477,6 +480,7 @@ export async function runReflectAll(opts?: ReflectAllOptions): Promise<ReflectAl
           continue;
         }
         if (verdict.reasons.includes('restatement')) { quality.restatement++; continue; }
+        if (verdict.reasons.includes('summary-only')) { quality.summaryOnly++; continue; }
         if (verdict.duplicateOf) {
           quality.nearDuplicate++;
           try { db.prepare('UPDATE memory SET reference_count = COALESCE(reference_count, 0) + 1, updated_at = ? WHERE id = ?').run(now, verdict.duplicateOf); } catch {}
