@@ -88,6 +88,8 @@ export interface InjectionStats {
   facts?: number;
   /** 时间路按日期直取了几条事件记录 */
   temporal?: number;
+  /** 向量路抛错了（embed 端点/无 key）；此时时间路/事实路仍会照跑 */
+  vectorFailed?: boolean;
   /** 因 recentIds 去重跳过的条数 */
   deduped: number;
   /** top1 - top2(只有一个命中时为 top1) */
@@ -367,6 +369,7 @@ export async function recallForInjection(query: string, options: InjectionOption
     return { text: '', stats: { ...empty, skipped: 'no-hits' } };
   }
   let hits: SearchResult[] = [];
+  let vectorRouteFailed = false;
   try {
     // minScore: 0 —— 融合分只用于排序，召回门槛由本模块按 similarity 判
     hits = await searchMemory({
@@ -383,7 +386,10 @@ export async function recallForInjection(query: string, options: InjectionOption
       countAccess: false,
     });
   } catch {
-    return { text: '', stats: { ...empty, skipped: 'no-hits' } };
+    // 2026-10-30: 这里原来直接 return，于是向量路一挂（embed 端点不通/无 key），
+    // **时间路和事实路也一起不执行** —— 而"我今天在忙什么"恰恰最该靠它们答。
+    // 现在只让记忆块空手，后面两路照跑。
+    vectorRouteFailed = true;
   }
   const t0 = Date.now();
   const out = renderInjectionBlock(hits, { ...options, topK, query: trimmed });
@@ -424,6 +430,12 @@ export async function recallForInjection(query: string, options: InjectionOption
   }
 
   out.stats.ms = Date.now() - t0;
+  if (vectorRouteFailed) out.stats.vectorFailed = true;
+  // 三路有货 → 不能报 skipped；三路全空 → 保留 render 给出的更具体原因
+  // （below-threshold / no-strong-evidence），只在它没给原因时才落 no-hits。
+  const anyRoute = out.stats.count > 0 || (out.stats.temporal ?? 0) > 0 || (out.stats.facts ?? 0) > 0;
+  if (anyRoute) delete out.stats.skipped;
+  else if (!out.stats.skipped) out.stats.skipped = 'no-hits';
   // 观测:整条链路以前完全不可见(报告里 P0 的一条)。默认静默,env/选项开。
   if (options.log === true || process.env.MEMORY_RECALL_LOG === '1') {
     const st = out.stats;
