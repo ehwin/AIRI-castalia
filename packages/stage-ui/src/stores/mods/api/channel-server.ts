@@ -65,6 +65,9 @@ export const useModsServerChannelStore = defineStore('mods:channels:proj-airi:se
   const pendingSend = ref<Array<WebSocketEvent>>([])
   const pendingSendCount = computed(() => pendingSend.value.length)
   const reconnectedCallbacks = new Set<() => void>()
+  // Ready means the SDK finished authenticate + announce, so a send from these callbacks is actually transmitted;
+  // `connected` flips earlier, at authenticate, when the transport still refuses sends.
+  const readyCallbacks = new Set<() => void>()
 
   const defaultWebSocketUrl = import.meta.env.VITE_AIRI_WS_URL || 'ws://localhost:6121/ws'
   const websocketUrl = useLocalStorage('settings/connection/websocket-url', defaultWebSocketUrl)
@@ -203,6 +206,15 @@ export const useModsServerChannelStore = defineStore('mods:channels:proj-airi:se
           flush()
           initializeListeners()
 
+          for (const callback of readyCallbacks) {
+            try {
+              callback()
+            }
+            catch (error) {
+              console.error('Error in ready callback:', error)
+            }
+          }
+
           if (isReconnect) {
             for (const callback of reconnectedCallbacks) {
               try {
@@ -333,6 +345,18 @@ export const useModsServerChannelStore = defineStore('mods:channels:proj-airi:se
     return registerListener(type, callback)
   }
 
+  /**
+   * Runs after every successful connect, once the SDK reports ready (authenticate + announce done).
+   * Registration messages sent before ready are dropped by the SDK's transport, so claims belong here.
+   */
+  function onReady(callback: () => void) {
+    readyCallbacks.add(callback)
+
+    return () => {
+      readyCallbacks.delete(callback)
+    }
+  }
+
   function onReconnected(callback: () => void) {
     reconnectedCallbacks.add(callback)
 
@@ -390,6 +414,7 @@ export const useModsServerChannelStore = defineStore('mods:channels:proj-airi:se
     sendContextUpdate,
     onContextUpdate,
     onEvent,
+    onReady,
     onReconnected,
     getPendingSendSnapshot: () => [...pendingSend.value],
     dispose,
