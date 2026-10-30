@@ -106,7 +106,7 @@
     "apps/**"
   ],
   "simple-git-hooks": {
-    "pre-commit": "pnpm nano-staged"
+    "pre-commit": "node ./node_modules/nano-staged/lib/bin.js"
   },
   "nano-staged": {
     "*": "moeru-lint --fix"
