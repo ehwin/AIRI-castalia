@@ -371,6 +371,35 @@ if (isSettingsWindow) {
 }
 
 onMounted(async () => {
+  // The desktop is the only chat consumer, and input:text is dropped with "no consumer registered for event
+  // delivery" when nobody claims the group. context-bridge registers inside createFullStageRuntime, which only
+  // runs for stage-runtime=full windows; claiming it here covers every window and survives reconnects.
+  // Only the full stage runtime answers chat: a minimal window registers too, and the group would hand it the
+  // message instead of the window that owns the conversation.
+  if (windowContext.stageRuntime !== 'minimal') {
+    const chatChannel = useModsServerChannelStore()
+    const claimChatIngestion = () => {
+      for (const event of ['input:text', 'input:text:voice', 'input:voice']) {
+        chatChannel.send({
+          type: 'module:consumer:register',
+          data: { event, mode: 'consumer-group', group: 'chat-ingestion', priority: 100 },
+        } as never)
+      }
+    }
+    void chatChannel.ensureConnected()
+      .catch(error => console.error('[AIRI] consumer registration failed:', error))
+    // Ready, not connected: `connected` flips at authenticate, while the SDK only accepts sends once announce
+    // completes. A claim sent in the authenticate tick is refused by the transport and dropped without an error,
+    // which is why the group looked unclaimed on every cold start.
+    chatChannel.onReady(() => {
+      claimChatIngestion()
+      console.info('[AIRI] claimed chat-ingestion consumer group at priority 100')
+    })
+    // A window that mounts into an already-ready connection gets no ready callback, so claim once here.
+    if (chatChannel.connected)
+      claimChatIngestion()
+  }
+
   void listModelAssets().then((statuses) => {
     for (const status of statuses) {
       if (!isSherpawModelBundled(status.id))
