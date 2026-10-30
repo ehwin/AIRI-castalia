@@ -68,6 +68,10 @@ export interface MaintainOptions {
   skipConsolidate?: boolean
   /** 跳过 digest */
   skipDigest?: boolean
+  /** 跳过事件摘要（P2：把一天的对话压成"发生了什么"，只摘录不改写） */
+  skipEventDigest?: boolean
+  /** 事件摘要回看几天，默认 2 */
+  eventDigestDays?: number
 }
 
 export interface MaintainReport {
@@ -78,6 +82,8 @@ export interface MaintainReport {
   reflectConfigured: boolean
   reflect?: { ok: boolean, mode?: string, conversationCount?: number, actions?: number, applied?: number, factsInserted?: number, factsUpdated?: number, errors: string[], deferred?: number }
   consolidate?: { ok: boolean, scanned?: number, candidates?: number, merged?: number, deleted?: number, kept?: number, invalidated?: number, errors: string[] }
+  /** 事件摘要：每天把对话压成"发生了什么"（逐字摘录 + 来源 rowid，原文不动） */
+  eventDigest?: { ok: boolean, conversations?: number, events?: number, inserted?: number, updated?: number, skipped?: number, errors: string[], skippedReason?: string }
   digest?: { success: boolean, cleaned?: number, restored?: number, vadUpdated?: boolean, errors: string[] }
   before?: Record<string, number>
   after?: Record<string, number>
@@ -318,6 +324,31 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
         }
         else {
           report.reflect = { ok: false, errors: ['未配置反刍 LLM（config.json 的 reflect.api_key 为空）'] }
+        }
+
+        // 事件摘要层（P2）：独立于反刍配置，走 triage 通道；只摘录不改写、带来源 rowid。
+        if (!options.skipEventDigest) {
+          try {
+            const eventDigestMod = await import('../vendor/engine/eventDigest')
+            const events = await (eventDigestMod as any).runEventDigest({
+              project,
+              characterId: charId,
+              days: options.eventDigestDays ?? 2,
+            })
+            report.eventDigest = {
+              ok: Boolean(events?.ok),
+              conversations: events?.conversations,
+              events: events?.events,
+              inserted: events?.inserted,
+              updated: events?.updated,
+              skipped: events?.skipped,
+              errors: events?.errors ?? [],
+              skippedReason: events?.skippedReason,
+            }
+          }
+          catch (e: any) {
+            report.eventDigest = { ok: false, errors: [e?.message ?? String(e)] }
+          }
         }
 
         if (!options.skipDigest) {

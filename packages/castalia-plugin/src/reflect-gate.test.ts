@@ -13,8 +13,15 @@ describe('reflect-derived rows', () => {
   it('covers every producer, including merges', () => {
     // 这里刻意用前缀判定:第一版枚举了 extract/insight/summary/reasoning 四个,
     // 恰好漏掉 reflect_merge,而漏掉的那一种正是把噪音带进注入的那一条。
-    for (const source of ['reflect_extract', 'reflect_insight', 'reflect_summary', 'reflect_reasoning', 'reflect_merge'])
+    for (const source of ['reflect_extract', 'reflect_insight', 'reflect_summary', 'reflect_reasoning', 'reflect_merge', 'daily_event'])
       expect(isReflectDerived({ source })).toBe(true)
+  })
+
+  it('treats event summaries as rewrites too', () => {
+    // 实测：「团子怎么了」对事件行 0.606，噪音「下周要交的报表怎么做」对「下周三复查提醒」0.587。
+    // 两者只差 0.019，所以事件行必须和 reflect_* 一样走 0.60 门槛，不能按原文 0.45/0.50 放行。
+    expect(isReflectDerived({ source: 'daily_event' })).toBe(true)
+    expect(injectionMinSimilarityReflect()).toBeGreaterThanOrEqual(0.6)
   })
 
   it('leaves original rows on the normal gate', () => {

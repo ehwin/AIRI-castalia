@@ -176,6 +176,31 @@ describe('store tools (memory_store_* port)', () => {
     expect(task.facts).toHaveLength(0)
   })
 
+  it('answers a time question by date instead of by similarity', async () => {
+    // 事件行有向量也排不进 top-12（人设长文分更高），所以带时间词时必须按日期直取。
+    const { DatabaseSync } = await import('node:sqlite')
+    const db = new DatabaseSync(join(dir, 'testproj', 'general', 'memory.sqlite'))
+    const today = new Date()
+    const day = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+    const now = new Date().toISOString()
+    db.prepare(`INSERT INTO memory (id, text, project, type, category, tags, importance, character_id, source, subject, tier, is_active, created_at, updated_at, last_accessed_at, accessed_count, reference_count, mem_type)
+                VALUES (?, ?, 'testproj', 'episodic', 'event', ?, 0.9, 'airi', 'daily_event', 'user', 'standard', 1, ?, ?, ?, 0, 0, 'general')`)
+      .run('event-probe-1', `# ${day} · 今天加班到十点\n用户说今天加班到十点很累，她建议先洗个热水澡。`, JSON.stringify([`day:${day}`]), now, now, now)
+    db.close()
+
+    const { recallTemporalForQuery } = await import('../vendor/engine/temporalRecall')
+    const hit = recallTemporalForQuery('我昨天在忙什么', { project: 'testproj', characterId: 'airi', limit: 5 })
+    // 昨天没有事件，今天这条不该冒充"昨天"
+    expect(hit.hits.map(h => h.day)).not.toContain('2026-01-01')
+
+    const todayHit = recallTemporalForQuery('今天有什么要做的', { project: 'testproj', characterId: 'airi', limit: 5 })
+    expect(todayHit.hits.some(h => h.title.includes('加班'))).toBe(true)
+    expect(todayHit.text).toContain('按日期直取')
+
+    // 没有时间词就不触发（任务类问句不该被塞进事件）
+    expect(recallTemporalForQuery('帮我写个快速排序', { project: 'testproj' }).hits).toHaveLength(0)
+  })
+
   it('runs maintenance without a reflection model and reports what it did', async () => {
     // 维护长在 app 主进程里(这条链只有 app ↔ anima 两段)。这里用的是无 config 的临时库,
     // 所以反刍通道未配置 —— 正确行为不是抛错,而是如实报告"只跑了 digest"。
