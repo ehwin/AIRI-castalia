@@ -27,6 +27,12 @@ import { computeBiasBoost } from './bias.js';
 import { computeDecay, computeBaseIntensity, computeRecency, isNightTime } from './emotion.js';
 import { parseTagsSafe } from './tags.js';
 import { chunkKnnSearch } from './chunkIndex.js';
+import { rankBySalience, moodFromScalar } from './emotionalRanking.js';
+import { memorySourceWithoutStateSql, publicMemorySourceSql } from './memoryProvenance.js';
+
+function visibleMemorySourceSql(alias: string, includeDiary?: boolean): string {
+  return includeDiary === true ? memorySourceWithoutStateSql(alias) : publicMemorySourceSql(alias);
+}
 
 // v1.28: tags 解码收敛到纯模块 src/tags.ts（零副作用、可被验收脚本单独加载）。
 // 这里保留 re-export，历史 import { parseTagsSafe } from './search.js' 不会断。
@@ -64,6 +70,11 @@ export interface SearchOptions {
    * 默认关 —— 冷存/清理/维护类调用必须严格按角色隔离。
    */
   includeGeneral?: boolean;
+  /**
+   * 是否允许召回自循环生成的 agent_diary。
+   * 默认关闭：日记是派生观察，不是用户证据；显式开启只用于日记浏览/调试。
+   */
+  includeDiary?: boolean;
   subject?: string;
   topK?: number;
   minScore?: number;
@@ -77,6 +88,13 @@ export interface SearchOptions {
    * 注入路径（recallForInjection）一律传 false；用户主动检索保持默认 true。
    */
   countAccess?: boolean;
+  /**
+   * 当前心情(-10..+10,agentState 的口径)。给了才参与「情绪一致性」重排与注入时的
+   * 「难过别翻旧账」策略;不给就按中性处理(行为与接线前一致)。
+   */
+  mood?: number;
+  /** 写访问日志时标渠道(默认 'search');只影响 ACT-R 统计,不影响打分 */
+  accessChannel?: string;
 }
 
 // minScore 阈值可配;harness 可用 SEARCH_MIN_SCORE 覆盖
@@ -117,6 +135,10 @@ export interface SearchResult {
   superseded?: boolean;
   /** v1.28：接管它的记忆 id，来自 memory.metadata.supersededBy */
   supersededBy?: string[];
+  /** 情感锚点：钉住的那条无条件在场（Character.AI Story Memory） */
+  pinned?: boolean;
+  /** 情感显著度 0..1（emotionalRanking.rankBySalience 的输出，锚点恒 1） */
+  salience?: number;
 }
 
 /**
@@ -163,15 +185,196 @@ function computeScore(row: any, similarity: number, project?: string): { score: 
                  + WEIGHT_EMOTION * emotionalIntensity
                  + WEIGHT_TIME * timeDecay
                  + WEIGHT_DEVIATION * deviationBonus;
-  // 2026-10-28:派生摘要行(reflect_summary / reflect_reasoning 是"这段时间用户与尤诺…""这批记忆
+  // 2026-10-28:派生摘要行(reflect_summary / reflect_reasoning 是"这段时间用户与角色…""这批记忆
   // 全部…"这类第三人称概括)在语义上离任何问题都很近,会把第一人称正典挤出前几名 —— 实测
-  // 「你还记得自己是谁吗」的第一条注入就是"这段时间用户小托与尤诺建立了深厚的羁绊"。它们对
-  // 索引有用、对台词没用,给个**有界**降权(不动可检索性)。
+  // 「你还记得自己是谁吗」的第一条注入就是这类第三人称概括。它们对索引有用、对台词没用,
+  // 给个**有界**降权(不动可检索性)。
   const src = String(row.source || '');
   const sourceFactor = (src === 'reflect_summary' || src === 'reflect_reasoning') ? 0.85
     : (src.startsWith('reflect_') ? 0.93 : 1.0);
   const score = Math.round(rawScore * sourceFactor * densityFactor * importanceMult * biasBoost * tierBoost * accessBoost * 1000) / 1000;
   return { score, biasBoost };
+}
+
+/**
+ * 情感显著度重排(v1.29 接线,2026-10-30)
+ *
+ * `emotionalRanking.ts` 里的东西(ACT-R 激活、情绪一致性、共振、锚点)一直是**纯函数 + 测试**,
+ * 主链仍然是 computeScore —— 也就是说这套情感机制在线上从来没参与过排序。这里把它接上:
+ * 候选来源、召回门槛、相似度仍归 computeScore;显著度只在**最终排序**里发言。
+ *
+ * 三个刻意的决定(每个都有踩过的坑作依据,不是照抄论文):
+ * 1. **有界混合,不替换**。2026-10-28 已经踩过一次「结构性元数据乘在总分上会把相关性压死」
+ *    (tier×3.0 / importance×(0.5+imp) / access×1.5 → 6 个字的垃圾行 score 4.3 排第一)。
+ *    所以显著度只做 ±10% 的乘数(`1 - blend/2 + blend*s`,blend = 0.2):同量级候选之间的
+ *    先后由它决定,相关性差一个档次时它翻不了盘。
+ * 2. **强度用存储强度 `computeBaseIntensity`,不用衰减后的 retrieval**。新鲜度已经由 ACT-R
+ *    的 activation 项表达;这里要的是「这件事本身刻得多深」。"被反复想起"靠 activation 涨,
+ *    不靠把情绪值改大 —— 所以这一层与「情感衰减该按哪个时钟算」是正交的。
+ * 3. **一次查询取齐输入**。候选 id 通常 ≤40:一条 IN 查询 + 一条访问日志查询,不按条 N+1。
+ *    老库没有 pinned 列或日志表时**静默退化为不重排**(行为与接线前完全一致),绝不抛错
+ *    —— 引擎里任何排序增强都不该让检索变成 0 条。
+ */
+export const SALIENCE_BLEND = 0.2;
+
+/**
+ * 显著度 → 分数乘数。s=0 → 0.9、s=0.5 → 1.0、s=1 → 1.1。
+ * 单独抽出来是为了能被断言钉死("显著度只能动 ±10%"),而不是埋在排序里没法验。
+ */
+export function salienceBlendFactor(s: number): number {
+  const v = Number.isFinite(s) ? Math.min(1, Math.max(0, s)) : 0.5;
+  return 1 - SALIENCE_BLEND / 2 + SALIENCE_BLEND * v;
+}
+
+function applySalienceRerank(db: any, results: SearchResult[], mood?: number): void {
+  if (results.length === 0) return;
+  const ids = results.map(r => r.id);
+  const ph = ids.map(() => '?').join(',');
+  let rows: any[];
+  try {
+    rows = db.prepare(`SELECT id, importance, vad_valence, vad_arousal, vad_dominance,
+        last_accessed_at, created_at, pinned
+      FROM memory WHERE id IN (${ph})`).all(...ids) as any[];
+  } catch {
+    return; // 老库没有 pinned 列 → 不接线,也不报错
+  }
+  const byId = new Map<string, any>(rows.map((r: any) => [String(r.id), r]));
+
+  // ACT-R 的输入:多次访问的**时间戳**。一次取最近 400 条(每条封顶 32 次呈现),
+  // 没有日志表时退回 last_accessed_at —— 单次呈现,间隔效应表达不出来,但不会算错。
+  const times = new Map<string, number[]>();
+  try {
+    const logs = db.prepare(`SELECT memory_id, accessed_at FROM memory_access_log
+      WHERE memory_id IN (${ph}) ORDER BY accessed_at DESC LIMIT 400`).all(...ids) as any[];
+    for (const l of logs) {
+      const t = Date.parse(String(l.accessed_at));
+      if (!Number.isFinite(t)) continue;
+      const key = String(l.memory_id);
+      const list = times.get(key) || [];
+      if (list.length < 32) { list.push(t); times.set(key, list); }
+    }
+  } catch { /* 无日志表 */ }
+
+  // 共振:库里没有共激活表,直接用 edges 当联想边(构造时就绑在一起的两条记忆)。
+  const resonance = new Map<string, Record<string, number>>();
+  try {
+    const edges = db.prepare(`SELECT source_id, target_id FROM edges
+      WHERE source_id IN (${ph}) AND target_id IN (${ph})`).all(...ids, ...ids) as any[];
+    for (const e of edges) {
+      const a = String(e.source_id), b = String(e.target_id);
+      if (a === b) continue;
+      const ra = resonance.get(a) || {}; ra[b] = (ra[b] || 0) + 1; resonance.set(a, ra);
+      const rb = resonance.get(b) || {}; rb[a] = (rb[a] || 0) + 1; resonance.set(b, rb);
+    }
+  } catch { /* 无 edges 表 */ }
+
+  const inputs = results.map(r => {
+    const row = byId.get(r.id) || {};
+    const hasVad = row.vad_valence != null;
+    const vad = hasVad
+      ? { valence: Number(row.vad_valence), arousal: Number(row.vad_arousal), dominance: Number(row.vad_dominance) }
+      : null;
+    const intensity = hasVad
+      ? computeBaseIntensity(vad)
+      : Math.min(1, Math.abs(Number(r.emotionalImpact) || 0) / 10);
+    const list = times.get(r.id) || [];
+    if (list.length === 0) {
+      const t = Date.parse(String(row.last_accessed_at || row.created_at || r.lastAccessedAt || r.createdAt || ''));
+      if (Number.isFinite(t)) list.push(t);
+    }
+    return {
+      id: r.id,
+      intensity,
+      importance: Number(row.importance ?? r.importance ?? 0.5),
+      accessTimes: list,
+      vad,
+      pinned: !!row.pinned,
+      resonance: resonance.get(r.id) || null,
+    };
+  });
+
+  // 共振种子 = 相关性最高的三条(「已经决定在场的」),不外求。
+  const seeds = [...results].sort((a, b) => b.score - a.score).slice(0, 3).map(r => r.id);
+  const ranked = rankBySalience(inputs, Date.now(), mood == null ? null : moodFromScalar(mood), seeds);
+  const salById = new Map(ranked.map(x => [x.id, x.score]));
+  const pinnedById = new Map(inputs.map(i => [i.id, i.pinned]));
+
+  for (const r of results) {
+    const s = salById.get(r.id);
+    if (s == null) continue;
+    r.salience = Math.round(s * 1000) / 1000;
+    if (pinnedById.get(r.id)) r.pinned = true;
+    r.score = Math.round(r.score * salienceBlendFactor(s) * 1000) / 1000;
+  }
+  results.sort((a, b) => b.score - a.score);
+}
+
+/**
+ * 情感锚点:被钉住的记忆(memory.pinned=1)。注入时**无条件在场**,不参与相似度门槛。
+ *
+ * Character.AI 的 Story Memory 口径:用户能长按钉住「告白 / 转折 / 那句改变一切的话」,
+ * 那条永不衰减。所以它不能靠相似度进门 —— 问句跟它无关时也该在。
+ * 但仍然服从项目隔离与角色隔离(钉住 ≠ 跨角色泄漏)。
+ */
+export function pinnedAnchors(options: {
+  project?: string;
+  characterId?: string;
+  includeGeneral?: boolean;
+  includeDiary?: boolean;
+  memType?: MemType;
+  limit?: number;
+} = {}): SearchResult[] {
+  const project = normalizeProject(options.project);
+  const limit = Math.max(0, options.limit ?? 2);
+  if (limit === 0) return [];
+  const dirs = options.memType ? [normalizeMemType(options.memType)] : listMemTypeDirs(project);
+  const found = new Map<string, SearchResult>();
+  for (const mt of dirs) {
+    try {
+      const db = DatabaseManager.getInstance(project, mt);
+      const conds = ['m.is_active = 1', 'm.project = ?', 'm.pinned = 1', "COALESCE(m.status, '') <> 'superseded'"];
+      const params: any[] = [project];
+      conds.push(visibleMemorySourceSql('m', options.includeDiary));
+      if (options.characterId) {
+        conds.push(options.includeGeneral
+          ? "(m.character_id = ? OR m.character_id IS NULL OR m.character_id = '')"
+          : 'm.character_id = ?');
+        params.push(options.characterId);
+      }
+      const rows = db.prepare(`
+        SELECT m.id, m.text, m.project, m.type, m.mem_type, m.category, m.subcategory, m.tags,
+          m.emotional_impact, m.importance, m.character_id, m.source,
+          m.subject, m.agent_mood, m.agent_desire, m.tier,
+          m.created_at, m.last_accessed_at, m.accessed_count, m.parent_id, m.pinned
+        FROM memory m
+        WHERE ${conds.join(' AND ')}
+        ORDER BY m.importance DESC, m.created_at DESC
+        LIMIT ?
+      `).all(...params, limit) as any[];
+      for (const row of rows) {
+        if (found.has(row.id)) continue;
+        found.set(row.id, {
+          id: row.id, text: row.text, project: row.project || 'default', type: row.type,
+          memType: row.mem_type || 'general', category: row.category, subcategory: row.subcategory,
+          tags: parseTagsSafe(row.tags),
+          emotionalImpact: row.emotional_impact ?? 0,
+          importance: Number(row.importance ?? 0.5),
+          characterId: row.character_id, source: row.source,
+          subject: row.subject || 'user', agentMood: row.agent_mood, agentDesire: row.agent_desire,
+          tier: row.tier || 'standard',
+          parentId: row.parent_id || null,
+          // score/similarity 给 0:锚点不参与检索排序,注入层直接取(别让它被当成召回命中)
+          score: 0, similarity: 0, basis: 'tag' as const,
+          createdAt: row.created_at, lastAccessedAt: row.last_accessed_at,
+          accessedCount: row.accessed_count, biasBoost: 0,
+          pinned: true, salience: 1,
+        } as SearchResult);
+      }
+    } catch { /* 单分类库失败不影响其他 */ }
+  }
+  return [...found.values()]
+    .sort((a, b) => (b.importance || 0) - (a.importance || 0))
+    .slice(0, limit);
 }
 
 /**
@@ -195,46 +398,85 @@ function entityExpandedSearch(
   seedIds: string[],
   excludeIds: Set<string>,
   limit: number,
+  memoryDbs: Database.Database[] = [db],
 ): SearchResult[] {
   if (seedIds.length === 0 || limit <= 0) return [];
   const project = options.project;
   const cid = options.characterId;
   try {
     const ph = seedIds.map(() => '?').join(',');
-    const seedEnts = db.prepare(`SELECT DISTINCT entity_id FROM memory_entities WHERE memory_id IN (${ph})`)
-      .all(...seedIds) as any[];
+    // Relations are normally stored in general, while the source memory may
+    // live in another memType partition. Read relations from every partition
+    // and resolve the actual memory rows separately below.
+    const seedEnts: any[] = [];
+    const relationDbs = [...new Set([db, ...memoryDbs])];
+    for (const relationDb of relationDbs) {
+      try {
+        seedEnts.push(...relationDb.prepare(`SELECT DISTINCT entity_id FROM memory_entities WHERE memory_id IN (${ph})`)
+          .all(...seedIds) as any[]);
+      } catch { /* legacy partition without entity tables */ }
+    }
     const entIds = seedEnts.map(r => String(r.entity_id)).slice(0, 32);
     if (entIds.length < 2) return [];
 
     const ph2 = entIds.map(() => '?').join(',');
-    const notIn = [...excludeIds];
-    const notPh = notIn.length ? `AND m.id NOT IN (${notIn.map(() => '?').join(',')})` : '';
-    const charCond = cid && cid !== 'any' ? 'AND m.character_id = ?' : '';
-    const params: any[] = [...entIds];
-    if (project) params.push(project);
-    params.push(...notIn);
-    if (charCond) params.push(cid);
-    params.push(limit);
+    // Count shared entities across all relation partitions before loading
+    // memory rows. This preserves entity expansion for cross-memType sources.
+    const sharedByMemory = new Map<string, Set<string>>();
+    for (const relationDb of relationDbs) {
+      try {
+        const rows = relationDb.prepare(`SELECT memory_id, entity_id FROM memory_entities WHERE entity_id IN (${ph2})`)
+          .all(...entIds) as any[];
+        for (const row of rows) {
+          const id = String(row.memory_id || '');
+          const entityId = String(row.entity_id || '');
+          if (!id || !entityId) continue;
+          const set = sharedByMemory.get(id) || new Set<string>();
+          set.add(entityId);
+          sharedByMemory.set(id, set);
+        }
+      } catch { /* legacy partition without entity tables */ }
+    }
+    const candidateIds = [...sharedByMemory.entries()]
+      .filter(([id, entities]) => entities.size >= 2 && !excludeIds.has(id))
+      .map(([id]) => id);
+    if (candidateIds.length === 0) return [];
 
-    const rows = db.prepare(`
-      SELECT m.id, m.text, m.project, m.type, m.mem_type, m.category, m.subcategory, m.tags,
-        m.emotional_impact, m.importance, m.character_id, m.source,
-        m.subject, m.agent_mood, m.agent_desire, m.tier,
-        m.created_at, m.last_accessed_at, m.accessed_count, m.parent_id,
-        m.vad_valence, m.vad_arousal, m.vad_dominance, m.tsundere_level,
-        COUNT(DISTINCT me.entity_id) AS shared
-      FROM memory_entities me
-      JOIN memory m ON m.id = me.memory_id
-      WHERE me.entity_id IN (${ph2}) AND m.is_active = 1
-        ${project ? 'AND m.project = ?' : ''}
-        ${notPh} ${charCond}
-      GROUP BY m.id
-      HAVING shared >= 2
-      ORDER BY shared DESC, m.importance DESC
-      LIMIT ?
-    `).all(...params) as any[];
+    const rows: any[] = [];
+    const idPh = candidateIds.map(() => '?').join(',');
+    for (const memoryDb of memoryDbs) {
+      const params: any[] = [...candidateIds];
+      const conditions = [`m.id IN (${idPh})`, 'm.is_active = 1'];
+      if (project) { conditions.push('m.project = ?'); params.push(project); }
+      conditions.push(visibleMemorySourceSql('m', options.includeDiary));
+      if (options.memType) { conditions.push('m.mem_type = ?'); params.push(options.memType); }
+      const charCond = cid && cid !== 'any'
+        ? (options.includeGeneral
+          ? "(m.character_id = ? OR m.character_id IS NULL OR m.character_id = '')"
+          : 'm.character_id = ?')
+        : '';
+      if (charCond) { conditions.push(charCond); params.push(cid); }
+      try {
+        rows.push(...memoryDb.prepare(`
+          SELECT m.id, m.text, m.project, m.type, m.mem_type, m.category, m.subcategory, m.tags,
+            m.emotional_impact, m.importance, m.character_id, m.source,
+            m.subject, m.agent_mood, m.agent_desire, m.tier,
+            m.created_at, m.last_accessed_at, m.accessed_count, m.parent_id,
+            m.vad_valence, m.vad_arousal, m.vad_dominance, m.tsundere_level
+          FROM memory m WHERE ${conditions.join(' AND ')}
+        `).all(...params) as any[]);
+      } catch { /* legacy partition without newer memory columns */ }
+    }
+    const dedup = new Map<string, any>();
+    for (const row of rows) {
+      const id = String(row.id);
+      if (!dedup.has(id)) dedup.set(id, { ...row, shared: sharedByMemory.get(id)?.size || 0 });
+    }
 
-    return rows.map(row => {
+    return [...dedup.values()]
+      .sort((a, b) => Number(b.shared) - Number(a.shared) || Number(b.importance || 0) - Number(a.importance || 0))
+      .slice(0, limit)
+      .map(row => {
       const shared = Number(row.shared) || 0;
       const structural = Math.min(0.7, 0.3 + 0.1 * (shared - 1));
       const { score, biasBoost } = computeScore(row, structural, project);
@@ -249,13 +491,13 @@ function entityExpandedSearch(
         createdAt: row.created_at, lastAccessedAt: row.last_accessed_at,
         accessedCount: row.accessed_count, biasBoost: Math.round(biasBoost * 1000) / 1000,
       } as SearchResult;
-    });
+      });
   } catch {
     return [];   // 没有 memory_entities 表(旧库)/查询失败:扩散是增益,不是前置条件
   }
 }
 
-async function searchInDb(db: Database.Database, options: SearchOptions): Promise<SearchResult[]> {
+async function searchInDb(db: Database.Database, options: SearchOptions, memoryDbs: Database.Database[] = [db]): Promise<SearchResult[]> {
   const profile = options.profile ? SEARCH_PROFILES[options.profile] : null;
   const topK = options.topK ?? profile?.topK ?? 10;
   const minScore = options.minScore ?? profile?.minScore ?? 0;
@@ -320,7 +562,7 @@ async function searchInDb(db: Database.Database, options: SearchOptions): Promis
   // 放在排序前,让它们与其它来源同场竞争(它们分数天然偏低,不会挤掉强命中)。
   if (!(options as any).noEntityExpand && merged.length > 0) {
     const seedIds = merged.slice(0, 5).map(r => r.id);
-    merged.push(...entityExpandedSearch(db, scoped, seedIds, new Set(merged.map(r => r.id)), Math.min(3, topK)));
+    merged.push(...entityExpandedSearch(db, scoped, seedIds, new Set(merged.map(r => r.id)), Math.min(3, topK), memoryDbs));
   }
 
   merged.sort((a, b) => b.score - a.score);
@@ -348,16 +590,22 @@ async function searchInDb(db: Database.Database, options: SearchOptions): Promis
     const prev = bestById.get(r.id);
     if (!prev || (Number(r.similarity) || 0) > (Number(prev.similarity) || 0)) bestById.set(r.id, r);
   }
-  const unique = [...bestById.values()].sort((a, b) => b.score - a.score).slice(0, topK);
+  const unique = [...bestById.values()].sort((a, b) => b.score - a.score);
+  // v1.29(2026-10-30):情感显著度在这里发言 —— 相关性定"有哪些",显著度定"同样近时谁先"。
+  // 三条设计决定见 applySalienceRerank;老库缺列时它自己退化为不重排。
+  applySalienceRerank(db, unique, scoped.mood);
+  const top = unique.slice(0, topK);
 
-  updateAccessedGuard(db, unique.slice(0, topK), scoped.countAccess);
-  return unique.slice(0, topK);
+  updateAccessedGuard(db, top, scoped.countAccess, scoped.accessChannel, memoryDbs);
+  return top;
 }
 
 /** countAccess=false 时不记访问（注入路径），见 SearchOptions.countAccess */
-function updateAccessedGuard(db: any, results: SearchResult[], countAccess: boolean | undefined): void {
+function updateAccessedGuard(db: any, results: SearchResult[], countAccess: boolean | undefined, channel?: string, memoryDbs: any[] = [db]): void {
   if (countAccess === false) return;
-  updateAccessed(db, results);
+  // Entity expansion can return rows owned by another memType database.
+  // Update each partition so access accounting never targets the wrong DB.
+  for (const ownerDb of [...new Set([db, ...memoryDbs])]) updateAccessed(ownerDb, results, channel);
 }
 
 export async function searchMemory(options: SearchOptions): Promise<SearchResult[]> {
@@ -366,11 +614,15 @@ export async function searchMemory(options: SearchOptions): Promise<SearchResult
   // memdir:memType 指定 → 单分类库;未指定 → 聚合项目全部分类库
   const mtFilter = options.memType ? normalizeMemType(options.memType) : null;
   const dirs = mtFilter ? [mtFilter] : listMemTypeDirs(proj);
+  const memoryDbs: Database.Database[] = [];
+  for (const mt of listMemTypeDirs(proj)) {
+    try { memoryDbs.push(DatabaseManager.getInstance(proj, mt)); } catch { /* partition unavailable */ }
+  }
   const all: SearchResult[] = [];
   for (const mt of dirs) {
     try {
       const db = DatabaseManager.getInstance(proj, mt);
-      const r = await searchInDb(db, { ...options, project: proj });
+      const r = await searchInDb(db, { ...options, project: proj }, memoryDbs.length ? memoryDbs : [db]);
       all.push(...r);
     } catch { /* 单分类库失败不影响其他 */ }
   }
@@ -465,6 +717,7 @@ function tagSearch(db: any, options: SearchOptions): SearchResult[] {
   // v1.23-fix: superseded 在三条检索路径上一致排除（被接管的旧记忆不该再被检索命中）
   const conditions: string[] = ['m.is_active = 1', 'm.project = ?', "COALESCE(m.status, '') <> 'superseded'"];
   const params: any[] = [project];
+  conditions.push(visibleMemorySourceSql('m', options.includeDiary));
 
   conditions.push(`((${tagCond}) OR (${looseCond}))`);
   params.push(...tagParams, ...looseParams);
@@ -574,6 +827,7 @@ function vectorKnnSearch(
   const rowidParams = candidateRowids;
   const conditions: string[] = [`m.rowid IN (${rowidPlaceholders})`, 'm.is_active = 1', 'm.project = ?', "COALESCE(m.status, '') <> 'superseded'"];
   const params: any[] = [...rowidParams, project];
+  conditions.push(visibleMemorySourceSql('m', options.includeDiary));
 
   if (options.type) { conditions.push('m.type = ?'); params.push(options.type); }
   if (options.memType) { conditions.push('m.mem_type = ?'); params.push(options.memType); }
@@ -653,9 +907,15 @@ function textFallbackSearch(
   // 权重取 log(1 + N/(1+df)):df 小(罕见)权重高,df 大(高频)权重接近 0。
   const dfSql = `SELECT COUNT(*) c FROM memory m WHERE m.is_active = 1 AND m.project = ?`
     + ` AND COALESCE(m.status, '') <> 'superseded'`
+    + ` AND ${visibleMemorySourceSql('m', options.includeDiary)}`
     + (options.memType ? ' AND m.mem_type = ?' : '')
-    + (options.characterId ? ' AND m.character_id = ?' : '');
-  const dfBase: any[] = [project, ...(options.memType ? [String(options.memType)] : []), ...(options.characterId ? [options.characterId] : [])];
+    + (options.characterId
+      ? (options.includeGeneral
+        ? " AND (m.character_id = ? OR m.character_id IS NULL OR m.character_id = '')"
+        : ' AND m.character_id = ?')
+      : '');
+  const dfBase: any[] = [project, ...(options.memType ? [String(options.memType)] : [])];
+  if (options.characterId) dfBase.push(options.characterId);
   let corpusN = 1;
   try { corpusN = Number((db.prepare(dfSql).get(...dfBase) as any)?.c) || 1; } catch { corpusN = 1; }
   const idf = terms.map((t) => {
@@ -666,6 +926,7 @@ function textFallbackSearch(
 
   const conds: string[] = [`m.is_active = 1`, `m.project = ?`, "COALESCE(m.status, '') <> 'superseded'", `${matchExpr} >= 1`];
   const params: any[] = [project, ...likeParams];
+  conds.push(visibleMemorySourceSql('m', options.includeDiary));
   if (options.memType) { conds.push('m.mem_type = ?'); params.push(options.memType); }
   if (options.type) { conds.push('m.type = ?'); params.push(options.type); }
   if (options.category) { conds.push('m.category = ?'); params.push(options.category); }
@@ -756,6 +1017,7 @@ function supersededRecall(db: any, options: SearchOptions, excludeIds: Set<strin
   const likeCond = terms.map(() => 'm.text LIKE ?').join(' OR ');
   const conds: string[] = ['m.is_active = 1', 'm.project = ?', "COALESCE(m.status, '') = 'superseded'", `(${likeCond})`];
   const params: any[] = [project, ...terms.map(t => `%${t}%`)];
+  conds.push(visibleMemorySourceSql('m', options.includeDiary));
   if (options.characterId) {
     conds.push(options.includeGeneral
       ? "(m.character_id = ? OR m.character_id IS NULL OR m.character_id = '')"
@@ -803,18 +1065,35 @@ function supersededRecall(db: any, options: SearchOptions, excludeIds: Set<strin
     });
 }
 
-/** 更新记忆访问计数 */
-function updateAccessed(db: any, results: SearchResult[]) {
+/** 更新记忆访问计数 + 写访问日志(v1.29:ACT-R 需要多次呈现的时间戳,不是只有一个 last) */
+function updateAccessed(db: any, results: SearchResult[], channel?: string) {
   if (results.length === 0) return;
   try {
     // v1.23 冷存回温：被检索命中即回到工作集（清掉 status='cold'）。
     // 否则"冷"会变成永久标记 —— 经常被用的记忆反而永远被排除在新沉淀之外。
     const stmt = db.prepare("UPDATE memory SET accessed_count = accessed_count + 1, last_accessed_at = ?, status = CASE WHEN status = 'cold' THEN NULL ELSE status END WHERE id = ?");
     const now = new Date().toISOString();
-    const tx = db.transaction((ids: string[]) => { for (const id of ids) stmt.run(now, id); });
-    tx(results.map(r => r.id));
+    // 日志表可能不存在(老库没迁移/迁移失败) —— 那就不记,不影响计数这条主路径。
+    let logStmt: any = null;
+    try { logStmt = db.prepare('INSERT INTO memory_access_log (memory_id, project, accessed_at, channel) VALUES (?, ?, ?, ?)'); }
+    catch { logStmt = null; }
+    const ch = String(channel || 'search').slice(0, 32);
+    const tx = db.transaction((rows: SearchResult[]) => {
+      for (const r of rows) {
+        stmt.run(now, r.id);
+        if (logStmt) logStmt.run(r.id, r.project || 'default', now, ch);
+      }
+    });
+    tx(results);
+    // 日志是无界增长表:每 200 次写入清一次 180 天前的记录(足够表达间隔效应,又不会撑爆库)。
+    accessWrites++;
+    if (logStmt && accessWrites % 200 === 0) {
+      try { db.prepare("DELETE FROM memory_access_log WHERE accessed_at < datetime('now', '-180 day')").run(); } catch {}
+    }
   } catch {}
 }
+
+let accessWrites = 0;
 
 /** v1.23 Parent-Child 回捞结果 */
 export interface HydratedParent {
@@ -857,12 +1136,16 @@ export function hydrateParentExcerpts(
     }
     for (const [pid, hit] of [...hitsByParent.entries()].slice(0, maxParents)) {
       if (budget <= 0) break;
-      const row = DatabaseManager.queryAll<any>(proj, 'SELECT id, text FROM memory WHERE id = ? AND project = ? AND character_id = ?', [pid, proj, cid])[0];
+      // Parent hydration is still a memory read. Keep derived self-cycle
+      // entries out even when a caller supplies a diary leaf/parent id.
+      const row = DatabaseManager.queryAll<any>(proj,
+        `SELECT id, text FROM memory WHERE id = ? AND project = ? AND character_id = ? AND is_active = 1 AND ${publicMemorySourceSql()}`,
+        [pid, proj, cid])[0];
       if (!row || !row.text) continue;
       const parentText = String(row.text);
       // 分母只算活跃 leaf：已停用/被接管的 leaf 不该把"同父命中比"拉低
       const totalLeaves = DatabaseManager.queryAll<any>(proj,
-        'SELECT COUNT(*) AS c FROM memory WHERE parent_id = ? AND project = ? AND is_active = 1 AND character_id = ?', [pid, proj, cid])
+        `SELECT COUNT(*) AS c FROM memory WHERE parent_id = ? AND project = ? AND is_active = 1 AND character_id = ? AND ${publicMemorySourceSql()}`, [pid, proj, cid])
         .reduce((n, r) => n + (Number(r.c) || 0), 0) || 1;
       const ratio = hit.hits / totalLeaves;
       const full = ratio > 0.5 || parentText.length <= 1800;
@@ -912,6 +1195,7 @@ export function getRecentMemories(characterId: string, limit: number = 5, hoursB
       // v1.24: 角色隔离 — characterId='any' 才关闭过滤(默认由调用方传 CHAR_ID)
       const conds: string[] = ['is_active = 1', 'project = ?', 'created_at > ?', "COALESCE(status, '') <> 'superseded'"];
       const params: any[] = [proj, since];
+      conds.push(publicMemorySourceSql());
       if (characterId && characterId !== 'any') { conds.push('character_id = ?'); params.push(characterId); }
       if (memType) { conds.push('mem_type = ?'); params.push(memType); }
       params.push(limit);
@@ -1017,7 +1301,9 @@ export async function searchFacts(
     SELECT f.rowid, f.id, f.subject, f.predicate, f.object, f.confidence,
            f.source_memory_id, f.created_at, f.updated_at
     FROM facts f
+    LEFT JOIN memory source_memory ON source_memory.id = f.source_memory_id
     WHERE ${conditions.join(' AND ')}
+      AND COALESCE(f.source_memory_source, source_memory.source, '') NOT IN ('agent_diary', 'agent_state')
     ORDER BY f.confidence DESC
   `).all(...params) as any[];
 
