@@ -7,6 +7,7 @@ import { useDisplayModelsStore } from '@proj-airi/stage-ui/stores/display-models
 import { useModsServerChannelStore } from '@proj-airi/stage-ui/stores/mods/api/channel-server'
 import { useContextBridgeStore } from '@proj-airi/stage-ui/stores/mods/api/context-bridge'
 import { useAiriCardStore } from '@proj-airi/stage-ui/stores/modules/airi-card'
+import { useChatStore } from '@proj-airi/stage-ui/stores/chat'
 import { useArtistryStore } from '@proj-airi/stage-ui/stores/modules/artistry'
 import { useConsciousnessStore } from '@proj-airi/stage-ui/stores/modules/consciousness'
 import { useHearingStore } from '@proj-airi/stage-ui/stores/modules/hearing'
@@ -39,6 +40,7 @@ const onboardingStore = useOnboardingStore()
 const syncedPinia = usePiniaSynced()
 const serverChannelStore = useModsServerChannelStore()
 const characterOrchestratorStore = useCharacterOrchestratorStore()
+const chatStore = useChatStore()
 const settingsAudioDeviceStore = useSettingsAudioDevice()
 const { showingSetup } = storeToRefs(onboardingStore)
 const { isDark } = useTheme()
@@ -97,6 +99,9 @@ async function loadStartup() {
   try {
     await startup.run('modelIndex', () => displayModelsStore.initialize())
     await startup.run('card', () => cardStore.initialize())
+    // The session index and the canonical conversation live behind this store, and a send with no session is
+    // refused by the remote transport before it leaves the device — the composer only restores the draft.
+    await startup.run('chat', () => chatStore.initialize(syncedPinia))
     await startup.run('services', () => {
       void serverChannelStore.initialize({
         possibleEvents: ['ui:configure', 'output:gen-ai:chat:message', 'output:gen-ai:chat:complete'],
