@@ -25,8 +25,6 @@ ITEMS = [
     "run_guard.cmd", "README.md",
     'hermes_memory_hook.py',
     'service_runtime.py', 'sync_to_instances.py',
-    # 事件层的主机侧触发（计划任务 Castalia Anima Event Digest 每 10 分钟叫一次）
-    'anima_event_digest.mjs', 'run_anima_event_digest.vbs',
 ]
 
 TARGETS = [

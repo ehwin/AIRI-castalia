@@ -36,7 +36,7 @@ if not defined PYW (
     pause
     exit /b 1
 )
-start "" "%PYW%" "D:\system\AIRI\castalia\run\Castalia\scripts\castalia_tray.py"
+start "" "%PYW%" "D:\castalia\run\Castalia\scripts\castalia_tray.py"
 echo [1/2] tray started via %PYW%
 %SystemRoot%\System32\ping.exe -n 6 127.0.0.1 >nul
 
@@ -46,6 +46,9 @@ set "AIRI_ROOT=D:\system\AIRI"
 set "APP=%AIRI_ROOT%\apps\stage-tamagotchi"
 rem --- APP_DEBUG=0: without it shouldOpenDevTools() opens a detached DevTools window on every dev launch ---
 set "APP_DEBUG=0"
+rem 2026-10-30: packaged 0.12 build first (electron-builder --dir output);
+rem the old code only knew out\main\index.js, so it silently fell back to 0.11.
+if exist "%APP%\dist\win-unpacked\airi.exe" goto packaged
 if not exist "%APP%\out\main\index.js" goto installed
 
 echo [2/2] starting dev build ^(fork 0.12: memory injection / relationship gate / crisis handling^)
@@ -63,6 +66,11 @@ if not exist "%ELECTRON%" (
     goto installed
 )
 start "" "%ELECTRON%" "%APP%"
+goto done
+
+:packaged
+echo [2/2] starting packaged app %APP%\dist\win-unpacked\airi.exe ^(0.12 build^)
+start "" "%APP%\dist\win-unpacked\airi.exe"
 goto done
 
 :installed

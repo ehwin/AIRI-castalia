@@ -7,6 +7,7 @@ import { autoAnimatePlugin } from '@formkit/auto-animate/vue'
 import { PiniaColada } from '@pinia/colada'
 import { pushToTalkTriggerKey } from '@proj-airi/stage-ui/composables/push-to-talk-trigger'
 import { piniaPluginTracing, setupSynced } from '@proj-airi/stage-ui/libs/pinia'
+import { applyNpuWhisperDefaults } from '@proj-airi/stage-ui/libs/providers/npu-whisper'
 import { MotionPlugin } from '@vueuse/motion'
 import { createPinia } from 'pinia'
 import { setupLayouts } from 'virtual:generated-layouts'
@@ -82,3 +83,7 @@ createApp(App)
   // The stage window registers a global hold shortcut. Every window shares this app, so the settings window offers the mode too.
   .provide(pushToTalkTriggerKey, true)
   .mount('#app')
+
+// Voice input falls back to the NPU Whisper served by Lemonade Server on this
+// machine when the user has not picked a transcription provider yet.
+void applyNpuWhisperDefaults()
