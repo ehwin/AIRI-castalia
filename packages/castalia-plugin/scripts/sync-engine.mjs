@@ -4,7 +4,7 @@
 // 做的事: 复制 .ts → 改写 better-sqlite3/sqlite-vec 导入 → 加 NOTICE 头 + @ts-nocheck →
 //        跳过 MCP 入口(index.ts/fedServer.ts，插件不需要)。
 // 幂等: 重复跑结果一致；改完跑 pnpm -F @proj-airi/castalia-plugin test:run 验证。
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -47,13 +47,15 @@ function header(file) {
   ].join('\n')
 }
 
-function rewrite(source) {
+function rewrite(source, depth = 0) {
+  // 子目录（federation/）里的文件要多上跳一层才能到 vendor/sqlite-shim。
+  const up = '../'.repeat(depth + 1)
   let s = source
-  s = s.replace(/from 'better-sqlite3'/g, "from '../sqlite-shim'")
-  s = s.replace(/from "better-sqlite3"/g, 'from "../sqlite-shim"')
+  s = s.replace(/from 'better-sqlite3'/g, `from '${up}sqlite-shim'`)
+  s = s.replace(/from "better-sqlite3"/g, `from "${up}sqlite-shim"`)
   s = s.replace(
     /import \* as sqliteVec from 'sqlite-vec'/g,
-    "import { loadVecExtension as _loadVec } from '../sqlite-shim'\nconst sqliteVec = { load: (db: any) => _loadVec(db) }",
+    `import { loadVecExtension as _loadVec } from '${up}sqlite-shim'\nconst sqliteVec = { load: (db: any) => _loadVec(db) }`,
   )
   return s
 }
@@ -115,5 +117,27 @@ for (const file of sources) {
   const raw = readFileSync(join(engineSrc, file), 'utf8')
   writeFileSync(join(dest, file), `${header(file)}\n${splitTypeImports(rewrite(raw), typeExports)}`, 'utf8')
   copied += 1
+}
+
+// 子目录也要镜像：reflectAll.ts 引用了 './federation/index.js'，只复制扁平文件会留断链。
+// 目录里的文件多一层，better-sqlite3 → ../../sqlite-shim。
+const SUBDIRS = ['federation']
+for (const sub of SUBDIRS) {
+  const from = join(engineSrc, sub)
+  if (!existsSync(from)) continue
+  const subSources = readdirSync(from).filter(f => f.endsWith('.ts')).sort()
+  if (subSources.length === 0) continue
+  const subDest = join(dest, sub)
+  mkdirSync(subDest, { recursive: true })
+  const subTypeExports = collectTypeExports(from)
+  for (const file of subSources) {
+    const raw = readFileSync(join(from, file), 'utf8')
+    writeFileSync(
+      join(subDest, file),
+      `${header(`${sub}/${file}`)}\n${splitTypeImports(rewrite(raw, 1), subTypeExports)}`,
+      'utf8',
+    )
+    copied += 1
+  }
 }
 console.log(`synced ${copied} files from ${engineSrc} -> ${dest}`)
