@@ -17,6 +17,10 @@ const config: CapacitorConfig = {
       }
     : undefined,
   android: {
+    // Self-use builds only: a release APK is not debuggable by default, which leaves the WebView's console and
+    // its Pinia stores unreachable — the reason phone-side send failures could only be guessed at. With this on,
+    // `adb forward tcp:9223 localabstract:webview_devtools_remote_<pid>` exposes the page to CDP.
+    webContentsDebuggingEnabled: true,
     buildOptions: {
       keystorePath: env.CAPACITOR_ANDROID_KEYSTORE_PATH,
       keystoreAlias: env.CAPACITOR_ANDROID_KEYSTORE_ALIAS,
