@@ -260,8 +260,13 @@ class Config:
         env.update(self._global_env())
         for k, val in (v.get("env") or {}).items():
             env[k] = self._resolve(val)
-        return {"id": v["id"], "name": v["name"], "port": int(v["port"]),
+        # id 加 viz- 前缀(2026-10-30):星图原先与记忆实例共用 id(hermes/dsh/lobehub/airi/full),
+        # 而实例 id 也在 service-state 里占同名键 —— 星图开关一写 desired 就改到别人头上,
+        # 按需判定(service_wanted)也跟着互相污染。星图是独立服务,id 必须独立。
+        return {"id": "viz-" + v["id"], "name": v["name"], "port": int(v["port"]),
                 "instance": v.get("instance"), "cwd": cwd, "env": env,
+                # 按需服务:没人显式要过就不起(见 castalia_tray.service_wanted)
+                "onDemand": bool(v.get("onDemand")),
                 "cmd": [self.NODE, os.path.join(cwd, "server.mjs")]}
 
     def _airi_proxy(self, ap):
@@ -357,19 +362,29 @@ class Config:
         return {"id": t.get("id", "tray"), "name": t.get("name", "托盘"), "port": port}
 
     def _lobehub_boot(self, d):
-        """LobeHub compose 栈的随托盘启动配置(autoStart / delaySeconds)。
+        """LobeHub compose 栈的随托盘启动 / 空闲退栈配置。
 
         autoStart: 托盘启动后顺带把栈拉起(需要 WSL + docker);默认 false,保持旧行为。
         delaySeconds: 启动延迟,给开机 IO 峰值留余量(默认 45s)。
+        idleShutdownMinutes: 栈空闲(到 :3210 无活跃连接)多少分钟后自动 compose down
+            并 `wsl --terminate` 把 VM 退掉 —— 容器停掉不等于内存还回来,vmmem 挂在实例上。
+            0 = 关闭自动退栈(栈一直挂着)。
+        wslDistro: 需要退掉的 WSL 实例名(默认 Ubuntu-24.04)。
         """
         d = d or {}
         try:
             delay = float(d.get("delaySeconds", 45))
         except Exception:
             delay = 45.0
+        try:
+            idle = float(d.get("idleShutdownMinutes", 5) or 0)
+        except Exception:
+            idle = 5.0
         return {
             "autoStart": bool(d.get("autoStart", False)),
             "delaySeconds": max(0.0, delay),
+            "idleShutdownMinutes": max(0.0, idle),
+            "wslDistro": str(d.get("wslDistro") or "Ubuntu-24.04"),
         }
 
     def _webapp(self, w):
@@ -391,7 +406,10 @@ class Config:
                 "instance": e.get("instance"),
                 # 第三方分拣/推理服务一律按需：常驻只会白烧显存/内存
                 "onDemand": bool(e.get("onDemand")),
-                "cmd": [self._resolve(e["program"])] if e.get("program") else [],
+                # args(2026-10-30): 允许附带服务是脚本而非单 exe —— 心灵传感器(NPU) 是
+                # `node psyche_npu.mjs --serve`，没有 args 就只能塞 bat 壳，多一层失败点。
+                "cmd": ([self._resolve(e["program"])] + [str(a) for a in (e.get("args") or [])])
+                if e.get("program") else [],
                 "cwd": self._resolve(e.get("cwd", ""))}
 
     def extra(self, service_id):

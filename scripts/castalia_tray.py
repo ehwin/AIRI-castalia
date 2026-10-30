@@ -66,6 +66,17 @@ LOBEHUB_RUN = C.LOBEHUB_RUN
 AIRI_BASE = C.AIRI_BASE
 AIRI_ANIMA = C.AIRI_ANIMA
 AIRI_EXE = os.path.join(AIRI_BASE, "airi.exe")
+# 2026-10-30:迁移后 airiBase/airi.exe 与应用侧 unified-proxy 都是 legacy 0.11 布局,已不存在 ——
+# 托盘点「启动 AIRI」报 WinError 2/267(实测)。现在真正跑的是打包版 0.12:
+#   apps/stage-tamagotchi/dist/win-unpacked/airi.exe
+# 路径从配置 paths.airiExe 读,换构建目录只改配置。
+_airi_exe_cfg = (C.PATHS or {}).get("airiExe") or ""
+if _airi_exe_cfg:
+    try:
+        AIRI_EXE = C._resolve(_airi_exe_cfg)
+    except Exception:
+        AIRI_EXE = _airi_exe_cfg
+AIRI_APP_HINT = "stage-tamagotchi"      # 打包版/开发版的路径都含这段,用于识进程
 # 第三方附带服务(如 AIRI 分拣 Lemonade):同样从配置读,配置里删掉即不在菜单出现。
 # 占位值(port=0/cmd=[])保证配置缺项时托盘不崩、菜单显示为关闭。
 AIRI_LEMONADE = C.extra("lemonade") or {"id": "lemonade", "name": "AIRI 分拣",
@@ -237,8 +248,19 @@ class _ControlHandler(http.server.BaseHTTPRequestHandler):
                                "pid": os.getpid(), "controlPort": TRAY_PORT, "title": title,
                                "icon": bool(_ICON_ALIVE),
                                "bridges": bridges_up(), "viz": viz_up(),
+                               "airi": {"running": airi_running(), "installed": airi_installed(),
+                                        "exe": AIRI_EXE},
+                               "lobehub": {"up": lobehub_up(), "wsl": wsl_running(), "vmmemMB": vmmem_mb()},
                                "children": {k: getattr(v, "pid", None) for k, v in _procs.items()},
                                "state": read_state(), "groups": service_groups()})
+        if p == "/lobehub":
+            # 开关的"真的是什么状态"就在这里:容器、WSL、连接数、空闲计时一起给。
+            return self._json({"ok": True, "up": lobehub_up(), "wsl": wsl_running(),
+                               "wslDistro": WSL_DISTRO, "connections": lobehub_connections(),
+                               "dockerReady": _docker_ready(), "vmmemMB": vmmem_mb(),
+                               "idleEnabled": lobehub_idle_enabled(),
+                               "idleMinutes": lobehub_idle_minutes(),
+                               "idleForMinutes": round((time.time() - _LH_IDLE["last_active"]) / 60.0, 1)})
         return self._json({"ok": False, "error": f"未知路径 {p}"}, 404)
 
     def do_POST(self):
@@ -266,6 +288,28 @@ class _ControlHandler(http.server.BaseHTTPRequestHandler):
             except Exception:
                 pass
             return
+        if p == "/lobehub/start":
+            self._json({"ok": True, "action": "lobehub-start"})
+            logger.info("control: 收到 /lobehub/start (来自 %s)", _who)
+            start_lobehub()
+            return
+        if p == "/lobehub/stop":
+            self._json({"ok": True, "action": "lobehub-stop"})
+            logger.info("control: 收到 /lobehub/stop (来自 %s)", _who)
+            stop_lobehub(reason="control")
+            return
+        if p in ("/lobehub/idle/on", "/lobehub/idle/off"):
+            on = p.endswith("on")
+            set_lobehub_idle(on)
+            self._json({"ok": True, "idleEnabled": lobehub_idle_enabled()})
+            logger.info("control: 空闲退栈 = %s (来自 %s)", "开" if on else "关", _who)
+            return
+        if p == "/lobehub/idle/tick":
+            out = lobehub_idle_tick(force=True)
+            self._json({"ok": True, "action": "lobehub-idle-tick", "did": out,
+                        "up": lobehub_up(), "wsl": wsl_running()})
+            logger.info("control: 立即评估空闲退栈 → %s (来自 %s)", out, _who)
+            return
         return self._json({"ok": False, "error": f"未知路径 {p}"}, 404)
 
 
@@ -280,7 +324,9 @@ def start_control():
 
 def _cli_verb():
     for v in sys.argv[1:]:
-        if v in ("--status", "--quit", "--activate", "--stop-services"):
+        if v in ("--status", "--quit", "--activate", "--stop-services",
+                 "--lobehub", "--lobehub-start", "--lobehub-stop",
+                 "--lobehub-idle-on", "--lobehub-idle-off", "--lobehub-idle-tick"):
             return v
     return None
 
@@ -290,8 +336,18 @@ def _client(verb):
     verb = verb or "--activate"
     if verb == "--stop-services":
         verb = "--quit"
-    method, path = {"--status": ("GET", "/status"), "--quit": ("POST", "/quit"),
-                    "--activate": ("POST", "/activate")}[verb]
+    routes = {
+        "--status": ("GET", "/status"),
+        "--quit": ("POST", "/quit"),
+        "--activate": ("POST", "/activate"),
+        "--lobehub": ("GET", "/lobehub"),
+        "--lobehub-start": ("POST", "/lobehub/start"),
+        "--lobehub-stop": ("POST", "/lobehub/stop"),
+        "--lobehub-idle-on": ("POST", "/lobehub/idle/on"),
+        "--lobehub-idle-off": ("POST", "/lobehub/idle/off"),
+        "--lobehub-idle-tick": ("POST", "/lobehub/idle/tick"),
+    }
+    method, path = routes[verb]
     code, body = control_request(method, path)
     logger.info("client %s -> %s %s", verb, code, body[:200].replace("\n", " "))
     if verb == "--status":
@@ -299,6 +355,12 @@ def _client(verb):
             _write_status(json.loads(body))
         except Exception:
             _write_status({"ok": False, "httpStatus": code, "raw": body})
+    else:
+        # 其余动词是"开关"动作,状态必须能被脚本读到(windowed 宿主没有控制台也要落文件)
+        try:
+            print(body)
+        except Exception:
+            pass
     return 0 if code else 1
 
 
@@ -442,14 +504,18 @@ def _kill_pid(pid):
 
 
 def _kill_airi():
-    """按镜像名杀 airi.exe(psutil 进程内,零子进程)。"""
+    """杀掉 AIRI 桌面应用(打包版 airi.exe / 开发版 electron.exe <app>)。"""
     if _psutil is None:
         return
-    for pid, name in _proc_names():
-        if name != "airi.exe":
-            continue
+    for p in _psutil.process_iter(["name", "cmdline"]):
         try:
-            _psutil.Process(pid).kill()
+            n = (p.info["name"] or "").lower()
+            hit = n == "airi.exe" or (n.startswith("electron")
+                                      and AIRI_APP_HINT in " ".join(p.info["cmdline"] or []).lower())
+            if not hit:
+                continue
+            _psutil.Process(p.info["pid"]).kill()
+            logger.info("kill airi pid=%s (%s)", p.info["pid"], n)
         except Exception:
             pass
 
@@ -922,7 +988,10 @@ def open_page(port, path="/", view=""):
     """打开一个页面 —— 优先送进原生外壳(GUI),只有没有外壳时才回落到浏览器。"""
     def work():
         target = next((v for v in VIZ if v['port'] == port), None)
-        start_viz(services=[target] if target else [])
+        # 星图可以按需(onDemand):打开页面这个动作本身就是「我要它」的声明,
+        # 不能沿用 start_viz 的 wanted 过滤(没人声明过 = 永远不起)。
+        if target:
+            ensure_on_demand(target, '打开星图')
         for _ in range(24):
             if listening(port):
                 url = f"http://127.0.0.1:{port}{path}"
@@ -1103,38 +1172,52 @@ def _proc_names(ttl=2.0):
     return out
 
 
+def airi_installed():
+    """AIRI 桌面应用的 exe 是否就位(决定菜单里有没有这个入口)。"""
+    return bool(AIRI_EXE) and os.path.isfile(AIRI_EXE)
+
+
 def airi_running():
-    """airi.exe 是否在跑 —— psutil 进程内查询,不再 spawn tasklist。"""
-    if _psutil is not None:
-        return any(name == "airi.exe" for _, name in _proc_names())
+    """AIRI 桌面应用是否在跑。
+
+    打包版进程名是 airi.exe;`electron.exe <app>` 开发版的进程名是 electron.exe,
+    所以只认 airi.exe 会把开发版判成"没开"(菜单永远显示未运行、重复点启动)。
+    """
+    if _psutil is None:
+        return False
+    for p in _psutil.process_iter(["name", "cmdline"]):
+        try:
+            n = (p.info["name"] or "").lower()
+            if n == "airi.exe":
+                return True
+            if n.startswith("electron"):
+                if AIRI_APP_HINT in " ".join(p.info["cmdline"] or []).lower():
+                    return True
+        except Exception:
+            pass
     return False
 
 
 def start_airi_app():
-    if not AIRI_PROXY: return '未配置 AIRI'
-    set_service_desired(AIRI_PROXY, True)
-    if AIRI_LEMONADE['cmd']: set_service_desired(AIRI_LEMONADE, True)
-    if not listening(AIRI_PROXY["port"]):
-        try:
-            _spawn(AIRI_PROXY["id"], AIRI_PROXY["cmd"], AIRI_PROXY["cwd"], AIRI_PROXY.get("env"))
-        except Exception as e:
-            logger.error("airi proxy: %s", e)
-    if AIRI_LEMONADE["cmd"] and not listening(AIRI_LEMONADE["port"]):
-        try:
-            _spawn(AIRI_LEMONADE["id"], AIRI_LEMONADE["cmd"], AIRI_LEMONADE["cwd"])
-        except Exception as e:
-            logger.error("lemonade: %s", e)
+    """启动 AIRI 桌面应用(打包版 0.12)。
+
+    2026-10-30:不再依赖 airiProxy(5050 那套 unified-proxy 已随 0.11 退役,目录都没了),
+    直接拉起 paths.airiExe 指向的 exe;APP_DEBUG=0 避免每次启动弹一个独立 DevTools 窗口
+    (与 scripts/start-airi.bat 同口径)。
+    """
     if airi_running():
         return "AIRI 已在运行"
+    if not AIRI_EXE or not os.path.isfile(AIRI_EXE):
+        return f"AIRI 启动失败: 找不到 {AIRI_EXE}(用 paths.airiExe 指向构建产物)"
     try:
-        env = _env_base(AIRI_PROXY.get("env"))
         subprocess.Popen(
-            [AIRI_EXE], cwd=AIRI_BASE, env=env,
+            [AIRI_EXE], cwd=os.path.dirname(AIRI_EXE),
+            env=_env_base({"APP_DEBUG": "0"}),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             creationflags=NOWIN | DETACHED,
         )
-        logger.info("start airi.exe")
+        logger.info("start airi.exe: %s", AIRI_EXE)
         return "正在启动 AIRI"
     except Exception as e:
         logger.error("airi.exe: %s", e)
@@ -1142,15 +1225,17 @@ def start_airi_app():
 
 
 def stop_airi_app():
-    if not AIRI_PROXY: return '未配置 AIRI'
-    set_service_desired(AIRI_PROXY, False)
-    if AIRI_LEMONADE['cmd']: set_service_desired(AIRI_LEMONADE, False)
+    """停 AIRI 桌面应用(+ 已配置的代理/分拣按需服务,若有)。"""
     _kill_airi()
-    _kill_port(AIRI_PROXY["port"])
-    if AIRI_LEMONADE["port"]:
-        _kill_port(AIRI_LEMONADE["port"])
-    _procs.pop(AIRI_PROXY["id"], None)
-    _procs.pop(AIRI_LEMONADE["id"], None)
+    if AIRI_PROXY:
+        set_service_desired(AIRI_PROXY, False)
+        _kill_port(AIRI_PROXY["port"])
+        _procs.pop(AIRI_PROXY["id"], None)
+    if AIRI_LEMONADE["cmd"]:
+        set_service_desired(AIRI_LEMONADE, False)
+        if AIRI_LEMONADE["port"]:
+            _kill_port(AIRI_LEMONADE["port"])
+        _procs.pop(AIRI_LEMONADE["id"], None)
     return "AIRI 已停止"
 
 
@@ -1400,6 +1485,90 @@ def _wsl(cmd, timeout=180):
         return f"wsl error: {e}"
 
 
+# ── WSL 实例本身 ──────────────────────────────────────────────────────────
+# 2026-10-30:停容器 ≠ 内存还回来。vmmem 挂在 WSL 实例上,不 `--terminate` 就永远占着
+# (实测 882MB)。这里只放"管理动词":`wsl -l --running -q` / `wsl --terminate` 都不会
+# 把实例拉起来 —— 而 `wsl -e <cmd>` **会**,所以"探测它在不在"绝对不能用 _wsl()。
+WSL_DISTRO = (getattr(C, "LOBEHUB_BOOT", {}) or {}).get("wslDistro") or "Ubuntu-24.04"
+
+
+def _wslctl(args, timeout=60):
+    try:
+        r = subprocess.run(["wsl"] + list(args), capture_output=True, timeout=timeout,
+                           creationflags=NOWIN)
+        return _dec_bytes(r.stdout) + _dec_bytes(r.stderr)
+    except Exception as e:
+        return f"wsl error: {e}"
+
+
+_wsl_running_cache = {"t": 0.0, "running": False}
+
+
+def wsl_running(refresh=False):
+    """WSL 实例在不在。缓存 10s(子进程调用,标题 8s 一刷新太浪费)。"""
+    now = time.time()
+    if not refresh and now - _wsl_running_cache["t"] < 10:
+        return _wsl_running_cache["running"]
+    out = _wslctl(["-l", "--running", "-q"])
+    names = [l.strip() for l in out.replace("\x00", "").splitlines()]
+    running = any(n.lower() == WSL_DISTRO.lower() for n in names if n)
+    _wsl_running_cache.update(t=now, running=running)
+    return running
+
+
+def _wsl_distros():
+    out = _wslctl(["-l", "-q"])
+    return [l.strip() for l in out.replace("\x00", "").splitlines() if l.strip()]
+
+
+def vmmem_mb():
+    """vmmemWSL 当前占用(MB)。这是"WSL 到底退了没"的唯一硬证据 ——
+    `--terminate` 之后发行版列表可以是空的,而 utility VM 仍在,内存一点没还(实测 1.9GB)。"""
+    if _psutil is None:
+        return -1
+    total = 0
+    try:
+        for p in _psutil.process_iter(["name", "memory_info"]):
+            if (p.info["name"] or "").lower().startswith("vmmem"):
+                total += p.info["memory_info"].rss
+    except Exception:
+        return -1
+    return round(total / 1048576.0)
+
+
+def terminate_wsl(reason=""):
+    """整个退掉 WSL。返回是否已确认退掉。
+
+    2026-10-30 实测:`wsl --terminate <distro>` 只结束发行版,**utility VM 还活着**,
+    vmmem 继续占 1.9GB(这就是"停了 LobeHub 内存却没还"的真相)。
+    单发行版机器直接 `wsl --shutdown`(连 VM 一起收);多发行版才退化成 --terminate,
+    免得把别人的实例一起关掉。
+    """
+    if not wsl_running(refresh=True):
+        base = vmmem_mb()
+        if base == 0:
+            return True
+        # 发行版没跑但 vmmem 还在 → 直接 shutdown 收掉残留 VM
+        _wslctl(["--shutdown"])
+        gone = vmmem_mb() in (0, -1)
+        logger.info("wsl shutdown(残留 VM) reason=%s → vmmem 已释放=%s", reason or "-", gone)
+        return gone
+    before = vmmem_mb()
+    distros = _wsl_distros()
+    if len(distros) <= 1:
+        out = _wslctl(["--shutdown"])
+        mode = "shutdown"
+    else:
+        out = _wslctl(["--terminate", WSL_DISTRO])
+        mode = "terminate"
+    gone = not wsl_running(refresh=True)
+    after = vmmem_mb()
+    logger.info("wsl %s(%s) reason=%s → 已退出=%s vmmem %sMB→%sMB %s",
+                mode, WSL_DISTRO, reason or "-", gone, before, after, out.strip()[:120])
+    return gone and (after in (0, -1))
+
+
+
 _lh_cache = {"t": 0.0, "up": False}
 
 
@@ -1446,10 +1615,105 @@ def lobehub_up():
     return up
 
 
-def _docker_ready():
-    """docker 守护是否活着 —— 守护没起时 compose 会直接失败,必须先判。"""
+def _docker_ready(fresh=False):
+    """docker 守护是否活着 —— 守护没起时 compose 会直接失败,必须先判。
+
+    ⚠️ 这个调用会 `wsl -e bash -c docker info` —— 实例没起时**它会把实例拉起来**。
+    所以只允许在 wsl_running() 为真时调(2026-10-30:之前状态栏每 8s 调一次,
+    WSL 等于被托盘永久钉住 —— 这正是「LobeHub 那个标签从来没关过」的一半原因)。
+    """
+    if not wsl_running(fresh):
+        return False
     out = _wsl("docker info --format '{{.ServerVersion}}' 2>&1", timeout=30)
     return ("Cannot connect" not in out) and ("error" not in out.lower())
+
+
+# ── 空闲退栈:没人用就把容器停掉、再把 WSL 实例退掉(内存才真的还回来) ──────
+_LH_IDLE = {"last_active": time.time()}
+_IDLE_FLAG = {"id": "lobehub-idle", "name": "LobeHub 空闲退栈", "port": 0}
+
+
+def lobehub_idle_minutes():
+    boot = getattr(C, "LOBEHUB_BOOT", {}) or {}
+    try:
+        return float(boot.get("idleShutdownMinutes", 10) or 0)
+    except Exception:
+        return 0.0
+
+
+def lobehub_idle_enabled():
+    """配置 >0 才启用;托盘菜单的开关单独写 state,没人写过 = 开。"""
+    if lobehub_idle_minutes() <= 0:
+        return False
+    st = (service_runtime.read(SERVICE_STATE_FILE).get("services") or {})
+    return st.get(_IDLE_FLAG["id"]) != "stopped"
+
+
+def set_lobehub_idle(enabled):
+    set_service_desired(_IDLE_FLAG, enabled)
+    _LH_IDLE["last_active"] = time.time()
+    logger.info("lobehub 空闲退栈 = %s（%g 分钟无连接即退）", "开" if enabled else "关", lobehub_idle_minutes())
+
+
+def lobehub_connections():
+    """到 :3210 的活跃连接数。页面开着(含 SSE/websocket 长连)就 >0 = 有人在用。"""
+    if _psutil is None:
+        return -1
+    n = 0
+    try:
+        for c in _psutil.net_connections(kind="tcp"):
+            if c.status != _psutil.CONN_ESTABLISHED:
+                continue
+            for a in (c.laddr, c.raddr):
+                if a and getattr(a, "port", None) == 3210:
+                    n += 1
+                    break
+    except Exception:
+        return -1
+    return n
+
+
+def lobehub_idle_tick(force=False):
+    """一分钟一跳:用着就不动,闲着超过阈值就 down + terminate。
+
+    force=True =「立即按空闲规则评估一次」(控制口 / 托盘里的立即退栈用它做验证,
+    不必真的干等 N 分钟)。
+    """
+    if not lobehub_idle_enabled():
+        _LH_IDLE["last_active"] = time.time()
+        return None
+    up = lobehub_up()
+    conns = lobehub_connections()
+    if up and (conns != 0):            # -1 = 探不到,保守当作"在用"
+        _LH_IDLE["last_active"] = time.time()
+        return None
+    idle = (time.time() - _LH_IDLE["last_active"]) / 60.0
+    if not force and idle < lobehub_idle_minutes():
+        return None
+    if up:
+        logger.info("lobehub idle: %.0f 分钟无连接(阈值 %g) → down 并退掉 WSL",
+                    idle, lobehub_idle_minutes())
+        _LH_IDLE["last_active"] = time.time()
+        stop_lobehub(reason="idle")
+        return "down"
+    if wsl_running():
+        logger.info("wsl idle: LobeHub 未运行且已空闲 %.0f 分钟 → 退出 WSL", idle)
+        _LH_IDLE["last_active"] = time.time()
+        terminate_wsl(reason="idle-no-stack")
+        return "wsl"
+    return None
+
+
+def _lobehub_idle_loop():
+    while not _stop.is_set():
+        try:
+            lobehub_idle_tick()
+        except Exception:
+            logger.exception("lobehub idle loop")
+        for _ in range(30):
+            if _stop.is_set():
+                return
+            time.sleep(1)
 
 
 def _first_err(out):
@@ -1463,8 +1727,12 @@ def _first_err(out):
 def start_lobehub(icon=None, item=None):
     def work():
         _notify(APP_NAME, "正在启动 LobeHub…")
+        _LH_IDLE["last_active"] = time.time()
         _wsl("service docker start 2>/dev/null; true", timeout=180)
-        if not _docker_ready():
+        # 上面那句 wsl 调用已经把实例拉起来了 —— 但 wsl_running() 有 10s 缓存,
+        # 不刷新的话 _docker_ready() 会拿旧缓存说"WSL 没起"→ 误报启动失败(2026-10-30 踩过)。
+        _wsl_running_cache["t"] = 0.0
+        if not _docker_ready(fresh=True):
             logger.error("lobehub: docker daemon 未就绪")
             _notify(APP_NAME, "LobeHub 启动失败: docker 守护未就绪(service docker start 失败)")
             _refresh_title()
@@ -1493,16 +1761,20 @@ def start_lobehub(icon=None, item=None):
     _bg(work)
 
 
-def stop_lobehub(icon=None, item=None):
+def stop_lobehub(icon=None, item=None, reason="manual"):
     def work():
         _notify(APP_NAME, "正在停止 LobeHub…")
         out = _wsl("cd %s && docker compose down 2>&1" % _lh_dir_wsl(), timeout=300)
-        logger.info("lobehub down: %s", out[-300:])
+        logger.info("lobehub down(%s): %s", reason, out[-300:])
         _lh_cache["t"] = 0
+        _LH_IDLE["last_active"] = time.time()
         if lobehub_up():
             _notify(APP_NAME, "LobeHub 停止失败: " + (_first_err(out) or "容器仍在运行"))
-        else:
-            _notify(APP_NAME, "LobeHub 已停止")
+            _refresh_title()
+            return
+        # 容器停了 vmmem 还在(实测 882MB)—— 顺手把 WSL 实例退掉,否则"停"等于没停。
+        halted = terminate_wsl(reason="lobehub-down-" + reason)
+        _notify(APP_NAME, "LobeHub 已停止" + ("，WSL 已退出" if halted else "（WSL 仍在运行）"))
         _refresh_title()
     _bg(work)
 
@@ -1546,9 +1818,12 @@ def status_text():
         (f"AIRI 代理 {_mark(listening(AIRI_PROXY['port']))}   :{AIRI_PROXY['port']}   admin → http://127.0.0.1:{AIRI_PROXY['port']}/admin" if AIRI_PROXY else 'AIRI 代理 未配置'),
         f"分拣     {_mark(listening(AIRI_LEMONADE['port']))}   :{AIRI_LEMONADE['port']}",
         f"AIRI     {_mark(airi_running())}   airi.exe",
-        f"LobeHub  {_mark(lobehub_up())}   :3210 (docker" + ("" if _docker_ready() else "; 守护未起!")
+        f"LobeHub  {_mark(lobehub_up())}   :3210 (docker"
+        + ("" if _docker_ready() else ("; WSL 已退出" if not wsl_running() else "; 守护未起!"))
         + ("" if (not lobehub_up() or listening(3210)) else "; 容器在跑但 Windows 连不上 → WSL 网络问题")
         + ")",
+        f"WSL      {_mark(wsl_running())}   {WSL_DISTRO}"
+        + ("" if lobehub_idle_enabled() else "   (空闲退栈已关,不会自动退)"),
     ]
     return "\n".join(lines)
 
@@ -1801,6 +2076,7 @@ def tooltip():
         f"{APP_NAME} {APP_VERSION} — "
         f"记忆桥 {_mark_n(group_up(BRIDGES), len(BRIDGES))} · "
         f"星图 {_mark_n(group_up(VIZ), len(VIZ))} · "
+        f"LobeHub {_mark(lobehub_up())} · WSL {_mark(wsl_running())} · "
         f"嵌入 {embed_mark()} · "
         f"AIRI {_mark(airi_running())}"
     )
@@ -1958,8 +2234,10 @@ def build_menu():
         return lambda icon, item: open_page(v['port'], '/?scope=local')
     opening = [pystray.MenuItem('联邦总图', open_fed_graph), pystray.MenuItem('记忆总成', open_aggregate)] if VIZ else []
     opening += [pystray.MenuItem(v['name'], open_viz(v)) for v in VIZ]
-    if AIRI_PROXY:
-        opening += [pystray.MenuItem('AIRI', open_airi), pystray.MenuItem('AIRI Admin', open_admin)]
+    # AIRI 桌面应用的入口不能挂在 airiProxy 上(5050 那套已随 0.11 退役,配置段已删):
+    # 只要 exe 在就给入口,否则用户会像 2026-10-30 那样"托盘里找不到 AIRI"。
+    if airi_installed():
+        opening.append(pystray.MenuItem('AIRI', open_airi))
     opening.append(pystray.MenuItem('LobeHub', open_lobehub))
     services = [group('记忆桥', BRIDGES), group('星图', VIZ)]
     if SHELL:
@@ -1973,13 +2251,32 @@ def build_menu():
             pystray.MenuItem('验证连接（一次真实调用）', lambda icon, item: run_maintenance('probe-embed', '嵌入自检')),
             pystray.MenuItem('打开记忆库配置目录', lambda icon, item: subprocess.Popen(['explorer', BANKS], creationflags=NOWIN)))))
     services += endpoint_menu_items([EMBED, AIRI_PROXY] + C.EXTRAS)
-    if AIRI_PROXY:
-        services.append(pystray.MenuItem(lambda item: 'AIRI  ' + ('运行中' if airi_running() else '未运行'),
-            pystray.Menu(pystray.MenuItem('启动', lambda icon, item: _run_action(start_airi_app)),
-                         pystray.MenuItem('停止 AIRI 及代理', lambda icon, item: _run_action(stop_airi_app)))))
-    services.append(pystray.MenuItem(lambda item: 'LobeHub  ' + ('运行中' if lobehub_up() else '未运行'),
-        pystray.Menu(pystray.MenuItem('启动', lambda icon, item: start_lobehub()),
-                     pystray.MenuItem('停止', lambda icon, item: stop_lobehub()))))
+    if airi_installed():
+        services.append(pystray.MenuItem(
+            lambda item: 'AIRI 桌面应用  ' + ('运行中' if airi_running() else '未运行'),
+            pystray.Menu(
+                pystray.MenuItem('启动 AIRI', lambda icon, item: _run_action(start_airi_app)),
+                pystray.MenuItem('关闭 AIRI', lambda icon, item: _run_action(stop_airi_app)),
+                pystray.MenuItem('打开 exe 所在目录', lambda icon, item: subprocess.Popen(
+                    ['explorer', os.path.dirname(AIRI_EXE)], creationflags=NOWIN)))))
+    def _lh_label(item=None):
+        return ('LobeHub  ' + ('运行中' if lobehub_up() else '未运行')
+                + ' · WSL ' + ('开' if wsl_running() else '已退'))
+
+    def _toggle_lh_idle(icon=None, item=None):
+        set_lobehub_idle(not lobehub_idle_enabled())
+        _refresh_title()
+
+    services.append(pystray.MenuItem(_lh_label,
+        pystray.Menu(
+            pystray.MenuItem('启动（拉 WSL + compose up）', lambda icon, item: start_lobehub()),
+            pystray.MenuItem('停止（compose down + 退 WSL）', lambda icon, item: stop_lobehub()),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem(
+                (lambda item: '空闲自动退栈（%g 分钟无连接）' % lobehub_idle_minutes()) if lobehub_idle_minutes() > 0
+                else '空闲自动退栈（配置里是 0 = 关）',
+                _toggle_lh_idle, checked=lambda item: lobehub_idle_enabled()),
+            pystray.MenuItem('立即退栈并退出 WSL', lambda icon, item: stop_lobehub(reason='menu-now')))))
     return pystray.Menu(
         pystray.MenuItem(f'{APP_NAME}  {APP_VERSION}', None, enabled=False),
         pystray.MenuItem('打开控制台', lambda icon, item: _run_action(start_shell), default=True, visible=bool(SHELL)),
@@ -2107,6 +2404,7 @@ def _on_ready(icon):
         start_bridge(manual=False)
         start_viz(manual=False)
         autostart_lobehub()          # 2026-10-01:托盘启动顺带把 LobeHub 拉起(lobehub.autoStart 可关)
+        threading.Thread(target=_lobehub_idle_loop, daemon=True).start()   # 空闲退栈看门(含退 WSL)
         if embed_is_api():
             logger.info("embed = API, skip local yuan")
         else:
