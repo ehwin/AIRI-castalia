@@ -438,7 +438,9 @@ export function specsFromManifest(manifest: EngineTuningManifest | null | undefi
       })
     }
   }
-  return out.length > 0 ? out : null
+  // 有清单但清单为空 = 这个变体没有任何可调项（单记忆版）：返回空数组，
+  // 不能退回完整清单，否则面板会画出一排死开关。
+  return out
 }
 
 /** 引擎清单里的键集合（null = 没有清单） */

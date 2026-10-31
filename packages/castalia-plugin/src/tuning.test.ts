@@ -157,6 +157,12 @@ const STANDARD_PANEL_MANIFEST = {
 } as const
 
 describe('引擎能力清单', () => {
+  it('单记忆版：清单是空的 → 空数组（不是 null），面板整块不画', () => {
+    const specs = specsFromManifest({ spec_version: 1, engine: 'castalia-anima', variant: 'memory-only', groups: {} } as any)
+    expect(specs).toEqual([])
+    expect(specs!.length).toBe(0)
+  })
+
   it('没有清单（心智版）→ 退回完整静态清单', () => {
     expect(specsFromManifest(null)).toBeNull()
     // 当前 vendor/engine/tuningSupport.ts 生成的是 null，所以 ACTIVE 就是静态那份
