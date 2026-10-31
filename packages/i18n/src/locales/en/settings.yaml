@@ -428,6 +428,27 @@ pages:
       maintain_merged: merged
       maintain_no_llm: No reflection model configured, so only the digest step ran.
       maintain_failed: Consolidation failed
+      tuning_title: Psyche tuning
+      tuning_description: Emotion labels, half-lives, retrieval weights and injection thresholds — exactly the environment variables the engine reads. Saving writes them into castalia-engine.json and they are injected at startup. Rows marked “restart” only take effect after restarting the app; the rest apply on the next turn.
+      tuning_show: Expand
+      tuning_hide: Collapse
+      tuning_custom: Customised
+      tuning_reset: Reset all to default
+      tuning_apply: Save
+      tuning_saving: Saving…
+      tuning_saved: Saved — applies on the next turn.
+      tuning_saved_restart: Saved. Rows marked “restart” need an app restart.
+      tuning_rejected: Rejected parameters
+      tuning_restart_badge: restart
+      tuning_restart_note: Retrieval weights are module-level constants, so they are only re-read after an app restart.
+      tuning_group_band: Emotion band
+      tuning_group_halfLife: Emotion half-life
+      tuning_group_mood: Long-term mood
+      tuning_group_gain: Gain and limits
+      tuning_group_trait: Human-like properties
+      tuning_group_evidence: Evidence and decay switches
+      tuning_group_search: Retrieval weights
+      tuning_group_inject: Injection thresholds
   data:
     title: Data
     description: Manage stored AIRI data, exports, and resets

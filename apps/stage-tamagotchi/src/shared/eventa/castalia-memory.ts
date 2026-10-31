@@ -58,6 +58,27 @@ export interface CastaliaMaintainReport {
 }
 export const castaliaMemoryMaintain = defineInvokeEventa<CastaliaMaintainReport, { limit?: number } | undefined>('eventa:invoke:castalia:memory:maintain')
 
+/**
+ * 心智 / 检索参数（2026-10-31）。
+ *
+ * 清单与取值范围在 `@proj-airi/castalia-plugin/tuning`（引擎侧唯一一份）；
+ * 这里是「读快照 / 存一组值」两个动作。存完 psyche 那批参数立刻生效，
+ * 检索权重（模块级常量）要重启 app，`needsRestart` 会说明。
+ */
+export interface CastaliaTuningSnapshot {
+  file: string
+  values: Record<string, string>
+  effective: Record<string, string>
+  rejected: { key: string, reason: string }[]
+  needsRestart: boolean
+}
+
+export const castaliaTuningGet = defineInvokeEventa<CastaliaTuningSnapshot>('eventa:invoke:castalia:tuning:get')
+export const castaliaTuningSave = defineInvokeEventa<
+  CastaliaTuningSnapshot,
+  { values: Record<string, string | number | boolean | null> }
+>('eventa:invoke:castalia:tuning:save')
+
 // ── Full 总线（fedServer 3314）───────────────────────────────────────────────
 // 记忆体本体走进程内插件；这里只保留"跨库"那一层：总线能一次查所有库，
 // 面板「记忆体」页用它浏览，长期记忆页仍然只看 castalia 本库。

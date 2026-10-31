@@ -21,6 +21,10 @@
     "./bank/store-tools": {
       "types": "./src/bank/store-tools.ts",
       "default": "./src/bank/store-tools.ts"
+    },
+    "./tuning": {
+      "types": "./src/tuning.ts",
+      "default": "./src/tuning.ts"
     }
   },
   "scripts": {

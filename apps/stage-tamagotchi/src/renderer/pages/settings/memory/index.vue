@@ -1,19 +1,19 @@
 <script setup lang="ts">
 import type { CastaliaFullHit, CastaliaFullMember } from '../../../../shared/eventa/castalia-memory'
 
+import { TUNING_GROUPS, TUNING_PRESETS, TUNING_SPECS } from '@proj-airi/castalia-plugin/tuning'
 import { useElectronEventaInvoke } from '@proj-airi/electron-vueuse'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryMaintain, castaliaOpenConsole } from '../../../../shared/eventa/castalia-memory'
+import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryMaintain, castaliaOpenConsole, castaliaTuningGet, castaliaTuningSave } from '../../../../shared/eventa/castalia-memory'
 
 // NOTICE: 这个页面在 app 里覆盖了 stage-pages 的同名 WIP 页（见 electron.vite.config.ts 的 exclude）。
 // 边界: 「记忆体」= Full 总线（跨库只读总览/检索）；「长期记忆」= castalia 本库（进程内插件）。
 // 总线没起时页面只显示离线提示，不阻塞其它设置页。
 
-const { t } = useI18n()
+const { locale, t } = useI18n()
 const KEY = 'settings.pages.memory.bus'
-
 const invokeMembers = useElectronEventaInvoke(castaliaFullMembers)
 const invokeSearch = useElectronEventaInvoke(castaliaFullSearch)
 const invokeOpenConsole = useElectronEventaInvoke(castaliaOpenConsole)
@@ -71,6 +71,124 @@ async function openConsole(view: 'agg' | 'mng' | 'viz') {
   catch (error) {
     consoleNote.value = (error as Error).message
   }
+}
+
+// ── 心智 / 检索参数（2026-10-31）──────────────────────────────────────────
+// 清单来自引擎侧（@proj-airi/castalia-plugin/tuning），这里只做表单 + 保存。
+// psyche 那批参数每轮读取 → 存完即时生效；检索权重是模块级常量 → 要重启。
+const invokeTuningGet = useElectronEventaInvoke(castaliaTuningGet)
+const invokeTuningSave = useElectronEventaInvoke(castaliaTuningSave)
+
+const tuningOpen = ref(false)
+const tuningLoading = ref(false)
+const tuningSaving = ref(false)
+const tuningNote = ref('')
+const tuningFile = ref('')
+const tuningRestartNeeded = ref(false)
+const draft = ref<Record<string, string>>({})
+
+const labelOf = (o: { zh: string, en: string }) => (String(locale.value).startsWith('zh') ? o.zh : o.en)
+const specsOfGroup = (group: string) => TUNING_SPECS.filter(spec => spec.group === group)
+/**
+ * 分组标题单独列成字面量：仓库的 settings-search 插件在构建期静态扫 `t('...')`，
+ * 拼出来的 key（`t(\`${KEY}.tuning_group_${group}\`)`）会让构建直接失败。
+ */
+const groupLabels = computed<Record<string, string>>(() => ({
+  band: t('settings.pages.memory.bus.tuning_group_band'),
+  halfLife: t('settings.pages.memory.bus.tuning_group_halfLife'),
+  mood: t('settings.pages.memory.bus.tuning_group_mood'),
+  gain: t('settings.pages.memory.bus.tuning_group_gain'),
+  trait: t('settings.pages.memory.bus.tuning_group_trait'),
+  evidence: t('settings.pages.memory.bus.tuning_group_evidence'),
+  search: t('settings.pages.memory.bus.tuning_group_search'),
+  inject: t('settings.pages.memory.bus.tuning_group_inject'),
+}))
+/** 与「预设」相比现在是不是自定义过：只用于标题上的小字。 */
+const tuningIsCustom = computed(() => Object.keys(draft.value).length > 0)
+
+function fillDraft(values: Record<string, string>) {
+  const next: Record<string, string> = {}
+  for (const spec of TUNING_SPECS) {
+    if (values[spec.key] !== undefined)
+      next[spec.key] = values[spec.key]
+  }
+  draft.value = next
+}
+
+async function loadTuning() {
+  tuningLoading.value = true
+  try {
+    const snapshot = await invokeTuningGet()
+    tuningFile.value = snapshot.file
+    tuningRestartNeeded.value = snapshot.needsRestart
+    fillDraft(snapshot.values)
+    if (snapshot.rejected.length)
+      tuningNote.value = `${t(`${KEY}.tuning_rejected`)}: ${snapshot.rejected.map(item => `${item.key}(${item.reason})`).join(', ')}`
+  }
+  catch (error) {
+    tuningNote.value = (error as Error).message
+  }
+  finally {
+    tuningLoading.value = false
+  }
+}
+
+async function persistTuning(values: Record<string, string | null>) {
+  tuningSaving.value = true
+  tuningNote.value = ''
+  try {
+    const snapshot = await invokeTuningSave({ values })
+    tuningFile.value = snapshot.file
+    tuningRestartNeeded.value = snapshot.needsRestart
+    fillDraft(snapshot.values)
+    if (snapshot.rejected.length) {
+      tuningNote.value = `${t(`${KEY}.tuning_rejected`)}: ${snapshot.rejected.map(item => `${item.key}(${item.reason})`).join(', ')}`
+    }
+    else {
+      tuningNote.value = snapshot.needsRestart
+        ? t(`${KEY}.tuning_saved_restart`)
+        : t(`${KEY}.tuning_saved`)
+    }
+  }
+  catch (error) {
+    tuningNote.value = (error as Error).message
+  }
+  finally {
+    tuningSaving.value = false
+  }
+}
+
+/** 表单里的空值 = 回默认（null），非空则原样提交，越界由主进程拒绝。 */
+async function saveTuning() {
+  const values: Record<string, string | null> = {}
+  for (const spec of TUNING_SPECS) {
+    const raw = draft.value[spec.key]
+    values[spec.key] = raw === undefined || raw === '' ? null : raw
+  }
+  await persistTuning(values)
+}
+
+/** 套预设：预设没提到的键一律回默认，保证「切过去就是你看到的那组」。 */
+async function applyPreset(id: string) {
+  const preset = TUNING_PRESETS[id]
+  if (!preset)
+    return
+  const values: Record<string, string | null> = {}
+  for (const spec of TUNING_SPECS)
+    values[spec.key] = preset.values[spec.key] ?? null
+  await persistTuning(values)
+}
+
+async function resetTuning() {
+  const values: Record<string, string | null> = {}
+  for (const spec of TUNING_SPECS) values[spec.key] = null
+  await persistTuning(values)
+}
+
+function toggleTuning() {
+  tuningOpen.value = !tuningOpen.value
+  if (tuningOpen.value && !tuningFile.value)
+    void loadTuning()
 }
 
 const members = ref<CastaliaFullMember[]>([])
@@ -275,6 +393,98 @@ onMounted(refresh)
         </p>
       </li>
     </ul>
+
+    <!-- 心智 / 检索参数：清单在引擎侧（@proj-airi/castalia-plugin/tuning），这里只是表单 -->
+    <section :class="['flex flex-col', 'gap-3', 'rounded-xl', 'bg-neutral-50 dark:bg-neutral-800/60', 'p-4']">
+      <header :class="['flex flex-wrap items-baseline', 'gap-2']">
+        <h2 :class="['text-sm font-medium']">
+          {{ t(`${KEY}.tuning_title`) }}
+        </h2>
+        <span v-if="tuningIsCustom" :class="['text-xs', 'text-primary-500']">{{ t(`${KEY}.tuning_custom`) }}</span>
+        <button
+          type="button"
+          :class="['ml-auto', 'rounded-lg', 'px-3 py-1.5', 'text-xs', 'bg-neutral-100 dark:bg-neutral-800', 'hover:bg-neutral-200 dark:hover:bg-neutral-700']"
+          @click="toggleTuning"
+        >
+          {{ tuningOpen ? t(`${KEY}.tuning_hide`) : t(`${KEY}.tuning_show`) }}
+        </button>
+      </header>
+      <p :class="['text-xs', 'text-neutral-500 dark:text-neutral-400']">
+        {{ t(`${KEY}.tuning_description`) }}
+      </p>
+
+      <div v-if="tuningOpen" :class="['flex flex-col', 'gap-4']">
+        <div :class="['flex flex-wrap', 'gap-2']">
+          <button
+            v-for="(preset, id) in TUNING_PRESETS"
+            :key="id"
+            type="button"
+            :disabled="tuningSaving"
+            :title="preset.note ? labelOf(preset.note) : ''"
+            :class="['rounded-full', 'px-3 py-1', 'text-xs', 'bg-neutral-100 dark:bg-neutral-800', 'hover:bg-neutral-200 dark:hover:bg-neutral-700', tuningSaving ? 'opacity-50' : '']"
+            @click="applyPreset(String(id))"
+          >
+            {{ labelOf(preset.label) }}
+          </button>
+          <button
+            type="button"
+            :disabled="tuningSaving"
+            :class="['rounded-full', 'px-3 py-1', 'text-xs', 'border', 'border-neutral-300 dark:border-neutral-600', 'hover:bg-neutral-100 dark:hover:bg-neutral-700']"
+            @click="resetTuning"
+          >
+            {{ t(`${KEY}.tuning_reset`) }}
+          </button>
+        </div>
+
+        <div v-for="group in TUNING_GROUPS" :key="group" :class="['flex flex-col', 'gap-2']">
+          <h3 :class="['text-[11px]', 'uppercase', 'tracking-wide', 'text-neutral-400 dark:text-neutral-500']">
+            {{ groupLabels[group] }}
+          </h3>
+          <label
+            v-for="spec in specsOfGroup(group)"
+            :key="spec.key"
+            :title="spec.hint ? labelOf(spec.hint) : spec.key"
+            :class="['flex items-center', 'gap-3', 'text-sm']"
+          >
+            <span :class="['min-w-0 flex-1', 'flex flex-wrap items-baseline', 'gap-1.5']">
+              <span>{{ labelOf(spec.label) }}</span>
+              <code :class="['text-[10px]', 'text-neutral-400 dark:text-neutral-500']">{{ spec.default }}</code>
+              <span v-if="spec.restart" :class="['rounded', 'bg-amber-100 dark:bg-amber-500/20', 'px-1', 'text-[10px]', 'text-amber-700 dark:text-amber-300']">
+                {{ t(`${KEY}.tuning_restart_badge`) }}
+              </span>
+            </span>
+            <input
+              v-model="draft[spec.key]"
+              type="number"
+              :min="spec.min"
+              :max="spec.max"
+              :step="spec.step"
+              :placeholder="String(spec.default)"
+              :class="['w-24 shrink-0', 'rounded-lg', 'border', 'border-neutral-200 dark:border-neutral-700', 'bg-white dark:bg-neutral-900', 'px-2 py-1', 'text-sm', 'outline-none', 'focus:border-primary-400']"
+            >
+          </label>
+        </div>
+
+        <div :class="['flex flex-wrap items-center', 'gap-2']">
+          <button
+            type="button"
+            :disabled="tuningSaving || tuningLoading"
+            :class="['rounded-lg', 'px-4 py-2', 'text-sm', 'bg-primary-500 text-white', 'hover:bg-primary-600', 'disabled:opacity-50']"
+            @click="saveTuning"
+          >
+            {{ tuningSaving ? t(`${KEY}.tuning_saving`) : t(`${KEY}.tuning_apply`) }}
+          </button>
+          <span v-if="tuningNote" :class="['text-xs', 'text-neutral-500 dark:text-neutral-400']">{{ tuningNote }}</span>
+        </div>
+
+        <p v-if="tuningRestartNeeded" :class="['text-xs', 'text-amber-600 dark:text-amber-400']">
+          {{ t(`${KEY}.tuning_restart_note`) }}
+        </p>
+        <p v-if="tuningFile" :class="['text-[11px]', 'text-neutral-400 dark:text-neutral-500', 'break-all']">
+          {{ tuningFile }}
+        </p>
+      </div>
+    </section>
   </div>
 </template>
 

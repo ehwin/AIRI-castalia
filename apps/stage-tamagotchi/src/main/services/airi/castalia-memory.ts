@@ -8,13 +8,14 @@ import { defineInvokeHandler } from '@moeru/eventa'
 import { createCastaliaMemoryRepository } from '@proj-airi/castalia-plugin/memory'
 import { app } from 'electron'
 
-import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryRecall, castaliaMemorySave, castaliaOpenConsole } from '../../../shared/eventa/castalia-memory'
+import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryRecall, castaliaMemorySave, castaliaOpenConsole, castaliaTuningGet, castaliaTuningSave } from '../../../shared/eventa/castalia-memory'
 import { openCastaliaConsole } from './castalia-console'
 import type { CastaliaEngineMemory } from './castalia-engine'
 
 import { createCastaliaEngineMemory, resolveCastaliaEngineOptions } from './castalia-engine'
 import { createCastaliaFullClient, resolveCastaliaFullUrl } from './castalia-full'
 import { createInProcessBankMemory } from './castalia-inprocess'
+import { applyStoredTuning, getTuningSnapshot, saveTuning } from './castalia-tuning'
 
 let repository: ReturnType<typeof createCastaliaMemoryRepository> | undefined
 let repositoryPath: string | undefined
@@ -164,6 +165,13 @@ export function setupCastaliaMemoryService(params: {
   defineInvokeHandler(params.context, castaliaOpenConsole, input => openCastaliaConsole(input))
 
   const engineOptions = resolveCastaliaEngineOptions(userDataDir)
+
+  // 心智/检索参数：必须在引擎模块求值前注入 process.env（引擎是进程内加载的）。
+  // 无论走引擎还是本地 sqlite 都先应用一次 —— 面板要能看到「实际生效值」。
+  applyStoredTuning(userDataDir)
+  defineInvokeHandler(params.context, castaliaTuningGet, () => getTuningSnapshot(userDataDir))
+  defineInvokeHandler(params.context, castaliaTuningSave, input => saveTuning(userDataDir, input?.values ?? {}))
+
   if (engineOptions) {
     // 默认在主进程内直连记忆库（不再 spawn 子进程、不走 MCP/HTTP）；
     // CASTALIA_MEMORY_TRANSPORT=stdio 可切回旧的子进程路径做对照/兜底。
