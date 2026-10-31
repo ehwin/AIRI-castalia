@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest'
+
 import {
+  ACTIVE_TUNING_GROUPS,
+  ACTIVE_TUNING_PRESETS,
+  ACTIVE_TUNING_SPECS,
   applyTuning,
   coerceTuning,
   diffFromPreset,
+  ENGINE_TUNING_SPECS,
   needsRestart,
   readTuningFromEnv,
   specOf,
+  specsFromManifest,
   TUNING_GROUPS,
   TUNING_PRESETS,
   TUNING_SPECS,
@@ -110,5 +116,90 @@ describe('注入 env', () => {
     expect(diff.PSYCHE_BAND_CENTER_OFFSET).toBe('-0.2')
     expect(diff.PSYCHE_BAND_HOLD).toBe('')
     expect(diff.PSYCHE_BAND_ENTER).toBeUndefined()
+  })
+})
+
+// ── 引擎能力清单（tuning-support.json）──────────────────────────────────────
+// 面板只画清单里有的键：心智版 30 项、记忆+面板 7 项、标准版带面板 3 项。
+const MEMORY_PANEL_MANIFEST = {
+  spec_version: 1,
+  engine: 'castalia-anima',
+  variant: 'memory-panel',
+  engine_version: '2.0.0',
+  groups: {
+    search: [
+      { key: 'WEIGHT_CONSISTENCY', kind: 'number', default: 1, min: 0, max: 3, step: 0.01, restart: true, label: { zh: '相关性', en: 'relevance' } },
+      { key: 'WEIGHT_EMOTION', kind: 'number', default: 0.12, min: 0, max: 2, step: 0.01, restart: true, label: { zh: '情感', en: 'emotion' } },
+      { key: 'WEIGHT_TIME', kind: 'number', default: 0.03, min: 0, max: 1, step: 0.01, restart: true, label: { zh: '时间', en: 'recency' } },
+      { key: 'WEIGHT_DEVIATION', kind: 'number', default: 0.1, min: 0, max: 1, step: 0.01, restart: true, label: { zh: '偏离', en: 'deviation' } },
+    ],
+    inject: [
+      { key: 'MEMORY_INJECT_MIN_SIM_LEXICAL', kind: 'number', default: 0.2, min: 0, max: 1, step: 0.01, label: { zh: '词法', en: 'lexical' } },
+      { key: 'MEMORY_INJECT_MIN_SIM', kind: 'number', default: 0.5, min: 0, max: 1, step: 0.01, label: { zh: '相似度', en: 'similarity' } },
+      { key: 'MEMORY_INJECT_STRONG', kind: 'number', default: 0.5, min: 0, max: 1, step: 0.01, label: { zh: '证据门', en: 'evidence' } },
+    ],
+  },
+  presets: {},
+} as const
+
+const STANDARD_PANEL_MANIFEST = {
+  spec_version: 1,
+  engine: 'castalia',
+  variant: 'panel',
+  groups: {
+    search: [
+      { key: 'WEIGHT_CONSISTENCY', kind: 'number', default: 0.65, min: 0, max: 3, step: 0.01, restart: true, label: { zh: '相关性', en: 'relevance' } },
+      { key: 'WEIGHT_TIME', kind: 'number', default: 0.35, min: 0, max: 1, step: 0.01, restart: true, label: { zh: '时间', en: 'recency' } },
+      { key: 'SEARCH_MIN_SCORE', kind: 'number', default: 0.15, min: 0, max: 1, step: 0.01, restart: true, label: { zh: '下限', en: 'floor' } },
+    ],
+  },
+  presets: {},
+} as const
+
+describe('引擎能力清单', () => {
+  it('没有清单（心智版）→ 退回完整静态清单', () => {
+    expect(specsFromManifest(null)).toBeNull()
+    // 当前 vendor/engine/tuningSupport.ts 生成的是 null，所以 ACTIVE 就是静态那份
+    if (ENGINE_TUNING_SPECS === null)
+      expect(ACTIVE_TUNING_SPECS).toEqual(TUNING_SPECS)
+  })
+
+  it('记忆+面板版：7 项，只有 search/inject 两组', () => {
+    const specs = specsFromManifest(MEMORY_PANEL_MANIFEST as any)!
+    expect(specs.map(spec => spec.key)).toHaveLength(7)
+    expect(new Set(specs.map(spec => spec.group))).toEqual(new Set(['search', 'inject']))
+    expect(specs.some(spec => spec.key.startsWith('PSYCHE_'))).toBe(false)
+    // 默认值来自引擎，不是面板自己那份
+    expect(specs.find(spec => spec.key === 'WEIGHT_CONSISTENCY')!.default).toBe(1)
+    expect(specs.find(spec => spec.key === 'WEIGHT_TIME')!.default).toBe(0.03)
+  })
+
+  it('标准版带面板：3 项，且同名权重用标准版自己的默认值', () => {
+    const specs = specsFromManifest(STANDARD_PANEL_MANIFEST as any)!
+    expect(specs.map(spec => spec.key)).toHaveLength(3)
+    expect(specs.find(spec => spec.key === 'WEIGHT_CONSISTENCY')!.default).toBe(0.65)
+    expect(specs.find(spec => spec.key === 'WEIGHT_TIME')!.default).toBe(0.35)
+  })
+
+  it('用引擎清单做白名单：清单外的键（PSYCHE_*）被拒', () => {
+    const specs = specsFromManifest(MEMORY_PANEL_MANIFEST as any)!
+    const result = coerceTuning({ PSYCHE_BAND_ENTER: 0.3, WEIGHT_TIME: 0.05 }, specs)
+    expect(result.values).toEqual({ WEIGHT_TIME: '0.05' })
+    expect(result.rejected).toEqual([{ key: 'PSYCHE_BAND_ENTER', reason: 'unknown-key' }])
+  })
+
+  it('用引擎清单做白名单：越界仍拒绝（不夹到边界）', () => {
+    const specs = specsFromManifest(STANDARD_PANEL_MANIFEST as any)!
+    const result = coerceTuning({ WEIGHT_TIME: 9 }, specs)
+    expect(result.values).toEqual({})
+    expect(result.rejected[0].reason).toContain('out-of-range')
+  })
+
+  it('预设只保留清单能覆盖的那些', () => {
+    // 当前 TUNING_SUPPORT=null → ACTIVE 预设 = 静态三档（band 预设都在）
+    if (ENGINE_TUNING_SPECS === null) {
+      expect(Object.keys(ACTIVE_TUNING_PRESETS)).toEqual(Object.keys(TUNING_PRESETS))
+      expect(ACTIVE_TUNING_GROUPS).toEqual(TUNING_GROUPS)
+    }
   })
 })

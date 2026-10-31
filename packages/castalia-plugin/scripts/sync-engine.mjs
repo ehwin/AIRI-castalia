@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import process from 'node:process'
+
 // NOTICE: 把 castalia 引擎源码同步进插件 vendor 目录。
 // 用: node packages/castalia-plugin/scripts/sync-engine.mjs [--engine <src dir>]
 // 做的事: 复制 .ts → 改写 better-sqlite3/sqlite-vec 导入 → 加 NOTICE 头 + @ts-nocheck →
@@ -67,11 +69,13 @@ function rewrite(source, depth = 0) {
 function collectTypeExports(dir) {
   const map = new Map()
   for (const file of readdirSync(dir)) {
-    if (!file.endsWith('.ts')) continue
+    if (!file.endsWith('.ts'))
+      continue
     const text = readFileSync(join(dir, file), 'utf8')
     const names = new Set()
-    for (const m of text.matchAll(/export\s+(?:interface|type)\s+([A-Za-z0-9_]+)/g)) names.add(m[1])
-    if (names.size > 0) map.set(file.replace(/\.ts$/, ''), names)
+    for (const m of text.matchAll(/export\s+(?:interface|type)\s+(\w+)/g)) names.add(m[1])
+    if (names.size > 0)
+      map.set(file.replace(/\.ts$/, ''), names)
   }
   return map
 }
@@ -83,17 +87,22 @@ function splitTypeImports(source, typeExports) {
       // 引擎内部统一用 './x.js' 写法（TS→JS 输出习惯），匹配表键要去掉 .js
       const key = spec.replace(/^\.\//, '').replace(/\.js$/, '')
       const types = typeExports.get(key)
-      if (!types) return whole
+      if (!types)
+        return whole
       const valueParts = []
       const typeParts = []
       for (const raw of names.split(',')) {
         const name = raw.trim()
-        if (!name) continue
-        ;(types.has(name) ? typeParts : valueParts).push(name)
+        if (!name)
+          continue
+        const bucket = types.has(name) ? typeParts : valueParts
+        bucket.push(name)
       }
-      if (typeParts.length === 0) return whole
+      if (typeParts.length === 0)
+        return whole
       const lines = []
-      if (valueParts.length > 0) lines.push(`import { ${valueParts.join(', ')} } from '${spec}'`)
+      if (valueParts.length > 0)
+        lines.push(`import { ${valueParts.join(', ')} } from '${spec}'`)
       lines.push(`import type { ${typeParts.join(', ')} } from '${spec}'`)
       return lines.join('\n')
     },
@@ -113,10 +122,44 @@ const typeExports = collectTypeExports(engineSrc)
 
 let copied = 0
 for (const file of sources) {
-  if (!file.endsWith('.ts') || SKIP.has(file)) continue
+  if (!file.endsWith('.ts') || SKIP.has(file))
+    continue
   const raw = readFileSync(join(engineSrc, file), 'utf8')
   writeFileSync(join(dest, file), `${header(file)}\n${splitTypeImports(rewrite(raw), typeExports)}`, 'utf8')
   copied += 1
+}
+
+// ── 引擎能力清单 → TS 常量（面板据此只画真实支持的参数）────────────────────────
+// 引擎仓根有 tuning-support.json 就落成 src/vendor/engine/tuningSupport.ts；
+// 没有（心智版完整 Anima）就写 null —— 面板退回 src/tuning.ts 的完整清单，行为与以前一致。
+// 为什么不直接读 JSON：打包后 asar 里 fs 读 JSON 路径不可靠，而 TS 常量会被正常编译进 bundle。
+{
+  const engineRoot = resolve(engineSrc, '..')
+  const manifestPath = join(engineRoot, 'tuning-support.json')
+  let manifest = null
+  if (existsSync(manifestPath)) {
+    try {
+      manifest = JSON.parse(readFileSync(manifestPath, 'utf8').replace(/^\uFEFF+/, ''))
+    }
+    catch (error) {
+      throw new Error(`[sync-engine] tuning-support.json 解析失败（${manifestPath}）：${error.message}`)
+    }
+    if (!manifest || typeof manifest !== 'object' || typeof manifest.groups !== 'object')
+      throw new Error(`[sync-engine] tuning-support.json 缺 groups（${manifestPath}）`)
+  }
+  const body = [
+    '// NOTICE: 由 scripts/sync-engine.mjs 从引擎仓根的 tuning-support.json 生成，不要手改。',
+    manifest
+      ? `// 引擎：${manifest.engine} / 变体：${manifest.variant} / 版本：${manifest.engine_version ?? '?'}`
+      : '// 当前引擎没有声明清单（心智版）→ 面板退回 src/tuning.ts 的完整清单。',
+    '// 类型定义在 src/engineTuning.ts。',
+    'import type { EngineTuningManifest } from \'../../engineTuning\'',
+    '',
+    `export const TUNING_SUPPORT: EngineTuningManifest | null = ${manifest ? JSON.stringify(manifest, null, 2) : 'null'}`,
+    '',
+  ].join('\n')
+  writeFileSync(join(dest, 'tuningSupport.ts'), body, 'utf8')
+  console.info(`[sync-engine] tuning-support: ${manifest ? `${manifest.variant} (${Object.values(manifest.groups).flat().length} keys)` : 'none (fallback to full list)'}`)
 }
 
 // 子目录也要镜像：reflectAll.ts 引用了 './federation/index.js'，只复制扁平文件会留断链。
@@ -124,9 +167,11 @@ for (const file of sources) {
 const SUBDIRS = ['federation']
 for (const sub of SUBDIRS) {
   const from = join(engineSrc, sub)
-  if (!existsSync(from)) continue
+  if (!existsSync(from))
+    continue
   const subSources = readdirSync(from).filter(f => f.endsWith('.ts')).sort()
-  if (subSources.length === 0) continue
+  if (subSources.length === 0)
+    continue
   const subDest = join(dest, sub)
   mkdirSync(subDest, { recursive: true })
   const subTypeExports = collectTypeExports(from)
@@ -140,4 +185,4 @@ for (const sub of SUBDIRS) {
     copied += 1
   }
 }
-console.log(`synced ${copied} files from ${engineSrc} -> ${dest}`)
+console.info(`synced ${copied} files from ${engineSrc} -> ${dest}`)

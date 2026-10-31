@@ -1,3 +1,4 @@
+import type { EngineTuningManifest, EngineTuningSpec } from './engineTuning'
 /**
  * 心智/检索参数的唯一清单（2026-10-31）。
  *
@@ -11,6 +12,8 @@
  *      挡下来并告诉用户，而不是悄悄改成 max。
  */
 import type { PsycheTuning } from './vendor/engine/psycheState'
+
+import { TUNING_SUPPORT } from './vendor/engine/tuningSupport'
 
 export type TuningGroup = 'band' | 'halfLife' | 'mood' | 'gain' | 'trait' | 'evidence' | 'search' | 'inject'
 
@@ -405,7 +408,62 @@ export const TUNING_PRESETS: Record<string, { label: { zh: string, en: string },
   },
 }
 
-const SPEC_BY_KEY = new Map(TUNING_SPECS.map(spec => [spec.key, spec]))
+/**
+ * 引擎声明的能力（来自 `tuning-support.json`，由 sync-engine.mjs 生成到 vendor/engine/tuningSupport.ts）。
+ *
+ * null = 引擎没带清单（心智版完整 Anima），此时行为与以前完全一致：面板画完整的 TUNING_SPECS。
+ * 非 null = 只画这个变体真正支持的键，默认值也用引擎的（不同变体同名权重默认值不同）。
+ */
+export function specsFromManifest(manifest: EngineTuningManifest | null | undefined): readonly TuningSpec[] | null {
+  if (!manifest || typeof manifest !== 'object' || !manifest.groups)
+    return null
+  const out: TuningSpec[] = []
+  for (const [group, list] of Object.entries(manifest.groups)) {
+    if (!Array.isArray(list))
+      continue
+    for (const spec of list as EngineTuningSpec[]) {
+      if (!spec || typeof spec.key !== 'string')
+        continue
+      out.push({
+        key: spec.key,
+        group: group as TuningGroup,
+        kind: spec.kind === 'bool' ? 'bool' : 'number',
+        default: Number(spec.default),
+        min: Number(spec.min),
+        max: Number(spec.max),
+        step: Number(spec.step) || 0.01,
+        ...(spec.restart === true ? { restart: true } : {}),
+        label: spec.label ?? { zh: spec.key, en: spec.key },
+        ...(spec.hint ? { hint: spec.hint } : {}),
+      })
+    }
+  }
+  return out.length > 0 ? out : null
+}
+
+/** 引擎清单里的键集合（null = 没有清单） */
+export const ENGINE_TUNING_SPECS = specsFromManifest(TUNING_SUPPORT)
+
+/** 面板实际要画的清单：有引擎清单就用它，否则退回完整静态清单。 */
+export const ACTIVE_TUNING_SPECS: readonly TuningSpec[] = ENGINE_TUNING_SPECS ?? TUNING_SPECS
+
+/** 只保留清单里真有键的组（空组不画，避免一排死开关/空标题）。 */
+export const ACTIVE_TUNING_GROUPS: readonly TuningGroup[] = TUNING_GROUPS.filter(
+  group => ACTIVE_TUNING_SPECS.some(spec => spec.group === group),
+)
+
+const ACTIVE_KEYS = new Set(ACTIVE_TUNING_SPECS.map(spec => spec.key))
+
+/** 预设里引用了引擎不支持的键 → 整个预设不显示（例如记忆体没有 band 三项）。 */
+export const ACTIVE_TUNING_PRESETS: Record<string, { label: { zh: string, en: string }, note?: { zh: string, en: string }, values: Record<string, string> }>
+  = Object.fromEntries(
+    Object.entries(TUNING_PRESETS)
+      .filter(([, preset]) => preset && Object.keys(preset.values ?? {}).length === 0
+        ? true
+        : Object.keys(preset.values ?? {}).every(key => ACTIVE_KEYS.has(key))),
+  )
+
+const ACTIVE_BY_KEY = new Map(ACTIVE_TUNING_SPECS.map(spec => [spec.key, spec]))
 
 export interface TuningCoerceResult {
   /** 规范化后的值（字符串，与 env 同构）；等于默认值的键会被丢掉 */
@@ -421,19 +479,23 @@ export interface TuningCoerceResult {
  * - 越界不夹，直接 `out-of-range` 拒绝，让用户看见自己填错了。
  * - `bool` 接受 0/1/'0'/'1'/true/false。
  */
-export function coerceTuning(input: unknown): TuningCoerceResult {
+export function coerceTuning(input: unknown, specs?: readonly TuningSpec[]): TuningCoerceResult {
+  const table = specs ? new Map(specs.map(spec => [spec.key, spec])) : ACTIVE_BY_KEY
   const values: Record<string, string> = {}
   const rejected: { key: string, reason: string }[] = []
-  if (input === null || input === undefined) return { values, rejected }
-  if (typeof input !== 'object') return { values, rejected: [{ key: '*', reason: 'not-an-object' }] }
+  if (input === null || input === undefined)
+    return { values, rejected }
+  if (typeof input !== 'object')
+    return { values, rejected: [{ key: '*', reason: 'not-an-object' }] }
 
   for (const [key, raw] of Object.entries(input as Record<string, unknown>)) {
-    const spec = SPEC_BY_KEY.get(key)
+    const spec = table.get(key)
     if (!spec) {
       rejected.push({ key, reason: 'unknown-key' })
       continue
     }
-    if (raw === null || raw === undefined || raw === '') continue
+    if (raw === null || raw === undefined || raw === '')
+      continue
 
     const numeric = typeof raw === 'boolean' ? (raw ? 1 : 0) : Number(raw)
     if (!Number.isFinite(numeric)) {
@@ -448,17 +510,20 @@ export function coerceTuning(input: unknown): TuningCoerceResult {
       rejected.push({ key, reason: `out-of-range(${spec.min}..${spec.max})` })
       continue
     }
-    if (numeric === spec.default) continue // 与默认相同就不落盘，配置文件保持最小
+    if (numeric === spec.default)
+      continue // 与默认相同就不落盘，配置文件保持最小
     values[key] = String(numeric)
   }
   return { values, rejected }
 }
 
 /** 把一组值注入 env（只写白名单键）。返回真正写进去的键。 */
-export function applyTuning(env: NodeJS.ProcessEnv, values: Record<string, string>): string[] {
+export function applyTuning(env: NodeJS.ProcessEnv, values: Record<string, string>, specs?: readonly TuningSpec[]): string[] {
+  const table = specs ? new Map(specs.map(spec => [spec.key, spec])) : ACTIVE_BY_KEY
   const applied: string[] = []
   for (const [key, value] of Object.entries(values)) {
-    if (!SPEC_BY_KEY.has(key)) continue
+    if (!table.has(key))
+      continue
     env[key] = value
     applied.push(key)
   }
@@ -466,19 +531,21 @@ export function applyTuning(env: NodeJS.ProcessEnv, values: Record<string, strin
 }
 
 /** 把 env 里的当前值读回来（给表单显示「实际生效值」）。 */
-export function readTuningFromEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+export function readTuningFromEnv(env: NodeJS.ProcessEnv, specs?: readonly TuningSpec[]): Record<string, string> {
   const out: Record<string, string> = {}
-  for (const spec of TUNING_SPECS) {
+  for (const spec of (specs ?? ACTIVE_TUNING_SPECS)) {
     const raw = env[spec.key]
-    if (raw === undefined || raw === '') continue
+    if (raw === undefined || raw === '')
+      continue
     out[spec.key] = raw
   }
   return out
 }
 
 /** 这组值里有没有需要重启后端才生效的键。 */
-export function needsRestart(values: Record<string, string>): boolean {
-  return Object.keys(values).some((key) => SPEC_BY_KEY.get(key)?.restart === true)
+export function needsRestart(values: Record<string, string>, specs?: readonly TuningSpec[]): boolean {
+  const table = specs ? new Map(specs.map(spec => [spec.key, spec])) : ACTIVE_BY_KEY
+  return Object.keys(values).some(key => table.get(key)?.restart === true)
 }
 
 /** 与某个预设的差异（用于「当前不是默认」这种提示）。 */
@@ -486,7 +553,8 @@ export function diffFromPreset(values: Record<string, string>, preset: string): 
   const target = TUNING_PRESETS[preset]?.values ?? {}
   const out: Record<string, string> = {}
   for (const key of new Set([...Object.keys(values), ...Object.keys(target)])) {
-    if ((values[key] ?? '') !== (target[key] ?? '')) out[key] = values[key] ?? ''
+    if ((values[key] ?? '') !== (target[key] ?? ''))
+      out[key] = values[key] ?? ''
   }
   return out
 }
@@ -520,6 +588,7 @@ export function defaultsFromEngine(readPsycheTuning: () => PsycheTuning): Record
   }
 }
 
-export function specOf(key: string): TuningSpec | undefined {
-  return SPEC_BY_KEY.get(key)
+export function specOf(key: string, specs?: readonly TuningSpec[]): TuningSpec | undefined {
+  const table = specs ? new Map(specs.map(spec => [spec.key, spec])) : ACTIVE_BY_KEY
+  return table.get(key)
 }

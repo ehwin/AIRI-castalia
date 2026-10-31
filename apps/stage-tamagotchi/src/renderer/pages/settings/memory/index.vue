@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { CastaliaFullHit, CastaliaFullMember } from '../../../../shared/eventa/castalia-memory'
 
-import { TUNING_GROUPS, TUNING_PRESETS, TUNING_SPECS } from '@proj-airi/castalia-plugin/tuning'
+import { ACTIVE_TUNING_GROUPS, ACTIVE_TUNING_PRESETS, ACTIVE_TUNING_SPECS } from '@proj-airi/castalia-plugin/tuning'
 import { useElectronEventaInvoke } from '@proj-airi/electron-vueuse'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -88,7 +88,11 @@ const tuningRestartNeeded = ref(false)
 const draft = ref<Record<string, string>>({})
 
 const labelOf = (o: { zh: string, en: string }) => (String(locale.value).startsWith('zh') ? o.zh : o.en)
-const specsOfGroup = (group: string) => TUNING_SPECS.filter(spec => spec.group === group)
+// 画哪几组由引擎清单决定：心智版 8 组、记忆+面板版只有 search/inject、标准版带面板只有 search。
+// 引擎没带清单时（心智版）ACTIVE_* 就等于下面的静态清单，行为不变。
+const specsOfGroup = (group: string) => ACTIVE_TUNING_SPECS.filter(spec => spec.group === group)
+/** 该变体是否真的有可调项（memory-only 变体没有，整块不显示）。 */
+const hasTuning = computed(() => ACTIVE_TUNING_SPECS.length > 0)
 /**
  * 分组标题单独列成字面量：仓库的 settings-search 插件在构建期静态扫 `t('...')`，
  * 拼出来的 key（`t(\`${KEY}.tuning_group_${group}\`)`）会让构建直接失败。
@@ -108,7 +112,7 @@ const tuningIsCustom = computed(() => Object.keys(draft.value).length > 0)
 
 function fillDraft(values: Record<string, string>) {
   const next: Record<string, string> = {}
-  for (const spec of TUNING_SPECS) {
+  for (const spec of ACTIVE_TUNING_SPECS) {
     if (values[spec.key] !== undefined)
       next[spec.key] = values[spec.key]
   }
@@ -161,7 +165,7 @@ async function persistTuning(values: Record<string, string | null>) {
 /** 表单里的空值 = 回默认（null），非空则原样提交，越界由主进程拒绝。 */
 async function saveTuning() {
   const values: Record<string, string | null> = {}
-  for (const spec of TUNING_SPECS) {
+  for (const spec of ACTIVE_TUNING_SPECS) {
     const raw = draft.value[spec.key]
     values[spec.key] = raw === undefined || raw === '' ? null : raw
   }
@@ -170,18 +174,18 @@ async function saveTuning() {
 
 /** 套预设：预设没提到的键一律回默认，保证「切过去就是你看到的那组」。 */
 async function applyPreset(id: string) {
-  const preset = TUNING_PRESETS[id]
+  const preset = ACTIVE_TUNING_PRESETS[id]
   if (!preset)
     return
   const values: Record<string, string | null> = {}
-  for (const spec of TUNING_SPECS)
+  for (const spec of ACTIVE_TUNING_SPECS)
     values[spec.key] = preset.values[spec.key] ?? null
   await persistTuning(values)
 }
 
 async function resetTuning() {
   const values: Record<string, string | null> = {}
-  for (const spec of TUNING_SPECS) values[spec.key] = null
+  for (const spec of ACTIVE_TUNING_SPECS) values[spec.key] = null
   await persistTuning(values)
 }
 
@@ -395,7 +399,7 @@ onMounted(refresh)
     </ul>
 
     <!-- 心智 / 检索参数：清单在引擎侧（@proj-airi/castalia-plugin/tuning），这里只是表单 -->
-    <section :class="['flex flex-col', 'gap-3', 'rounded-xl', 'bg-neutral-50 dark:bg-neutral-800/60', 'p-4']">
+    <section v-if="hasTuning" :class="['flex flex-col', 'gap-3', 'rounded-xl', 'bg-neutral-50 dark:bg-neutral-800/60', 'p-4']">
       <header :class="['flex flex-wrap items-baseline', 'gap-2']">
         <h2 :class="['text-sm font-medium']">
           {{ t(`${KEY}.tuning_title`) }}
@@ -416,7 +420,7 @@ onMounted(refresh)
       <div v-if="tuningOpen" :class="['flex flex-col', 'gap-4']">
         <div :class="['flex flex-wrap', 'gap-2']">
           <button
-            v-for="(preset, id) in TUNING_PRESETS"
+            v-for="(preset, id) in ACTIVE_TUNING_PRESETS"
             :key="id"
             type="button"
             :disabled="tuningSaving"
@@ -436,7 +440,7 @@ onMounted(refresh)
           </button>
         </div>
 
-        <div v-for="group in TUNING_GROUPS" :key="group" :class="['flex flex-col', 'gap-2']">
+        <div v-for="group in ACTIVE_TUNING_GROUPS" :key="group" :class="['flex flex-col', 'gap-2']">
           <h3 :class="['text-[11px]', 'uppercase', 'tracking-wide', 'text-neutral-400 dark:text-neutral-500']">
             {{ groupLabels[group] }}
           </h3>
