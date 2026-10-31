@@ -394,27 +394,6 @@ pages:
       maintain_merged: 合并
       maintain_no_llm: 没配置反刍模型，只跑了 digest。
       maintain_failed: 整理失败
-      tuning_title: 心智参数
-      tuning_description: 情绪标签、半衰期、检索权重与注入门槛。这些就是引擎读的环境变量；保存写进 castalia-engine.json，启动时注入。带「重启」标记的要重启 app 才生效，其余下一轮对话就生效。
-      tuning_show: 展开
-      tuning_hide: 收起
-      tuning_custom: 已自定义
-      tuning_reset: 全部恢复默认
-      tuning_apply: 保存
-      tuning_saving: 保存中…
-      tuning_saved: 已保存，下一轮生效。
-      tuning_saved_restart: 已保存。带「重启」标记的项要重启 app 才生效。
-      tuning_rejected: 被拒绝的参数
-      tuning_restart_badge: 重启
-      tuning_restart_note: 检索权重是模块级常量，必须重启 app 才会重新读取。
-      tuning_group_band: 情绪标签
-      tuning_group_halfLife: 情绪半衰期
-      tuning_group_mood: 长期心境
-      tuning_group_gain: 增益与限幅
-      tuning_group_trait: 类人性质
-      tuning_group_evidence: 证据与衰减开关
-      tuning_group_search: 检索权重
-      tuning_group_inject: 注入门槛
   data:
     title: 数据
     description: 管理存储 AIRI 数据、导出和重置
@@ -943,6 +922,27 @@ pages:
       short-term-memory: 短期记忆
       short-term-memory-description: 下一轮对话会带入的最近心情事件。
       no-short-term-memory: 暂无记录。
+      tuning_title: 心智参数
+      tuning_description: 情绪标签、半衰期、检索权重与注入门槛。这些就是引擎读的环境变量；保存写进 castalia-engine.json，启动时注入。带「重启」标记的要重启 app 才生效，其余下一轮对话就生效。
+      tuning_show: 展开
+      tuning_hide: 收起
+      tuning_custom: 已自定义
+      tuning_reset: 全部恢复默认
+      tuning_apply: 保存
+      tuning_saving: 保存中…
+      tuning_saved: 已保存，下一轮生效。
+      tuning_saved_restart: 已保存。带「重启」标记的项要重启 app 才生效。
+      tuning_rejected: 被拒绝的参数
+      tuning_restart_badge: 重启
+      tuning_restart_note: 检索权重是模块级常量，必须重启 app 才会重新读取。
+      tuning_group_band: 情绪标签
+      tuning_group_halfLife: 情绪半衰期
+      tuning_group_mood: 长期心境
+      tuning_group_gain: 增益与限幅
+      tuning_group_trait: 类人性质
+      tuning_group_evidence: 证据与衰减开关
+      tuning_group_search: 检索权重
+      tuning_group_inject: 注入门槛
     messaging-discord:
       description: Discord 发消息和语音聊天
       enable: 启用Discord集成
@@ -2280,6 +2280,8 @@ needs-attention:
   hearing-no-provider: 语音输入开着，但还没选转写服务
   hearing-no-model: 语音输入开着，但还没选转写模型
   not-transcribed: 说的话不会被转写
+  memory-degraded: 记忆体连着但没应答（连续 {count} 次失败）
+  memory-degraded-detail: '召回和写入都会静默跳过；提示里不会带记忆'
   affects: '影响{modules}'
   used-by: '{modules}在用'
   fix: 去修改

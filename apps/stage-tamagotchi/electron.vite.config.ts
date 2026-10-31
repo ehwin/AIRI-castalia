@@ -288,6 +288,7 @@ export default defineConfig({
               '**/settings/system/general.vue',
               '**/settings/modules/home-assistant.vue',
               '**/settings/modules/mcp.vue',
+              '**/settings/modules/castalia.vue',
               '**/settings/memory/index.vue',
               '**/devtools/index.vue',
               '**/settings/index.vue',
