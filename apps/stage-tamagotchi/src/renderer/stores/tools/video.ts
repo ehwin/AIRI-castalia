@@ -11,7 +11,7 @@ import { createVideoTools } from '@proj-airi/stage-ui/tools/video'
 import { defineStore } from 'pinia'
 import { watch } from 'vue'
 
-import { electronVideoProbe, electronVideoSheet, electronVideoText } from '../../../shared/eventa/video'
+import { electronVideoCapabilities, electronVideoProbe, electronVideoSheet, electronVideoText } from '../../../shared/eventa/video'
 
 /**
  * Mounts the video tools in the desktop shell, where ffmpeg and the cache directory live.
@@ -27,6 +27,7 @@ export const useTamagotchiVideoToolsStore = defineStore('tamagotchi-video-tools'
   const probeVideo = useElectronEventaInvoke(electronVideoProbe)
   const readText = useElectronEventaInvoke(electronVideoText)
   const drawSheet = useElectronEventaInvoke(electronVideoSheet)
+  const readCapabilities = useElectronEventaInvoke(electronVideoCapabilities)
   const toolIdPrefix = 'video:'
 
   // This shell has the engine; the module's switch now means "on" rather than "wanted".
@@ -47,8 +48,8 @@ export const useTamagotchiVideoToolsStore = defineStore('tamagotchi-video-tools'
    * settings page takes effect on the next question instead of after a restart.
    */
   const runtime: VideoToolRuntime = {
-    probe: async source => await probeVideo({ source, cookie: videoStore.bilibiliCookie || undefined }),
-    text: async source => await readText({ source, cookie: videoStore.bilibiliCookie || undefined }),
+    probe: async source => await probeVideo({ source, cookie: videoStore.bilibiliCookie || undefined, ffmpegPath: videoStore.ffmpegPath || undefined }),
+    text: async source => await readText({ source, cookie: videoStore.bilibiliCookie || undefined, ffmpegPath: videoStore.ffmpegPath || undefined }),
     sheet: async (request) => {
       const result = await drawSheet({
         source: request.source,
@@ -56,6 +57,7 @@ export const useTamagotchiVideoToolsStore = defineStore('tamagotchi-video-tools'
         toSeconds: request.toSeconds,
         cells: request.cells,
         cookie: videoStore.bilibiliCookie || undefined,
+        ffmpegPath: videoStore.ffmpegPath || undefined,
       })
       if ('error' in result)
         return result
@@ -74,7 +76,20 @@ export const useTamagotchiVideoToolsStore = defineStore('tamagotchi-video-tools'
     },
   }
 
+  /**
+   * Asks the shell what it can actually decode.
+   *
+   * Runs even with the module off: the settings page has to tell the owner that ffmpeg is missing
+   * before they spend a turn on a video that cannot be read.
+   */
+  async function refreshCapabilities() {
+    const capabilities = await readCapabilities()
+    videoStore.markCapabilities(capabilities)
+  }
+
   async function refresh() {
+    void refreshCapabilities().catch(error => console.warn('[video] Could not read the decoder capabilities:', error))
+
     if (!videoStore.enabled) {
       dispose()
       return
@@ -108,10 +123,11 @@ export const useTamagotchiVideoToolsStore = defineStore('tamagotchi-video-tools'
   return {
     dispose,
     refresh,
+    refreshCapabilities,
   }
 }, {
   synced: {
-    actions: ['dispose', 'refresh'],
+    actions: ['dispose', 'refresh', 'refreshCapabilities'],
     state: false,
   },
 })

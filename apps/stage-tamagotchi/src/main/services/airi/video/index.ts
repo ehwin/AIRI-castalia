@@ -35,19 +35,31 @@ export function createVideoService(params: {
 }) {
   const { context, engine } = params
 
-  defineInvokeHandler(context, electronVideoProbe, input =>
-    engine.probe(input.source, { cookie: input.cookie }))
+  /** The settings page can move the binary; every call carries the current choice. */
+  function useFfmpeg(ffmpegPath?: string) {
+    if (ffmpegPath !== undefined)
+      engine.setFfmpegPath(ffmpegPath)
+  }
 
-  defineInvokeHandler(context, electronVideoText, input =>
-    engine.text(input.source, { cookie: input.cookie, maxChars: input.maxChars }))
+  defineInvokeHandler(context, electronVideoProbe, (input) => {
+    useFfmpeg(input.ffmpegPath)
+    return engine.probe(input.source, { cookie: input.cookie })
+  })
 
-  defineInvokeHandler(context, electronVideoSheet, input =>
-    engine.sheet(input.source, {
+  defineInvokeHandler(context, electronVideoText, (input) => {
+    useFfmpeg(input.ffmpegPath)
+    return engine.text(input.source, { cookie: input.cookie, maxChars: input.maxChars })
+  })
+
+  defineInvokeHandler(context, electronVideoSheet, (input) => {
+    useFfmpeg(input.ffmpegPath)
+    return engine.sheet(input.source, {
       fromSeconds: input.fromSeconds,
       toSeconds: input.toSeconds,
       cells: input.cells,
       cookie: input.cookie,
-    }))
+    })
+  })
 
   defineInvokeHandler(context, electronVideoCapabilities, () => engine.capabilities())
 }

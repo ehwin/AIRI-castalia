@@ -166,8 +166,12 @@ export function spriteFilterGraph(
 }
 
 export function createVideoEngine(options: VideoEngineOptions) {
-  const ffmpegPath = options.ffmpegPath ?? process.env.AIRI_FFMPEG_PATH ?? findOnPath('ffmpeg')
-  const ffprobePath = options.ffprobePath ?? process.env.AIRI_FFPROBE_PATH ?? findOnPath('ffprobe')
+  // Resolved per call, not once at construction: the settings page can point at a binary after this
+  // engine exists, and a machine that installs ffmpeg later works without a restart.
+  let overrideFfmpeg = options.ffmpegPath
+  const overrideFfprobe = options.ffprobePath
+  const ffmpegPathOf = () => overrideFfmpeg || process.env.AIRI_FFMPEG_PATH || findOnPath('ffmpeg')
+  const ffprobePathOf = () => overrideFfprobe || process.env.AIRI_FFPROBE_PATH || findOnPath('ffprobe')
   const fetchImpl = options.fetchImpl ?? fetch
   const cacheDir = options.cacheDir
 
@@ -373,7 +377,7 @@ export function createVideoEngine(options: VideoEngineOptions) {
         } satisfies VideoProbe
       }
 
-      const info = JSON.parse((await run(ffprobePath, [
+      const info = JSON.parse((await run(ffprobePathOf(), [
         '-v',
         'error',
         '-print_format',
@@ -465,7 +469,7 @@ export function createVideoEngine(options: VideoEngineOptions) {
   }
 
   async function embeddedSubtitleLines(source: string) {
-    const streams = JSON.parse((await run(ffprobePath, [
+    const streams = JSON.parse((await run(ffprobePathOf(), [
       '-v',
       'error',
       '-print_format',
@@ -477,7 +481,7 @@ export function createVideoEngine(options: VideoEngineOptions) {
     ], { timeoutMs: 30_000 })).stdout) as { streams?: unknown[] }
     if ((streams.streams ?? []).length === 0)
       return []
-    const srt = (await run(ffmpegPath, [
+    const srt = (await run(ffmpegPathOf(), [
       '-v',
       'error',
       '-i',
@@ -492,7 +496,7 @@ export function createVideoEngine(options: VideoEngineOptions) {
   }
 
   async function durationOf(source: string): Promise<number> {
-    const info = JSON.parse((await run(ffprobePath, [
+    const info = JSON.parse((await run(ffprobePathOf(), [
       '-v',
       'error',
       '-print_format',
@@ -513,7 +517,7 @@ export function createVideoEngine(options: VideoEngineOptions) {
    * one asked for; the reply quotes cell timecodes against this image, so it has to be exact.
    */
   async function imageSizeOf(path: string): Promise<{ width: number, height: number }> {
-    const info = JSON.parse((await run(ffprobePath, [
+    const info = JSON.parse((await run(ffprobePathOf(), [
       '-v',
       'error',
       '-select_streams',
@@ -596,7 +600,7 @@ export function createVideoEngine(options: VideoEngineOptions) {
     let cached = existsSync(target)
     if (!cached) {
       const graph = `${spriteFilterGraph(picked, { width: cellWidth, height: cellHeight }, columns)};[sheet]format=rgb24[out]`
-      await run(ffmpegPath, [
+      await run(ffmpegPathOf(), [
         '-y',
         '-v',
         'error',
@@ -651,7 +655,7 @@ export function createVideoEngine(options: VideoEngineOptions) {
 
     let cached = existsSync(target)
     if (!cached) {
-      await run(ffmpegPath, [
+      await run(ffmpegPathOf(), [
         '-y',
         '-v',
         'error',
@@ -691,8 +695,15 @@ export function createVideoEngine(options: VideoEngineOptions) {
     probe,
     text,
     sheet,
+    /** Points the engine at a binary the owner picked, without rebuilding it. Empty clears it. */
+    setFfmpegPath: (path?: string) => {
+      overrideFfmpeg = path?.trim() || undefined
+    },
     /** For the settings page: whether this build can decode anything at all. */
-    capabilities: () => ({ ffmpegPath, ffprobePath, cacheDir, available: Boolean(ffmpegPath) }),
+    capabilities: () => {
+      const ffmpegPath = ffmpegPathOf()
+      return { ffmpegPath, ffprobePath: ffprobePathOf(), cacheDir, available: Boolean(ffmpegPath) }
+    },
   }
 }
 

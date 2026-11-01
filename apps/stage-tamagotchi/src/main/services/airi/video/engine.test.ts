@@ -105,4 +105,14 @@ describe('video engine', () => {
     expect(capabilities).toMatchObject({ ffmpegPath: 'ffmpeg-not-installed', cacheDir: 'test-cache' })
     expect(capabilities.available).toBe(true)
   })
+
+  it('takes a new binary after construction, so the path can be set without a restart', () => {
+    const movable = createVideoEngine({ cacheDir: 'test-cache' })
+    movable.setFfmpegPath('C:/tools/ffmpeg/bin/ffmpeg.exe')
+    expect(movable.capabilities()).toMatchObject({ ffmpegPath: 'C:/tools/ffmpeg/bin/ffmpeg.exe', available: true })
+
+    // Clearing it falls back to the environment and PATH rather than keeping the stale choice.
+    movable.setFfmpegPath('')
+    expect(movable.capabilities().ffmpegPath).not.toBe('C:/tools/ffmpeg/bin/ffmpeg.exe')
+  })
 })

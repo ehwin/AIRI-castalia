@@ -39,6 +39,18 @@ export const useVideoStore = defineStore('video', () => {
    */
   const autonomous = useLocalStorageManualReset<boolean>('settings/video/autonomous', false)
   /**
+   * The `ffmpeg` binary, when PATH is not enough.
+   *
+   * Windows installs it in places that never reach a GUI app's PATH (a private toolchain, a zip
+   * unpacked by hand), and an install that cannot decode should be fixable from this page rather
+   * than by editing system environment variables.
+   */
+  const ffmpegPath = useLocalStorageManualReset<string>('settings/video/ffmpeg-path', '')
+  /** What the shell reports: a machine fact, re-read at startup, so it is not persisted. */
+  const ffmpegAvailable = ref(false)
+  const ffmpegDetected = ref('')
+  const cacheDir = ref('')
+  /**
    * `true` once the desktop shell has mounted the tools. The web build has no ffmpeg and no cache
    * directory, so the switch there would turn on a prompt with nothing behind it.
    */
@@ -49,6 +61,13 @@ export const useVideoStore = defineStore('video', () => {
 
   function markRuntimeAvailable() {
     runtimeAvailable.value = true
+  }
+
+  /** Records what the shell can decode, and where it looks, so the page can say so plainly. */
+  function markCapabilities(capabilities: { available: boolean, ffmpegPath: string, cacheDir: string }) {
+    ffmpegAvailable.value = capabilities.available
+    ffmpegDetected.value = capabilities.ffmpegPath
+    cacheDir.value = capabilities.cacheDir
   }
 
   watch(configured, (isConfigured) => {
@@ -64,6 +83,7 @@ export const useVideoStore = defineStore('video', () => {
     attachImages.reset()
     bilibiliCookie.reset()
     autonomous.reset()
+    ffmpegPath.reset()
   }
 
   return {
@@ -72,9 +92,14 @@ export const useVideoStore = defineStore('video', () => {
     attachImages,
     bilibiliCookie,
     autonomous,
+    ffmpegPath,
+    ffmpegAvailable,
+    ffmpegDetected,
+    cacheDir,
     runtimeAvailable,
     configured,
     markRuntimeAvailable,
+    markCapabilities,
     resetState,
   }
 })

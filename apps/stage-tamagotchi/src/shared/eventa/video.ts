@@ -17,6 +17,8 @@ export interface ElectronVideoProbeInput {
   source: string
   /** `SESSDATA=…; bili_jct=…`, so a private or captioned video resolves. */
   cookie?: string
+  /** An `ffmpeg` the owner pointed at in the settings, which wins over PATH. */
+  ffmpegPath?: string
 }
 
 export interface ElectronVideoTextInput extends ElectronVideoProbeInput {

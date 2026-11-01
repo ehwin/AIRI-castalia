@@ -8,7 +8,7 @@ import { useVideoStore } from '../../stores/modules/video'
 
 const { t } = useI18n()
 const videoStore = useVideoStore()
-const { enabled, depth, attachImages, bilibiliCookie, autonomous, configured, runtimeAvailable } = storeToRefs(videoStore)
+const { enabled, depth, attachImages, bilibiliCookie, autonomous, ffmpegPath, ffmpegAvailable, ffmpegDetected, cacheDir, configured, runtimeAvailable } = storeToRefs(videoStore)
 
 const depthOptions = computed(() => [
   { label: t('settings.pages.modules.video.depth.skim'), value: 'skim' },
@@ -52,6 +52,13 @@ const depthOptions = computed(() => [
       :placeholder="t('settings.pages.modules.video.bilibili-cookie-placeholder')"
     />
 
+    <FieldInput
+      v-model="ffmpegPath"
+      :label="t('settings.pages.modules.video.ffmpeg-path')"
+      :description="t('settings.pages.modules.video.ffmpeg-path-description')"
+      :placeholder="ffmpegDetected || 'C:/tools/ffmpeg/bin/ffmpeg.exe'"
+    />
+
     <Callout
       v-if="configured"
       theme="lime"
@@ -62,9 +69,20 @@ const depthOptions = computed(() => [
       theme="orange"
       :label="t('settings.pages.modules.video.unavailable')"
     />
+
+    <!-- Only when the shell really cannot find a decoder: an always-on warning trains the eye to
+         ignore it, and the machine fact is one invoke away. -->
     <Callout
+      v-if="runtimeAvailable && !ffmpegAvailable"
       theme="orange"
-      :label="t('settings.pages.modules.video.ffmpeg-note')"
+      :label="t('settings.pages.modules.video.ffmpeg-missing')"
     />
+    <p
+      v-else-if="runtimeAvailable && ffmpegAvailable"
+      class="text-xs text-neutral-500"
+    >
+      {{ t('settings.pages.modules.video.ffmpeg-found', { path: ffmpegPath || ffmpegDetected }) }}
+      <span v-if="cacheDir">· {{ t('settings.pages.modules.video.cache-dir', { path: cacheDir }) }}</span>
+    </p>
   </SettingsCard>
 </template>

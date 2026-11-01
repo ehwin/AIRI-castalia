@@ -1441,7 +1441,12 @@ pages:
       bilibili-cookie-placeholder: SESSDATA=…; bili_jct=…
       configured: Video is ready to use!
       unavailable: This build has no video engine (the browser build has no ffmpeg). Open this switch in the desktop app for it to take effect.
-      ffmpeg-note: 'Needs ffmpeg on this machine (the desktop build looks on PATH, or set AIRI_FFMPEG_PATH). Media and sheets are cached under userData/video-cache.'
+      ffmpeg-path: ffmpeg path
+      ffmpeg-path-description: 'Empty, it is found on PATH; set, that binary is used (the next call picks it up, no restart).'
+      ffmpeg-missing: 'No ffmpeg on this machine: only captions work, sheets and exact frames do not. Set the path above, or put ffmpeg on PATH.'
+      ffmpeg-found: 'Decoder ready · {path}'
+      cache-dir: 'cache {path}'
+      ffmpeg-note-unused: 'Needs ffmpeg on this machine (the desktop build looks on PATH, or set AIRI_FFMPEG_PATH). Media and sheets are cached under userData/video-cache.'
     mcp-server:
       title: MCP servers
       description: Configure MCP servers and bring their tools into AIRI.

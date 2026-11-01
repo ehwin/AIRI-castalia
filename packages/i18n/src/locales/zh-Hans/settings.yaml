@@ -1383,7 +1383,12 @@ pages:
       bilibili-cookie-placeholder: SESSDATA=…; bili_jct=…
       configured: 看视频已就绪！
       unavailable: 这个构建里没有视频引擎（浏览器的网页版没有 ffmpeg）。用桌面版打开这个开关才会生效。
-      ffmpeg-note: 需要本机有 ffmpeg（桌面版会从 PATH 查找，也可用 AIRI_FFMPEG_PATH 指定）。视频与分镜缓存在 userData/video-cache。
+      ffmpeg-path: ffmpeg 路径
+      ffmpeg-path-description: 留空就从 PATH 里找；填了就直接用这个可执行文件（改完下一次调用即生效，不用重启）。
+      ffmpeg-missing: 本机没找到 ffmpeg：只能读字幕，分镜和精确取帧都用不了。填上面的路径，或把 ffmpeg 放进 PATH。
+      ffmpeg-found: 解码器已就绪 · {path}
+      cache-dir: 缓存 {path}
+      ffmpeg-note-unused: 需要本机有 ffmpeg（桌面版会从 PATH 查找，也可用 AIRI_FFMPEG_PATH 指定）。视频与分镜缓存在 userData/video-cache。
     mcp-server:
       title: MCP 集成
       description: 配置其他 MCP 服务器并将能力拓展至 AIRI
