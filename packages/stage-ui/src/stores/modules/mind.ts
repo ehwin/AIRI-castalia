@@ -113,13 +113,13 @@ export const useMindStore = defineStore('mind', () => {
   const lastDiaryText = ref<string>()
   /** 最近一次看到的屏幕（一行描述），由 `lookAround` 写入。 */
   const lastScreenLine = ref<string>()
+  /** 感知端自述：走到哪一步、拿到了什么。看不见和坏掉了要靠它区分。 */
+  const lastSenseDiagnostics = ref<Record<string, unknown>>()
   /** 她此刻可不可以开口：屏幕在开会/游戏/全屏时置 false。speech ticker 读这个。 */
   const interruptAllowed = ref(true)
   const interruptReason = ref<string>()
   /** 想说话但被挡住时的冷却，避免每秒重算一次屏幕。 */
   let lastProvokeAt = 0
-  /** 屏幕上一次「变了」的时刻：一直在变说明她在忙，别插嘴。 */
-  let lastScreenChangeAt = 0
 
   // How many sends a changed state stays visible. SillyTavern calls the same
   // control "Sticky": an activated entry stays for N messages, then stops on its
@@ -264,15 +264,16 @@ export const useMindStore = defineStore('mind', () => {
    */
   async function lookAround(options: { force?: boolean } = {}): Promise<number> {
     const observationsSeen = await sense.look().catch(() => [])
+    if (sense.diagnostics)
+      lastSenseDiagnostics.value = sense.diagnostics()
     const digest = digestSense(observationsSeen, seenTexts)
 
     // `force`：她要动脑子、或者想出声时，必须看到「此刻」的屏幕，
     // 不能被 digestSense 的「和上次差不多」挡掉。
-    if (options.force) {
-      const latest = [...observationsSeen].reverse().find(item => String(item?.text ?? '').trim())
-      if (latest)
-        applyScreenLine(String(latest.text).replace(/\s+/g, ' ').trim())
-    }
+    const newestObs = [...observationsSeen].reverse().find(item => String(item?.text ?? '').trim())
+
+    if (options.force && newestObs)
+      applyScreenLine(String(newestObs.text).replace(/\s+/g, ' ').trim(), newestObs)
 
     if (!digest.novel)
       return 0
@@ -280,32 +281,29 @@ export const useMindStore = defineStore('mind', () => {
     seenTexts = [...seenTexts, ...digest.texts].slice(-SENSE_MEMORY)
     for (const text of digest.texts)
       observe(text)
-    const newest = digest.texts[digest.texts.length - 1]
-    if (newest)
-      applyScreenLine(newest)
+    if (newestObs)
+      applyScreenLine(String(newestObs.text).replace(/\s+/g, ' ').trim(), newestObs)
     // Something new is what raises curiosity at the next tick.
     novelty.value = true
     return digest.texts.length
   }
 
-  /** 屏幕静止多久才算「她闲下来了」。一直在变说明她在干活，这时候开口就是打扰。 */
-  const SCREEN_SETTLE_MS = 3 * 60_000
-
   /**
    * 记住「刚看到的」并算出声裁决。
    *
-   * 两把尺子：一是关键词（会议/全屏/游戏/编辑器…），二是「屏幕是不是一直在变」——
-   * 后者不依赖文案质量，用户切窗口、打字、滚页面都会让它判成忙。宁可少说一句。
+   * 主路是视觉模型的语义判断（`screen:activity` 直接答「他在干嘛 / 能不能打扰」）。
+   * 关键词只在感知层没给意见时兜底——那是没有下限的备用路，不是判据。
    */
-  function applyScreenLine(line: string) {
-    const previous = String(lastScreenLine.value ?? '').trim()
-    if (previous && previous !== line.trim())
-      lastScreenChangeAt = Date.now()
+  function applyScreenLine(line: string, verdict?: { interruptible?: boolean, reason?: string }) {
     lastScreenLine.value = line
+    if (typeof verdict?.interruptible === 'boolean') {
+      interruptAllowed.value = verdict.interruptible
+      interruptReason.value = verdict.reason
+      return
+    }
     const busy = screenBusy(line)
-    const moving = lastScreenChangeAt > 0 && Date.now() - lastScreenChangeAt < SCREEN_SETTLE_MS
-    interruptAllowed.value = !busy.busy && !moving
-    interruptReason.value = busy.reason ?? (moving ? 'the screen keeps changing' : undefined)
+    interruptAllowed.value = !busy.busy
+    interruptReason.value = busy.reason
   }
 
   /** 想搭话时重新看屏幕的最短间隔：一秒一个 tick，不能每秒抓一次屏。 */
@@ -536,6 +534,7 @@ export const useMindStore = defineStore('mind', () => {
     interruptReason,
     lastScreenLine,
     lastDiaryText,
+    lastSenseDiagnostics,
     innerContextLine,
     thinkWired,
     thinkInFlight,

@@ -20,11 +20,30 @@ export interface SenseObservation {
   text: string
   /** When the host observed it. */
   at: number
+  /**
+   * Whether a word from the companion would be welcome right now.
+   *
+   * A host that can read the scene (the screen adapter asks the vision model
+   * "what is this person doing") answers directly; when it is absent the mind
+   * falls back to its own keyword read. Undefined is not "free" — it is "no
+   * opinion", and the caller decides.
+   */
+  interruptible?: boolean
+  /** Why, when the host has an opinion. */
+  reason?: string
 }
 
 export interface SensePort {
   /** What the companion can perceive right now. Empty when nothing is available or allowed. */
   look: () => Promise<SenseObservation[]>
+  /**
+   * What happened on the last look.
+   *
+   * A blind sense returns [] for permission, capture, and model failures alike, so
+   * "she sees nothing" and "she is broken" look identical from outside. A port that
+   * can explain itself makes that distinguishable without a debugger.
+   */
+  diagnostics?: () => Record<string, unknown>
 }
 
 /** A companion with no eyes and no webcam. The default. */

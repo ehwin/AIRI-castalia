@@ -31,3 +31,5 @@ export type { SenseDigest, SenseKind, SenseObservation, SensePort } from './sens
 export { blindSense, digestSense } from './sense'
 export type { HeldBackReason, InnerVoiceMaterial } from './inner-voice'
 export { composeInnerVoice, diaryTitle, sameSubject, screenBusy, screenSummary, stripDiaryHeader } from './inner-voice'
+export type { ActivityAssessment } from './activity'
+export { ACTIVITY_ASSESS_PROMPT, parseActivityAssessment } from './activity'
