@@ -469,11 +469,12 @@ onMounted(async () => {
   psycheSyncTimer = setInterval(() => void syncPsyche(), PSYCHE_SYNC_INTERVAL_MS)
 
   // 无聊/好奇的时候真的去想一次：mind 的驱力走到 `think`，这里把它接到 Castalia 的自循环
-  // （读最近的对话证据、写一篇带出处的日记）。返回的日记正文会变成她的一条内部念头。
-  // `minIntervalHours: 0.25` 是引擎侧的兜底间隔，与 mind 这边 20 分钟冷却互为保险。
+  // （读最近的对话证据、写一篇带出处的日记）。日记正文回来后被内化成一句自言自语。
+  // `minIntervalHours: 0` 把节奏交给 mind 的 20 分钟冷却 —— 引擎那道 15 分钟闸门只会让
+  // 「她正好无聊」的时刻被无故跳过，而定时自循环（6 小时）仍由引擎自己管。
   mindStore.attachThink(async () => {
     try {
-      const report = await invokeSelfCycle({ minIntervalHours: 0.25 })
+      const report = await invokeSelfCycle({ minIntervalHours: 0 })
       if (!report?.ok || report.skipped)
         return undefined
       return report.diaryText

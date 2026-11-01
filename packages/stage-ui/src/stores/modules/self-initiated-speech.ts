@@ -14,6 +14,7 @@ import {
 import { ACTIVE_SPEAK_POLICY, AUTONOMY_POLICY_DEFAULTS, SPEAK_POLICIES } from '../../libs/self-initiated-speech/speak-decision'
 import { createSpeechTicker } from '../../libs/self-initiated-speech/ticker'
 import { useChatStore } from '../chat'
+import { useMindStore } from './mind'
 import { readStoredRelationship } from '../chat/context-providers/relational-policy'
 import { useChatSessionStore } from '../chat/session-store'
 
@@ -88,7 +89,14 @@ export const useSelfInitiatedSpeechStore = defineStore('self-initiated-speech', 
       },
       gate: ({ now }) => {
         const verdict = decideOutbound({ now, hour: new Date(now).getHours(), topic: currentTopic }, outbound)
-        return { allow: verdict.allow, reason: verdict.reason }
+        if (!verdict.allow)
+          return { allow: false, reason: verdict.reason }
+        // 出声前再看一眼她在干什么：屏幕在开会/全屏/游戏时，心里说一句就算了。
+        // 裁决由 mind 的 lookAround 维护（每 5 分钟一次），这里只读，不额外抓屏。
+        const mind = useMindStore()
+        if (!mind.interruptAllowed)
+          return { allow: false, reason: `screen:${mind.interruptReason ?? 'busy'}` }
+        return { allow: true, reason: verdict.reason }
       },
       onGated: (verdict) => {
         gatedCount.value += 1

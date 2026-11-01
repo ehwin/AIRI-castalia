@@ -6,6 +6,7 @@ import { computed, ref } from 'vue'
 import {
   advanceDrives,
   blindSense,
+  composeInnerVoice,
   composeThought,
   createRefusalState,
   createStream,
@@ -17,6 +18,7 @@ import {
   recent,
   record,
   renderStateLine,
+  screenBusy,
   surface,
 } from '@proj-airi/core-agent'
 
@@ -106,6 +108,15 @@ export const useMindStore = defineStore('mind', () => {
   /** Last thing a real think produced, for the panel and for `poke()`. */
   const lastThinkText = ref<string>()
   const thinkCount = ref(0)
+  /** 原始日记正文（保留一节，念头只是它的内化版；诊断要看原文时用这个）。 */
+  const lastDiaryText = ref<string>()
+  /** 最近一次看到的屏幕（一行描述），由 `lookAround` 写入。 */
+  const lastScreenLine = ref<string>()
+  /** 她此刻可不可以开口：屏幕在开会/游戏/全屏时置 false。speech ticker 读这个。 */
+  const interruptAllowed = ref(true)
+  const interruptReason = ref<string>()
+  /** 想说话但被挡住时的冷却，避免每秒重算一次屏幕。 */
+  let lastProvokeAt = 0
 
   // How many sends a changed state stays visible. SillyTavern calls the same
   // control "Sticky": an activated entry stays for N messages, then stops on its
@@ -190,11 +201,11 @@ export const useMindStore = defineStore('mind', () => {
     thinking = true
     thinkInFlight.value = true
     try {
-      const text = (await Promise.race([
+      const diary = (await Promise.race([
         thinkExecutor(),
         new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), THINK_TIMEOUT_MS)),
       ]))?.trim()
-      if (!text) {
+      if (!diary) {
         // 引擎说「刚想过，还没到间隔」也是没想成：那是正常跳过，不该罚掉 20 分钟，
         // 但也不能每 45 秒问一次，给 3 分钟。
         lastThinkAt = Date.now() - THINK_COOLDOWN_MS + 3 * 60_000
@@ -202,6 +213,17 @@ export const useMindStore = defineStore('mind', () => {
       }
 
       lastThinkAt = Date.now()
+      lastDiaryText.value = diary
+      // 日记是「记录」，念头是「自言自语」：把她刚想出来的东西加上刚看到的屏幕，
+      // 收敛成一句自己的话。拿不到素材就不写念头 —— 编一句不是想。
+      const text = composeInnerVoice({
+        diary,
+        screen: lastScreenLine.value,
+        drives: drives.value,
+        now: lastThinkAt,
+      })
+      if (!text)
+        return false
       const thought: Thought = {
         id: `think-${lastThinkAt}`,
         at: lastThinkAt,
@@ -241,9 +263,58 @@ export const useMindStore = defineStore('mind', () => {
     seenTexts = [...seenTexts, ...digest.texts].slice(-SENSE_MEMORY)
     for (const text of digest.texts)
       observe(text)
+    // 最近一行就是「刚看到的」，她自言自语和「要不要出声」都用它。
+    const newest = digest.texts[digest.texts.length - 1]
+    if (newest) {
+      lastScreenLine.value = newest
+      const busy = screenBusy(newest)
+      interruptAllowed.value = !busy.busy
+      interruptReason.value = busy.reason
+    }
     // Something new is what raises curiosity at the next tick.
     novelty.value = true
     return digest.texts.length
+  }
+
+  /** 想搭话时重新看屏幕的最短间隔：一秒一个 tick，不能每秒抓一次屏。 */
+  const PROVOKE_RECHECK_MS = 10 * 60_000
+
+  /**
+   * 无聊到想开口时的第一步：看一眼她在干什么。
+   *
+   * 出声本身不在这个 store 里 —— `self-initiated-speech` 那条管线本来就有节流和静默时段。
+   * 这里只负责两件事：把最新的屏幕裁决给它（`interruptAllowed`），以及被挡住时把「想说又
+   * 憋回去」这件事变成一句自言自语，而不是产生一个打扰。
+   */
+  async function considerSpeaking(now = Date.now()): Promise<{ allowed: boolean, reason?: string }> {
+    if (now - lastProvokeAt < PROVOKE_RECHECK_MS)
+      return { allowed: interruptAllowed.value, reason: interruptReason.value }
+    lastProvokeAt = now
+
+    if (senseAttached.value)
+      await lookAround().catch(() => 0)
+
+    if (interruptAllowed.value)
+      return { allowed: true }
+
+    const text = composeInnerVoice({
+      screen: lastScreenLine.value,
+      heldReason: 'busy-screen',
+      drives: drives.value,
+      now,
+    })
+    if (text) {
+      const thought: Thought = {
+        id: `hold-${now}`,
+        at: now,
+        text,
+        visibility: 'private',
+        topic: 'held-back',
+      }
+      stream.value = record(stream.value, thought)
+      void innerThoughtsRepo.append(thought).catch(() => {})
+    }
+    return { allowed: false, reason: interruptReason.value ?? 'busy-screen' }
   }
 
   /** Advances every drive and lets the background lane write at most one thought. */
@@ -260,10 +331,12 @@ export const useMindStore = defineStore('mind', () => {
     })
     novelty.value = false
 
-    // 驱力说话：好奇过阈值就该真去想一次。这里只做「想」，不出声 —— 出声要过表达阶梯
-    // （`planExpression` 的两级冷却），那是另一条路，不在这个 tick 里顺手加。
-    if (decide(drives.value) === 'think')
+    // 驱力说话：好奇过阈值就真去想一次；无聊到想搭话时，先看一眼屏幕再决定打不打搅。
+    const action = decide(drives.value)
+    if (action === 'think')
       void thinkNow(now)
+    else if (action === 'provoke')
+      void considerSpeaking(now)
 
     // The roll is the impure input the pure lane needs. It lives here on purpose.
     const thought = composeThought({
@@ -397,6 +470,11 @@ export const useMindStore = defineStore('mind', () => {
     attachSense,
     attachThink,
     thinkNow,
+    considerSpeaking,
+    interruptAllowed,
+    interruptReason,
+    lastScreenLine,
+    lastDiaryText,
     thinkWired,
     thinkInFlight,
     lastThinkText,
