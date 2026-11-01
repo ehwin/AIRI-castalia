@@ -175,3 +175,6 @@ apps/*/src/renderer/public/sherpaw/
 
 # upgrade scratch
 .upgrade-logs/
+
+# Bundled decoder binaries: fetched, not committed
+apps/stage-tamagotchi/resources/ffmpeg/*.exe

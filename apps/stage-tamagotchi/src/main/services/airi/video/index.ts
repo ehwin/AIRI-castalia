@@ -1,5 +1,7 @@
 import type { createContext } from '@moeru/eventa/adapters/electron/main'
 
+import process from 'node:process'
+
 import { join } from 'node:path'
 
 import { defineInvokeHandler } from '@moeru/eventa'
@@ -21,7 +23,11 @@ export { createVideoEngine } from './engine'
  * finds them in one place and they never mix with the app bundle.
  */
 export function createAppVideoEngine() {
-  return createVideoEngine({ cacheDir: join(app.getPath('userData'), 'video-cache') })
+  return createVideoEngine({
+    cacheDir: join(app.getPath('userData'), 'video-cache'),
+    // Shipped with the app (see `extraResources`), so a machine without ffmpeg on PATH still works.
+    bundledDir: join(process.resourcesPath, 'ffmpeg'),
+  })
 }
 
 /**

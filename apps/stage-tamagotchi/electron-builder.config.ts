@@ -75,6 +75,9 @@ export default {
   files: [
     'out/**',
     'resources/**',
+    // Ships through `extraResources` instead, so the binaries stay outside the asar and can be
+    // spawned directly.
+    '!resources/ffmpeg/**',
     'package.json',
     // NOTICE: Exclude npm `electron` package from app payload.
     // Electron runtime is already provided by the outer app bundle; bundling a nested
@@ -114,6 +117,13 @@ export default {
     '**/node_modules/@auv-js/cli-*/bin/**',
   ],
   extraResources: [
+    {
+      // The decoder travels with the app: a packaged install has to read a video on a machine that
+      // never put ffmpeg on PATH.
+      from: 'resources/ffmpeg',
+      to: 'ffmpeg',
+      filter: ['*.exe', '*.md'],
+    },
     {
       from: '../../engines/stage-tamagotchi-godot/out/${os}',
       to: 'godot-stage',

@@ -49,6 +49,8 @@ export const useVideoStore = defineStore('video', () => {
   /** What the shell reports: a machine fact, re-read at startup, so it is not persisted. */
   const ffmpegAvailable = ref(false)
   const ffmpegDetected = ref('')
+  /** Where the binary came from: the setting, the environment, the app bundle, or PATH. */
+  const ffmpegSource = ref<'setting' | 'env' | 'bundled' | 'path' | 'missing'>('missing')
   const cacheDir = ref('')
   /**
    * `true` once the desktop shell has mounted the tools. The web build has no ffmpeg and no cache
@@ -64,9 +66,10 @@ export const useVideoStore = defineStore('video', () => {
   }
 
   /** Records what the shell can decode, and where it looks, so the page can say so plainly. */
-  function markCapabilities(capabilities: { available: boolean, ffmpegPath: string, cacheDir: string }) {
+  function markCapabilities(capabilities: { available: boolean, ffmpegPath: string, ffmpegSource?: typeof ffmpegSource.value, cacheDir: string }) {
     ffmpegAvailable.value = capabilities.available
     ffmpegDetected.value = capabilities.ffmpegPath
+    ffmpegSource.value = capabilities.ffmpegSource ?? (capabilities.available ? 'path' : 'missing')
     cacheDir.value = capabilities.cacheDir
   }
 
@@ -95,6 +98,7 @@ export const useVideoStore = defineStore('video', () => {
     ffmpegPath,
     ffmpegAvailable,
     ffmpegDetected,
+    ffmpegSource,
     cacheDir,
     runtimeAvailable,
     configured,

@@ -35,6 +35,13 @@ export interface VideoEngineOptions {
   ffmpegPath?: string
   /** `ffprobe` binary. Defaults to `AIRI_FFPROBE_PATH`, then `PATH`. */
   ffprobePath?: string
+  /**
+   * Directory shipped inside the app, `<resources>/ffmpeg`, holding its own `ffmpeg` and `ffprobe`.
+   *
+   * A packaged install has to work on a machine that never installed ffmpeg: the binaries travel
+   * with the app, and an explicit path (setting or environment) still wins over them.
+   */
+  bundledDir?: string
   /** Test seam. */
   fetchImpl?: typeof fetch
 }
@@ -170,8 +177,35 @@ export function createVideoEngine(options: VideoEngineOptions) {
   // engine exists, and a machine that installs ffmpeg later works without a restart.
   let overrideFfmpeg = options.ffmpegPath
   const overrideFfprobe = options.ffprobePath
-  const ffmpegPathOf = () => overrideFfmpeg || process.env.AIRI_FFMPEG_PATH || findOnPath('ffmpeg')
-  const ffprobePathOf = () => overrideFfprobe || process.env.AIRI_FFPROBE_PATH || findOnPath('ffprobe')
+  const bundledDir = options.bundledDir
+
+  /** A binary that travels with the app, checked per call so a rebuilt install needs no restart. */
+  function bundled(binary: 'ffmpeg' | 'ffprobe'): string {
+    if (!bundledDir)
+      return ''
+    for (const name of process.platform === 'win32' ? [`${binary}.exe`, binary] : [binary]) {
+      const candidate = join(bundledDir, name)
+      if (existsSync(candidate))
+        return candidate
+    }
+    return ''
+  }
+
+  type BinarySource = 'setting' | 'env' | 'bundled' | 'path' | 'missing'
+
+  /** Whichever rule won, so the settings page can say where the binary came from. */
+  function ffmpegSource(): BinarySource {
+    if (overrideFfmpeg)
+      return 'setting'
+    if (process.env.AIRI_FFMPEG_PATH)
+      return 'env'
+    if (bundled('ffmpeg'))
+      return 'bundled'
+    return findOnPath('ffmpeg') ? 'path' : 'missing'
+  }
+
+  const ffmpegPathOf = () => overrideFfmpeg || process.env.AIRI_FFMPEG_PATH || bundled('ffmpeg') || findOnPath('ffmpeg')
+  const ffprobePathOf = () => overrideFfprobe || process.env.AIRI_FFPROBE_PATH || bundled('ffprobe') || findOnPath('ffprobe')
   const fetchImpl = options.fetchImpl ?? fetch
   const cacheDir = options.cacheDir
 
@@ -702,7 +736,7 @@ export function createVideoEngine(options: VideoEngineOptions) {
     /** For the settings page: whether this build can decode anything at all. */
     capabilities: () => {
       const ffmpegPath = ffmpegPathOf()
-      return { ffmpegPath, ffprobePath: ffprobePathOf(), cacheDir, available: Boolean(ffmpegPath) }
+      return { ffmpegPath, ffmpegSource: ffmpegSource(), ffprobePath: ffprobePathOf(), cacheDir, available: Boolean(ffmpegPath) }
     },
   }
 }

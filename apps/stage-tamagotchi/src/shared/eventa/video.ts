@@ -36,6 +36,8 @@ export interface ElectronVideoSheetInput extends ElectronVideoProbeInput {
 export interface ElectronVideoCapabilities {
   available: boolean
   ffmpegPath: string
+  /** Which rule won: an explicit setting, the environment, the copy shipped in the app, or PATH. */
+  ffmpegSource: 'setting' | 'env' | 'bundled' | 'path' | 'missing'
   cacheDir: string
 }
 

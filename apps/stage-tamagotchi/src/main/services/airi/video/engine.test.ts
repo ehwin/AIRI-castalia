@@ -1,3 +1,7 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -104,6 +108,25 @@ describe('video engine', () => {
     const capabilities = engine.capabilities()
     expect(capabilities).toMatchObject({ ffmpegPath: 'ffmpeg-not-installed', cacheDir: 'test-cache' })
     expect(capabilities.available).toBe(true)
+  })
+
+  it('prefers the copy that ships with the app over PATH', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'airi-ffmpeg-'))
+    await writeFile(join(dir, 'ffmpeg.exe'), 'not really a binary')
+    await writeFile(join(dir, 'ffprobe.exe'), 'not really a binary')
+
+    const packaged = createVideoEngine({ cacheDir: 'test-cache', bundledDir: dir })
+    const capabilities = packaged.capabilities()
+
+    expect(capabilities.ffmpegSource).toBe('bundled')
+    expect(capabilities.ffmpegPath).toBe(join(dir, 'ffmpeg.exe'))
+    expect(capabilities.available).toBe(true)
+
+    // A path set in the settings still wins: the owner's choice is not silently overridden.
+    packaged.setFfmpegPath('C:/elsewhere/ffmpeg.exe')
+    expect(packaged.capabilities().ffmpegSource).toBe('setting')
+
+    await rm(dir, { recursive: true, force: true })
   })
 
   it('takes a new binary after construction, so the path can be set without a restart', () => {
