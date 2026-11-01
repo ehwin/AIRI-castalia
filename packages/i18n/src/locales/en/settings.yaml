@@ -1409,6 +1409,39 @@ pages:
       api-key-description: Web search is powered by Tavily. Get a free API key at tavily.com.
       api-key-placeholder: Enter your Tavily API key
       configured: Web search is ready to use!
+    video-share:
+      title: Sharing panel
+      description: 'What she watched on her own and wants to show you; your answer becomes her mood and her memory.'
+    video:
+      title: Video
+      description: Let her actually watch a clip — the transcript plus one contact sheet, not a title
+      enable: Enable video
+      enable-description: 'Let AIRI watch a video: read its transcript, draw one contact sheet, zoom a moment when it matters'
+      depth:
+        label: How closely
+        description: 'Sets the cell count and the default behaviour. Cells are nearly free in tokens; each one just gets smaller.'
+        skim: Glance (9 cells)
+        read: Watch (16 cells)
+        deep: Look closely (25 cells, expects zooms)
+      attach-images: Send the contact sheet to the model
+      attach-images-description: 'Off, only the timecode index is sent. A chat model that cannot see pictures then costs no vision call and no image tokens.'
+      share:
+        title: What she wants to show you
+        empty: 'Nothing yet. Turn on “let her decide when to watch”, or drop a link on her.'
+        wants: I want to see this
+        more: Tell me more
+        pass: Not interested
+        reaction-wants: You wanted to see it
+        reaction-more: You asked for more
+        reaction-pass: You passed
+      autonomous: Let her decide when to watch
+      autonomous-description: 'On, a clip she queued for later is picked up on her own when the moment is hers: idle chat, outside quiet hours, at most 3 a day, with odds that rise the longer it waited. What she watches goes into long-term memory.'
+      bilibili-cookie: Bilibili cookie
+      bilibili-cookie-description: 'Optional. With SESSDATA=… most videos expose their CC captions and a higher quality; without it you usually get 480p and no captions.'
+      bilibili-cookie-placeholder: SESSDATA=…; bili_jct=…
+      configured: Video is ready to use!
+      unavailable: This build has no video engine (the browser build has no ffmpeg). Open this switch in the desktop app for it to take effect.
+      ffmpeg-note: 'Needs ffmpeg on this machine (the desktop build looks on PATH, or set AIRI_FFMPEG_PATH). Media and sheets are cached under userData/video-cache.'
     mcp-server:
       title: MCP servers
       description: Configure MCP servers and bring their tools into AIRI.

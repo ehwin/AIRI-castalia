@@ -1351,6 +1351,39 @@ pages:
       api-key-description: 网络搜索由 Tavily 提供支持，可在 tavily.com 免费获取 API 密钥。
       api-key-placeholder: 输入您的 Tavily API 密钥
       configured: 网络搜索已就绪！
+    video-share:
+      title: 分享面板
+      description: 她自己看了什么、想给你看哪一段；你的回应会变成她的心情和记忆。
+    video:
+      title: 看视频
+      description: 让她真的看视频：字幕原文 + 一张分镜图，而不是只看标题
+      enable: 启用视频
+      enable-description: 允许 AIRI 看视频：读字幕原文、出一张分镜图、需要时放大某一段
+      depth:
+        label: 看得多细
+        description: 决定分镜的格数与默认行为。格数几乎不花 token，代价是每一格更小。
+        skim: 扫一眼（9 格）
+        read: 正常看（16 格）
+        deep: 仔细看（25 格 + 反复放大）
+      attach-images: 把分镜图交给模型
+      attach-images-description: 关掉只送时间码清单。聊天模型看不了图时可省掉一次视觉调用与图片 token。
+      share:
+        title: 她想给你看的
+        empty: 她还没攒下什么。打开「让她自己决定什么时候看」，或者直接丢一条链接给她。
+        wants: 这个我想看
+        more: 讲细一点
+        pass: 不感兴趣
+        reaction-wants: 你想看
+        reaction-more: 你想听她多讲
+        reaction-pass: 你没兴趣
+      autonomous: 让她自己决定什么时候看
+      autonomous-description: 打开后，她会把想看但没现在看的片子记在队列里，空闲时按自己的状态（心情、精力）挑一条看，看完写进长期记忆。每天最多 3 条，深夜不启动。
+      bilibili-cookie: B 站 Cookie
+      bilibili-cookie-description: 可选。填 SESSDATA=… 后多数视频能取到 CC 字幕与更高清晰度；不填通常只有 480p 且没有字幕。
+      bilibili-cookie-placeholder: SESSDATA=…; bili_jct=…
+      configured: 看视频已就绪！
+      unavailable: 这个构建里没有视频引擎（浏览器的网页版没有 ffmpeg）。用桌面版打开这个开关才会生效。
+      ffmpeg-note: 需要本机有 ffmpeg（桌面版会从 PATH 查找，也可用 AIRI_FFMPEG_PATH 指定）。视频与分镜缓存在 userData/video-cache。
     mcp-server:
       title: MCP 集成
       description: 配置其他 MCP 服务器并将能力拓展至 AIRI

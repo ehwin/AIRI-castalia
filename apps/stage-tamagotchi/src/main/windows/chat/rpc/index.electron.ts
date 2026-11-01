@@ -11,6 +11,7 @@ import { defineInvokeHandler } from '@moeru/eventa'
 
 import { electronOpenMainDevtools, electronOpenSettings } from '../../../../shared/eventa'
 import { createMcpServersService } from '../../../services/airi/mcp-servers'
+import { createAppVideoEngine, createVideoService } from '../../../services/airi/video'
 import { createWidgetsService } from '../../../services/airi/widgets'
 import { setupBaseWindowElectronInvokes } from '../../shared/window'
 
@@ -30,6 +31,7 @@ export async function setupChatWindowElectronInvokes(params: {
 
   createWidgetsService({ context, widgetsManager: params.widgetsManager, window: params.window })
   createMcpServersService({ context, manager: params.mcpManager })
+  createVideoService({ context, engine: createAppVideoEngine() })
 
   defineInvokeHandler(context, electronOpenMainDevtools, () => params.window.webContents.openDevTools({ mode: 'detach' }))
   defineInvokeHandler(context, electronOpenSettings, payload => params.openSettingsWindow(payload?.route))

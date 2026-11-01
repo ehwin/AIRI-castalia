@@ -2,6 +2,7 @@
 import type { ArtistrySyncPayload } from '@proj-airi/stage-shared'
 
 import { defineInvokeHandler } from '@moeru/eventa'
+import { useCastaliaPluginStore } from '@proj-airi/castalia-plugin'
 import { useElectronEventaContext, useElectronEventaInvoke } from '@proj-airi/electron-vueuse'
 import { themeColorFromValue, useThemeColor } from '@proj-airi/stage-layouts/composables/theme-color'
 import { artistrySyncConfig } from '@proj-airi/stage-shared'
@@ -10,7 +11,6 @@ import { updateModelAssetStatus, useInferencePreload } from '@proj-airi/stage-ui
 import { usePiniaSynced } from '@proj-airi/stage-ui/libs/pinia'
 import { isSherpawModelBundled, setSherpawModelAssetHost } from '@proj-airi/stage-ui/libs/providers/providers/sherpaw/model-assets'
 import { useCharacterOrchestratorStore } from '@proj-airi/stage-ui/stores/character'
-import { useCastaliaPluginStore } from '@proj-airi/castalia-plugin'
 import { useChatStore } from '@proj-airi/stage-ui/stores/chat'
 import { usePluginHostInspectorStore } from '@proj-airi/stage-ui/stores/devtools/plugin-host-debug'
 import { useDisplayModelsStore } from '@proj-airi/stage-ui/stores/display-models'
@@ -24,8 +24,6 @@ import { useHearingStore } from '@proj-airi/stage-ui/stores/modules/hearing'
 import { useMindStore } from '@proj-airi/stage-ui/stores/modules/mind'
 import { usePerceptionStore } from '@proj-airi/stage-ui/stores/modules/perception'
 import { useSelfInitiatedSpeechStore } from '@proj-airi/stage-ui/stores/modules/self-initiated-speech'
-import { castaliaMemoryPsyche, castaliaMemorySelfCycle } from '../shared/eventa/castalia-memory'
-import { createScreenSense } from './libs/screen-sense'
 import { useSpeechStore } from '@proj-airi/stage-ui/stores/modules/speech'
 import { useVisionStore } from '@proj-airi/stage-ui/stores/modules/vision'
 import { usePerfTracerBridgeStore } from '@proj-airi/stage-ui/stores/perf-tracer-bridge'
@@ -49,7 +47,7 @@ import {
   i18nGetLocale,
   i18nSetLocale,
 } from '../shared/eventa'
-import { castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryRecall, castaliaMemorySave } from '../shared/eventa/castalia-memory'
+import { castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemorySave, castaliaMemorySelfCycle } from '../shared/eventa/castalia-memory'
 import { electronModelAssetCancel, electronModelAssetEnsure, electronModelAssetRemove, electronModelAssetsClear, electronModelAssetsList, electronModelAssetStatusChanged } from '../shared/eventa/model-assets'
 import {
   electronPluginUpdateCapability,
@@ -72,6 +70,7 @@ import { electronPluginToolsChanged } from '../shared/eventa/plugin/tools'
 import { initializeIOTraceHubBridge } from './bridges/io-trace-hub'
 import { initializeStageThreeRuntimeTraceBridge } from './bridges/stage-three-runtime-trace'
 import { useLanguage } from './composables/use-language'
+import { createScreenSense } from './libs/screen-sense'
 import { useFullscreenStore } from './stores/fullscreen'
 import { useServerChannelSettingsStore } from './stores/settings/server-channel'
 import { useStageWindowLifecycleStore } from './stores/stage-window-lifecycle'
@@ -80,7 +79,9 @@ import {
   useTamagotchiHomeAssistantStore,
   useTamagotchiMcpToolsStore,
   useTamagotchiPluginToolsStore,
+  useTamagotchiVideoToolsStore,
 } from './stores/tools'
+import { useVideoAutonomyStore } from './stores/video-autonomy'
 import { resolveInitialRendererRoutePath, resolveRendererWindowContext } from './window-context'
 
 const { isDark: dark } = useTheme()
@@ -150,6 +151,10 @@ const selfInitiatedSpeechStore = useSelfInitiatedSpeechStore()
 const builtinToolsStore = useTamagotchiBuiltinToolsStore()
 const homeAssistantStore = useTamagotchiHomeAssistantStore()
 const mcpToolsStore = useTamagotchiMcpToolsStore()
+const videoToolsStore = useTamagotchiVideoToolsStore()
+// The autonomy ticker starts itself when the video module turns `autonomous` on; instantiating the
+// store here is what binds that timer to the app's lifetime.
+useVideoAutonomyStore()
 const pluginToolsStore = useTamagotchiPluginToolsStore()
 const syncedPinia = usePiniaSynced()
 const isSpotlightWindow = initialRoutePath === '/spotlight'
@@ -183,6 +188,11 @@ const stopLeadershipListener = syncedPinia.onLeadershipChange((isLeader) => {
   })
   void mcpToolsStore.refresh().catch((error) => {
     console.warn('[App] Failed to refresh MCP runtime tools:', error)
+  })
+  // The video module keeps its tools mounted across leadership changes; a renderer that only
+  // joins later still needs them, so the leader re-mounts them here.
+  void videoToolsStore.refresh().catch((error) => {
+    console.warn('[App] Failed to refresh video tools:', error)
   })
   void homeAssistantStore.refresh().catch((error) => {
     console.warn('[App] Failed to refresh Home Assistant tools:', error)

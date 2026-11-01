@@ -44,6 +44,7 @@
     "./tools/mcp": "./src/tools/mcp.ts",
     "./tools/home-assistant": "./src/tools/home-assistant.ts",
     "./tools/icons": "./src/tools/icons.ts",
+    "./tools/video": "./src/tools/video.ts",
     "./stores/character": "./src/stores/character/index.ts",
     "./stores/settings/stage-model": "./src/stores/settings/stage-model.ts",
     "./stores/settings": "./src/stores/settings/index.ts",

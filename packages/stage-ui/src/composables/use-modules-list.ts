@@ -21,6 +21,7 @@ import { usePerceptionStore } from '../stores/modules/perception'
 import { useSpeechStore } from '../stores/modules/speech'
 import { useStickersStore } from '../stores/modules/stickers'
 import { useTwitterStore } from '../stores/modules/twitter'
+import { useVideoStore } from '../stores/modules/video'
 import { useVisionStore } from '../stores/modules/vision'
 import { useWebSearchStore } from '../stores/modules/web-search'
 import { useToolCardsStore } from '../stores/tool-cards'
@@ -49,6 +50,7 @@ export function useModulesList() {
   const discordStore = useDiscordStore()
   const twitterStore = useTwitterStore()
   const webSearchStore = useWebSearchStore()
+  const videoStore = useVideoStore()
   const minecraftStore = useMinecraftStore()
   const factorioStore = useFactorioStore()
   const homeAssistantStore = useHomeAssistantStore()
@@ -135,6 +137,24 @@ export function useModulesList() {
       icon: 'i-solar:magnifer-bold-duotone',
       to: '/settings/modules/web-search',
       configured: webSearchStore.configured,
+      category: 'essential',
+    },
+    {
+      id: 'video',
+      name: t('settings.pages.modules.video.title'),
+      description: t('settings.pages.modules.video.description'),
+      icon: 'i-solar:videocamera-record-bold-duotone',
+      to: '/settings/modules/video',
+      configured: videoStore.configured,
+      category: 'essential',
+    },
+    {
+      id: 'video-share',
+      name: t('settings.pages.modules.video-share.title'),
+      description: t('settings.pages.modules.video-share.description'),
+      icon: 'i-solar:share-circle-bold-duotone',
+      to: '/settings/modules/video-share',
+      configured: true,
       category: 'essential',
     },
     {

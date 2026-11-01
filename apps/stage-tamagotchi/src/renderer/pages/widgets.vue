@@ -160,6 +160,7 @@ const Registry: Record<string, ReturnType<typeof defineAsyncComponent>> = {
   'extension-ui': defineAsyncComponent(async () => (await import('../widgets/extension-ui')).ExtensionUi),
   'map': defineAsyncComponent(async () => (await import('../widgets/map')).Map),
   'weather': defineAsyncComponent(async () => (await import('../widgets/weather')).Weather),
+  'video-share': defineAsyncComponent(async () => (await import('../widgets/video-share')).VideoShare),
   'artistry': defineAsyncComponent(async () => (await import('../widgets/artistry')).Artistry),
 }
 

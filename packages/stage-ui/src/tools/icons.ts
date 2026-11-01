@@ -22,6 +22,8 @@ export const TOOL_ICONS = {
   widgets: 'i-tabler:layout-grid',
   imageJournal: 'i-tabler:palette',
   computerUse: 'i-tabler:device-desktop',
+  /** Watching a video: the contact sheet and the transcript of one clip. */
+  video: 'i-tabler:movie',
   homeAssistant: 'i-tabler:home',
   memory: 'i-tabler:book-2',
   wakeWords: 'i-tabler:microphone',
