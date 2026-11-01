@@ -32,6 +32,9 @@ export function createScreenSense() {
   let busy = false
   /** 最近一次 look 走到哪一步、拿到什么。没有它，「她看不见」和「她坏了」长得一模一样。 */
   let last: Record<string, unknown> = { stage: 'idle' }
+  /** Display layout hardly changes; re-reading it every look would cost an extra CLI run each time. */
+  let displays: Array<{ name: string, isPrimary: boolean, frame: { x: number, y: number, w: number, h: number }, scale: number }> = []
+  let displaysAt = 0
 
   async function ask(imageDataUrl: string, workloadId: 'screen:activity' | 'screen:interpret') {
     const { text } = await useVisionOrchestratorStore().processCapture({
@@ -42,6 +45,10 @@ export function createScreenSense() {
       publishContext: false,
     })
     return String(text ?? '').trim()
+  }
+
+  function parseJson(output: unknown): any {
+    return typeof output === 'string' ? JSON.parse(output) : output
   }
 
   return {
@@ -55,14 +62,73 @@ export function createScreenSense() {
         const run = defineInvoke(context, computerUseRun)
         const readImage = defineInvoke(context, computerUseReadImage)
 
-        const capture = await run({ argv: ['invoke', 'display.capture', '--json'] })
-        last = { stage: 'capture', exitCode: capture?.exitCode, at: Date.now() }
+        // 哪一块屏？光标所在的那块。人眼跟着手走，比"主屏"这个静态概念更接近她该看的地方，
+        // 也是唯一能把第二块屏带进来的路（`display.capture` 只认主屏，`Target forbidden`）。
+        if (Date.now() - displaysAt > 5 * 60_000) {
+          const listed = await run({ argv: ['invoke', 'display.list', '--json'] })
+          const parsed = parseJson(listed?.output)
+          const rows = Array.isArray(parsed?.result?.displays) ? parsed.result.displays : []
+          displays = rows.map((row: any) => ({
+            name: String(row?.name ?? 'display'),
+            isPrimary: row?.is_primary === true,
+            frame: {
+              x: Number(row?.frame?.origin?.x ?? 0),
+              y: Number(row?.frame?.origin?.y ?? 0),
+              w: Number(row?.frame?.size?.width ?? 0),
+              h: Number(row?.frame?.size?.height ?? 0),
+            },
+            scale: Number(row?.scale_factor ?? 1) || 1,
+          })).filter((row: { frame: { w: number, h: number } }) => row.frame.w > 0 && row.frame.h > 0)
+          displaysAt = Date.now()
+          last = { ...last, displays: displays.map(d => ({ name: d.name, frame: d.frame, scale: d.scale })) }
+        }
+
+        let pointer: { x: number, y: number } | undefined
+        try {
+          const pos = await run({ argv: ['invoke', 'input.pointerPosition', '--json'] })
+          const parsed = parseJson(pos?.output)
+          const result = parsed?.result ?? parsed
+          if (Number.isFinite(result?.x) && Number.isFinite(result?.y))
+            pointer = { x: Number(result.x), y: Number(result.y) }
+        }
+        catch { /* 光标读不到就退回主屏 */ }
+
+        const target = pointer
+          ? displays.find(d => pointer!.x >= d.frame.x && pointer!.x < d.frame.x + d.frame.w
+            && pointer!.y >= d.frame.y && pointer!.y < d.frame.y + d.frame.h)
+          : undefined
+        const chosen = target ?? displays.find(d => d.isPrimary) ?? displays[0]
+
+        // 副屏只能按逻辑矩形抓（AUV 没有"抓第 N 块屏"的参数），主屏走物理分辨率的整屏抓。
+        let capture: any
+        let route = 'display.capture'
+        if (chosen && !chosen.isPrimary) {
+          route = 'screen.captureRegion'
+          const scale = chosen.scale || 1
+          capture = await run({
+            argv: [
+              'invoke',
+              'screen.captureRegion',
+              '--x', String(Math.round(chosen.frame.x / scale)),
+              '--y', String(Math.round(chosen.frame.y / scale)),
+              '--width', String(Math.round(chosen.frame.w / scale)),
+              '--height', String(Math.round(chosen.frame.h / scale)),
+              '--json',
+            ],
+          })
+        }
+        else {
+          capture = await run({ argv: ['invoke', 'display.capture', '--json'] })
+        }
+
+        last = { ...last, stage: 'capture', route, display: chosen?.name, pointer, exitCode: capture?.exitCode, at: Date.now() }
         if (capture?.exitCode !== 0)
           return []
 
-        const parsed = typeof capture.output === 'string' ? JSON.parse(capture.output) : capture.output as any
-        const artifactPath = parsed?.artifacts?.[0]?.file_path
-        last = { ...last, stage: 'artifact', hasPath: Boolean(artifactPath) }
+        const parsedCapture = parseJson(capture.output)
+        const artifactPath = parsedCapture?.artifacts?.[0]?.file_path
+        const pixels = parsedCapture?.result?.capture?.pixel_dimensions
+        last = { ...last, stage: 'artifact', hasPath: Boolean(artifactPath), pixels }
         if (!artifactPath)
           return []
 
