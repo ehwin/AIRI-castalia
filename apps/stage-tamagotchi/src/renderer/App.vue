@@ -10,6 +10,7 @@ import { updateModelAssetStatus, useInferencePreload } from '@proj-airi/stage-ui
 import { usePiniaSynced } from '@proj-airi/stage-ui/libs/pinia'
 import { isSherpawModelBundled, setSherpawModelAssetHost } from '@proj-airi/stage-ui/libs/providers/providers/sherpaw/model-assets'
 import { useCharacterOrchestratorStore } from '@proj-airi/stage-ui/stores/character'
+import { useCastaliaPluginStore } from '@proj-airi/castalia-plugin'
 import { useChatStore } from '@proj-airi/stage-ui/stores/chat'
 import { usePluginHostInspectorStore } from '@proj-airi/stage-ui/stores/devtools/plugin-host-debug'
 import { useDisplayModelsStore } from '@proj-airi/stage-ui/stores/display-models'
@@ -21,7 +22,10 @@ import { useArtistryStore } from '@proj-airi/stage-ui/stores/modules/artistry'
 import { useConsciousnessStore } from '@proj-airi/stage-ui/stores/modules/consciousness'
 import { useHearingStore } from '@proj-airi/stage-ui/stores/modules/hearing'
 import { useMindStore } from '@proj-airi/stage-ui/stores/modules/mind'
+import { usePerceptionStore } from '@proj-airi/stage-ui/stores/modules/perception'
 import { useSelfInitiatedSpeechStore } from '@proj-airi/stage-ui/stores/modules/self-initiated-speech'
+import { castaliaMemoryPsyche, castaliaMemorySelfCycle } from '../shared/eventa/castalia-memory'
+import { createScreenSense } from './libs/screen-sense'
 import { useSpeechStore } from '@proj-airi/stage-ui/stores/modules/speech'
 import { useVisionStore } from '@proj-airi/stage-ui/stores/modules/vision'
 import { usePerfTracerBridgeStore } from '@proj-airi/stage-ui/stores/perf-tracer-bridge'
@@ -31,7 +35,7 @@ import { useSettingsStageModel } from '@proj-airi/stage-ui/stores/settings/stage
 import { useTheme } from '@proj-airi/ui'
 import { isEqual } from 'es-toolkit'
 import { storeToRefs } from 'pinia'
-import { onMounted, onUnmounted, watch } from 'vue'
+import { onMounted, onUnmounted, watch, watchEffect } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import { toast, Toaster } from 'vue-sonner'
 
@@ -126,6 +130,19 @@ const windowContext = resolveRendererWindowContext()
 const initialRoutePath = resolveInitialRendererRoutePath(route.path)
 const chatStore = useChatStore()
 const mindStore = useMindStore()
+// Her eyes: the screen, summarised to one line per look by the vision workload. The mind stays blind until a host
+// attaches a port, and the perception toggles decide whether this host does.
+const castaliaStore = useCastaliaPluginStore()
+const invokePsyche = useElectronEventaInvoke(castaliaMemoryPsyche)
+const invokeSelfCycle = useElectronEventaInvoke(castaliaMemorySelfCycle)
+/** The engine owns the affect state; the mirror refreshes on this cadence so the prompt is never stale. */
+const PSYCHE_SYNC_INTERVAL_MS = 5 * 60_000
+let psycheSyncTimer: ReturnType<typeof setInterval> | null = null
+const perceptionStore = usePerceptionStore()
+const screenSense = createScreenSense()
+/** How often the idle mind glances at the screen. One look costs a capture plus one vision read. */
+const LOOK_AROUND_INTERVAL_MS = 5 * 60_000
+let lookAroundTimer: ReturnType<typeof setInterval> | null = null
 // The desktop shell starts the same autonomy ticker as the web app. Without this
 // line the policy layer runs (its tests pass) but nothing ever fires: she only
 // answers, never opens a conversation on her own.
@@ -428,6 +445,45 @@ onMounted(async () => {
   mindStore.attachTurnComplete(chatStore.onChatTurnComplete)
   await mindStore.initialize()
 
+  // Her eyes are attached only while perception allows them, and the idle mind glances at the screen on a slow
+  // timer. Without both, `lookAround` has nothing to see and the drive of curiosity never moves.
+  watchEffect(() => {
+    mindStore.attachSense(perceptionStore.screen && perceptionStore.screenReady ? screenSense : undefined)
+  })
+  lookAroundTimer = setInterval(() => {
+    if (mindStore.senseAttached)
+      void mindStore.lookAround()
+  }, LOOK_AROUND_INTERVAL_MS)
+
+  // Mirror the engine's psyche into her self-state. Without this the state line and the panel only move when the
+  // model calls a tool, and she never does; the bank has the values all along.
+  const syncPsyche = async () => {
+    try {
+      const psyche = await invokePsyche({})
+      if (psyche?.hasEvidence)
+        castaliaStore.syncPsyche({ vad: psyche.vad, at: psyche.updatedAt }, psyche.characterId)
+    }
+    catch { /* the mirror is best-effort; the engine keeps the truth */ }
+  }
+  void syncPsyche()
+  psycheSyncTimer = setInterval(() => void syncPsyche(), PSYCHE_SYNC_INTERVAL_MS)
+
+  // 无聊/好奇的时候真的去想一次：mind 的驱力走到 `think`，这里把它接到 Castalia 的自循环
+  // （读最近的对话证据、写一篇带出处的日记）。返回的日记正文会变成她的一条内部念头。
+  // `minIntervalHours: 0.25` 是引擎侧的兜底间隔，与 mind 这边 20 分钟冷却互为保险。
+  mindStore.attachThink(async () => {
+    try {
+      const report = await invokeSelfCycle({ minIntervalHours: 0.25 })
+      if (!report?.ok || report.skipped)
+        return undefined
+      return report.diaryText
+    }
+    catch {
+      // 引擎没起来就当这次没想成；下一次 tick 还会再来。
+      return undefined
+    }
+  })
+
   await fullStageRuntime?.initialize()
   await chatStreamView?.initializeStreamView()
 })
@@ -442,6 +498,14 @@ watch(themeColorsHueDynamic, () => {
 
 onUnmounted(() => {
   selfInitiatedSpeechStore.stop()
+  if (lookAroundTimer)
+    clearInterval(lookAroundTimer)
+  lookAroundTimer = null
+  if (psycheSyncTimer)
+    clearInterval(psycheSyncTimer)
+  psycheSyncTimer = null
+  mindStore.attachSense(undefined)
+  mindStore.attachThink(undefined)
   mindStore.dispose()
   stopIOTraceHubBridge()
   stopModelAssetStatus()

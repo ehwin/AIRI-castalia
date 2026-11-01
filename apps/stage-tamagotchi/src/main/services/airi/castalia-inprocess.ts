@@ -10,6 +10,10 @@ import type { CastaliaMemoryEntry } from '@proj-airi/castalia-plugin/memory'
 import type { CastaliaRecalledMemory } from '../../../shared/eventa/castalia-memory'
 import type { CastaliaEngineMemory, CastaliaEngineOptions } from './castalia-engine'
 
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
+
 import { openBank } from '@proj-airi/castalia-plugin/bank'
 import { parseStoreText } from '@proj-airi/castalia-plugin/bank/store-tools'
 
@@ -20,6 +24,37 @@ function parseTime(value: string | undefined): number {
   const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`
   const parsed = Date.parse(normalized)
   return Number.isFinite(parsed) ? parsed : Date.now()
+}
+
+/**
+ * 按 id 读一条日记的正文。
+ *
+ * 为什么直连库而不是问引擎：日记写在 `project` 分类库里，引擎的 `memory_get` 按 agent 的
+ * memType 目录找，实测返回 NOT_FOUND；而这里只读一行，代价可以忽略。读失败一律返回
+ * undefined —— 拿不到正文不该让「她刚想过」这件事变成错误。
+ */
+function readDiaryText(options: { bankDir: string, project: string } | undefined, diaryId: string): string | undefined {
+  try {
+    const bankDir = options?.bankDir
+    const project = options?.project
+    if (!bankDir || !project)
+      return undefined
+    const file = join(bankDir, project, 'project', 'memory.sqlite')
+    if (!existsSync(file))
+      return undefined
+    const db = new DatabaseSync(file, { readOnly: true })
+    try {
+      const row = db.prepare('SELECT text FROM memory WHERE id = ?').get(diaryId) as { text?: string } | undefined
+      const text = typeof row?.text === 'string' ? row.text.trim() : ''
+      return text || undefined
+    }
+    finally {
+      db.close()
+    }
+  }
+  catch {
+    return undefined
+  }
 }
 
 export function createInProcessBankMemory(options: CastaliaEngineOptions): CastaliaEngineMemory {
@@ -126,6 +161,25 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
         return { ok: false, startedAt: new Date().toISOString(), ms: 0, reflectConfigured: false, error: 'closing' }
       const bank = await ensure()
       return bank.maintain(options)
+    },
+
+    async psycheState(options) {
+      if (closing)
+        return null
+      const bank = await ensure()
+      return bank.psycheState(options ?? {})
+    },
+
+    async selfCycle(input) {
+      if (closing)
+        return { ok: false, skipped: true, reason: 'closing', evidenceIds: [], project: input?.project ?? '' }
+      const bank = await ensure()
+      const result = await bank.selfCycle(input)
+      // 日记正文只在 project 库里、且只有 id 能对上。这一读走只读连接（WAL 允许并发读），
+      // 用来回答「她刚才到底想了什么」—— mind 把它变成一条内部念头。
+      if (result?.ok && !result.skipped && result.diaryId)
+        return { ...result, diaryText: readDiaryText({ bankDir: options.bankDir, project: options.project }, result.diaryId) }
+      return result
     },
 
     async close() {

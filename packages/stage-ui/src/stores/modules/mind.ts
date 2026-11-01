@@ -9,6 +9,7 @@ import {
   composeThought,
   createRefusalState,
   createStream,
+  decide,
   digestSense,
   evaluateRefusal,
   inferRequestTraits,
@@ -32,6 +33,23 @@ const SENSE_MEMORY = 32
 
 /** Who it is, for friction. A tidy character with a normal patience. */
 const personaForFriction = { tidiness: 0.6, patience: 0.5 }
+
+/**
+ * 她到底多久才真去想一次。
+ *
+ * `decide()` 只看驱力：好奇压过阈值就想。但想这件事有成本（一次自循环要读写记忆），
+ * 45 秒一跳的驱力会让它在十分钟里想二十次。20 分钟是最短间隔，引擎侧还有
+ * `minIntervalHours` 兜底，两层都在。
+ */
+const THINK_COOLDOWN_MS = 20 * 60_000
+
+/**
+ * 一次「想」最多等多久。
+ *
+ * 引擎是一次子进程 MCP 调用：进程没起来、握手卡住、银行被别的桥独占，都可能让 promise
+ * 永远不落地。那样 `thinking` 会一直是 true，她就再也不想了 —— 必须有上限。
+ */
+const THINK_TIMEOUT_MS = 120_000
 
 /** A task she handed to someone else because it is not hers to do. */
 export interface DelegatedTask {
@@ -70,6 +88,24 @@ export const useMindStore = defineStore('mind', () => {
   let seenTexts: string[] = []
   /** Set by `lookAround` and consumed by the next tick. */
   const novelty = ref(false)
+  /**
+   * How a resident host answers `decide() === 'think'`.
+   *
+   * The store stays impure but dumb: it knows *when* to think, the host knows
+   * *how* (AIRI answers with one Castalia self-cycle, which reads recent
+   * conversation and writes a diary entry). Unset means she only daydreams in
+   * the local template lane, which is the old behaviour.
+   */
+  let thinkExecutor: (() => Promise<string | undefined>) | undefined
+  let thinking = false
+  let lastThinkAt = 0
+  /** 可观测：host 有没有把「怎么想」交进来。没接上时 `thinkNow()` 直接返回 false。 */
+  const thinkWired = ref(false)
+  /** 可观测：现在是不是正在想（卡住时能看见）。 */
+  const thinkInFlight = ref(false)
+  /** Last thing a real think produced, for the panel and for `poke()`. */
+  const lastThinkText = ref<string>()
+  const thinkCount = ref(0)
 
   // How many sends a changed state stays visible. SillyTavern calls the same
   // control "Sticky": an activated entry stays for N messages, then stops on its
@@ -128,6 +164,69 @@ export const useMindStore = defineStore('mind', () => {
   }
 
   /**
+   * Tells the mind how to actually think when the drives ask for it.
+   *
+   * AIRI passes one Castalia self-cycle: read the recent conversation, write a
+   * diary entry. The returned string is what she "thought about", and it lands
+   * in the private stream like any other thought.
+   */
+  function attachThink(executor: (() => Promise<string | undefined>) | undefined) {
+    thinkExecutor = executor
+    thinkWired.value = Boolean(executor)
+  }
+
+  /**
+   * One real think, if the host wired one and the cooldown allows it.
+   *
+   * Returns whether anything happened, so a probe can assert on it without
+   * waiting for the 45 s tick.
+   */
+  async function thinkNow(now = Date.now()): Promise<boolean> {
+    if (!thinkExecutor || thinking)
+      return false
+    if (now - lastThinkAt < THINK_COOLDOWN_MS)
+      return false
+
+    thinking = true
+    thinkInFlight.value = true
+    try {
+      const text = (await Promise.race([
+        thinkExecutor(),
+        new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), THINK_TIMEOUT_MS)),
+      ]))?.trim()
+      if (!text) {
+        // 引擎说「刚想过，还没到间隔」也是没想成：那是正常跳过，不该罚掉 20 分钟，
+        // 但也不能每 45 秒问一次，给 3 分钟。
+        lastThinkAt = Date.now() - THINK_COOLDOWN_MS + 3 * 60_000
+        return false
+      }
+
+      lastThinkAt = Date.now()
+      const thought: Thought = {
+        id: `think-${lastThinkAt}`,
+        at: lastThinkAt,
+        text,
+        visibility: 'private',
+        topic: 'self-cycle',
+      }
+      stream.value = record(stream.value, thought)
+      lastThinkText.value = text
+      thinkCount.value += 1
+      void innerThoughtsRepo.append(thought).catch(() => {})
+      return true
+    }
+    catch {
+      // A failed think must not stop the tick loop; retry in a few minutes.
+      lastThinkAt = Date.now() - THINK_COOLDOWN_MS + 3 * 60_000
+      return false
+    }
+    finally {
+      thinking = false
+      thinkInFlight.value = false
+    }
+  }
+
+  /**
    * Asks the sense what it can see and feeds the result to the lane.
    *
    * Returning the number of fresh observations keeps this testable without a
@@ -160,6 +259,11 @@ export const useMindStore = defineStore('mind', () => {
       novelty: novelty.value,
     })
     novelty.value = false
+
+    // 驱力说话：好奇过阈值就该真去想一次。这里只做「想」，不出声 —— 出声要过表达阶梯
+    // （`planExpression` 的两级冷却），那是另一条路，不在这个 tick 里顺手加。
+    if (decide(drives.value) === 'think')
+      void thinkNow(now)
 
     // The roll is the impure input the pure lane needs. It lives here on purpose.
     const thought = composeThought({
@@ -291,6 +395,12 @@ export const useMindStore = defineStore('mind', () => {
     tick,
     poke,
     attachSense,
+    attachThink,
+    thinkNow,
+    thinkWired,
+    thinkInFlight,
+    lastThinkText,
+    thinkCount,
     lookAround,
     senseAttached,
     handoffFor,

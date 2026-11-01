@@ -43,6 +43,36 @@ export interface CastaliaIngestTurnResult {
 }
 export const castaliaMemoryIngest = defineInvokeEventa<CastaliaIngestTurnResult, CastaliaIngestTurnInput>('eventa:invoke:castalia:memory:ingest')
 
+export interface CastaliaSelfCycleReport {
+  ok: boolean
+  skipped: boolean
+  reason?: string
+  diaryId?: string
+  /** 这一轮写下的日记正文（从 diaryId 取回），供「无聊时思考」把它当一条内部念头读出来。 */
+  diaryText?: string
+  evidenceIds: string[]
+  project: string
+}
+
+export const castaliaMemorySelfCycle = defineInvokeEventa<CastaliaSelfCycleReport, { limit?: number, hoursBack?: number, minIntervalHours?: number } | undefined>('eventa:invoke:castalia:memory:self-cycle')
+
+/**
+ * 引擎当前的 psyche（情绪坐标 + 慢层心境 + band）。
+ *
+ * 引擎是这份状态的唯一真源：UI 只读它来镜像自己的 self-state，不自己累积情绪。
+ */
+export interface CastaliaPsycheSnapshot {
+  characterId: string
+  project: string
+  hasEvidence: boolean
+  band: string
+  vad: { valence: number, arousal: number, dominance: number }
+  mood: { valence: number, arousal: number, dominance: number }
+  version: number
+  updatedAt: number
+}
+export const castaliaMemoryPsyche = defineInvokeEventa<CastaliaPsycheSnapshot | null, { characterId?: string } | undefined>('eventa:invoke:castalia:memory:psyche')
+
 /** 记忆维护（抽取 + 整合 + digest），全部在主进程内跑；失败不抛错，报告里带 error。 */
 export interface CastaliaMaintainReport {
   ok: boolean

@@ -135,6 +135,10 @@ export interface CastaliaEngineMemory {
   ingest?: (turn: CastaliaIngestTurn) => Promise<CastaliaIngestResult>
   /** 进程内维护：抽取 + 整合 + digest。没有实现的后端就不跑（返回 ok:false）。 */
   maintain?: (options?: { limit?: number }) => Promise<CastaliaMaintainReport>
+  /** 引擎当前的 psyche 状态（情绪坐标 + 慢层心境 + band）。没有实现的后端返回 null。 */
+  psycheState?: (options?: { characterId?: string }) => Promise<import('../../../shared/eventa/castalia-memory').CastaliaPsycheSnapshot | null>
+  /** Run one bounded self-cycle on the same engine/bank. */
+  selfCycle?: (options?: { project?: string, characterId?: string, limit?: number, hoursBack?: number, minIntervalHours?: number }) => Promise<CastaliaSelfCycleReport>
   close: () => Promise<void>
 }
 
@@ -150,6 +154,15 @@ export interface CastaliaIngestResult {
   id?: string
   mode?: string
   error?: string
+}
+
+export interface CastaliaSelfCycleReport {
+  ok: boolean
+  skipped: boolean
+  reason?: string
+  diaryId?: string
+  evidenceIds: string[]
+  project: string
 }
 
 export interface CastaliaMaintainReport {
@@ -184,7 +197,7 @@ export function createCastaliaEngineMemory(options: CastaliaEngineOptions): Cast
           MEMORY_CONFIG: join(options.bankDir, 'config.json'),
           CASTALIA_PROJECT: options.project,
           CHAR_ID: options.character,
-          MCP_TOOLS: 'store',
+          MCP_TOOLS: 'store,self_cycle,memory_recent',
           HEALTH_PORT: '0',
           CONSOLIDATE_AUTO_ON_START: '0',
         },
@@ -264,6 +277,48 @@ export function createCastaliaEngineMemory(options: CastaliaEngineOptions): Cast
       }
     },
 
+    async selfCycle(input = {}) {
+      if (closing)
+        return { ok: false, skipped: true, reason: 'closing', evidenceIds: [], project: input.project ?? options.project }
+      const envelope = await call('self_cycle', {
+        project: input.project ?? options.project,
+        characterId: input.characterId ?? options.character,
+        limit: input.limit,
+        hoursBack: input.hoursBack,
+        minIntervalHours: input.minIntervalHours,
+      })
+      // 这一轮写的日记正文要带回来：AIRI 的「无聊时思考」把它当成一条内部念头，
+      // 否则调用方只知道「写了一篇日记」，说不出想了什么。
+      // 日记正文只能用 memory_recent 拿：memory_get 按 agent 的 memType 目录找，
+      // 找不到写在 project 目录里的日记（实测 NOT_FOUND），而 memory_recent 能读到。
+      let diaryText: string | undefined
+      if (envelope.ok === true && typeof envelope.diaryId === 'string') {
+        try {
+          const recent = await call('memory_recent', {
+            project: input.project ?? options.project,
+            limit: 5,
+            hoursBack: 2,
+          })
+          const rows = Array.isArray((recent as any)?.results) ? (recent as any).results : []
+          const hit = rows.find((row: any) => row?.id === envelope.diaryId)
+            ?? rows.find((row: any) => typeof row?.text === 'string' && row.text.trim().startsWith('#'))
+          if (typeof hit?.text === 'string' && hit.text.trim())
+            diaryText = hit.text
+        }
+        catch {
+          // 拿不到正文不影响自循环本身的结果。
+        }
+      }
+      return {
+        ok: envelope.ok === true,
+        skipped: envelope.skipped === true,
+        reason: typeof envelope.reason === 'string' ? envelope.reason : undefined,
+        diaryId: typeof envelope.diaryId === 'string' ? envelope.diaryId : undefined,
+        diaryText,
+        evidenceIds: Array.isArray(envelope.evidenceIds) ? envelope.evidenceIds.map(String) : [],
+        project: typeof envelope.project === 'string' ? envelope.project : options.project,
+      }
+    },
     async close() {
       closing = true
       const client = await clientPromise?.catch(() => undefined)

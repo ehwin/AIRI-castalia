@@ -8,7 +8,7 @@ import { defineInvokeHandler } from '@moeru/eventa'
 import { createCastaliaMemoryRepository } from '@proj-airi/castalia-plugin/memory'
 import { app } from 'electron'
 
-import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryRecall, castaliaMemorySave, castaliaOpenConsole, castaliaTuningGet, castaliaTuningSave } from '../../../shared/eventa/castalia-memory'
+import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemorySave, castaliaMemorySelfCycle, castaliaOpenConsole, castaliaTuningGet, castaliaTuningSave } from '../../../shared/eventa/castalia-memory'
 import { openCastaliaConsole } from './castalia-console'
 import type { CastaliaEngineMemory } from './castalia-engine'
 
@@ -131,6 +131,34 @@ function scheduleMemoryMaintenance(engine: CastaliaEngineMemory) {
   })
 }
 
+function scheduleSelfCycle(engine: CastaliaEngineMemory) {
+  if (process.env.CASTALIA_SELF_CYCLE === 'off' || !engine.selfCycle) {
+    console.info('[castalia] self-cycle disabled or unavailable')
+    return
+  }
+  const intervalMinutes = Number.parseFloat(process.env.SELF_CYCLE_INTERVAL_MINUTES || '360')
+  if (!Number.isFinite(intervalMinutes) || intervalMinutes <= 0) {
+    console.info('[castalia] self-cycle disabled (SELF_CYCLE_INTERVAL_MINUTES <= 0)')
+    return
+  }
+  let running = false
+  const run = async (reason: string) => {
+    if (running) return
+    running = true
+    try {
+      const report = await engine.selfCycle!({ limit: 6, hoursBack: 48, minIntervalHours: Math.max(0, intervalMinutes / 60) })
+      console.info(`[castalia] self-cycle ${reason}: ok=${report.ok} skipped=${report.skipped} reason=${report.reason ?? '-'} evidence=${report.evidenceIds.length}`)
+    }
+    catch (error) {
+      console.warn('[castalia] self-cycle failed:', (error as Error).message)
+    }
+    finally { running = false }
+  }
+  const startupDelay = setTimeout(() => { void run('startup') }, 3 * 60_000)
+  const timer = setInterval(() => { void run('interval') }, intervalMinutes * 60_000)
+  app.once('before-quit', () => { clearTimeout(startupDelay); clearInterval(timer) })
+  console.info(`[castalia] self-cycle scheduled every ${intervalMinutes} minutes`)
+}
 function getRepository(databasePath: string) {
   if (repository && repositoryPath !== databasePath)
     throw new Error('Castalia memory is already open at a different database path')
@@ -166,7 +194,12 @@ export function setupCastaliaMemoryService(params: {
 
   const engineOptions = resolveCastaliaEngineOptions(userDataDir)
 
-  // 心智/检索参数：必须在引擎模块求值前注入 process.env（引擎是进程内加载的）。
+  // 每一轮落库都走引擎的完整 autoProcess（VAD 队列 + 会话缓冲），而不是最小路径。
+  // 只有这条路径会给情绪链喂原料：最小路径只写 conversation_log，psyche_events 永远是 0。
+  // 显式设 MEMORY_AUTO_PROCESS=0 可以退回最小路径做对照。
+  process.env.MEMORY_AUTO_PROCESS ??= '1'
+  // 情绪分析的 VAD 模型：优先本机 Lemonade 的 OpenAI 兼容端点（免费、不走网）。没有这一条时，
+  // 引擎只会去敲 127.0.0.1:11434 的 Ollama（本机没跑），每批 404 后落到词表——实测只覆盖 30% 的对话。
   // 无论走引擎还是本地 sqlite 都先应用一次 —— 面板要能看到「实际生效值」。
   applyStoredTuning(userDataDir)
   defineInvokeHandler(params.context, castaliaTuningGet, () => getTuningSnapshot(userDataDir))
@@ -198,7 +231,19 @@ export function setupCastaliaMemoryService(params: {
       writeMaintenanceLog(report)
       return report
     })
+    defineInvokeHandler(params.context, castaliaMemoryPsyche, async (input) => {
+      if (!engine.psycheState)
+        return null
+      return engine.psycheState(input ?? {})
+    })
+    defineInvokeHandler(params.context, castaliaMemorySelfCycle, async (input) => {
+      if (!engine.selfCycle)
+        return { ok: false, skipped: true, reason: 'backend has no self-cycle', evidenceIds: [], project: '' }
+      return engine.selfCycle(input)
+    })
     scheduleMemoryMaintenance(engine)
+    if (transport === 'in-process')
+      scheduleSelfCycle(engine)
     app.once('before-quit', () => {
       void engine.close()
     })
@@ -215,4 +260,6 @@ export function setupCastaliaMemoryService(params: {
   // 本地 sqlite 仓储只有条目、没有对话日志表，所以落库明确返回不可用。
   defineInvokeHandler(params.context, castaliaMemoryIngest, () => ({ ok: false, error: 'no castalia bank configured' }))
   defineInvokeHandler(params.context, castaliaMemoryMaintain, () => ({ ok: false, startedAt: new Date().toISOString(), ms: 0, reflectConfigured: false, error: 'no castalia bank configured' }))
+  defineInvokeHandler(params.context, castaliaMemorySelfCycle, () => ({ ok: false, skipped: true, reason: 'no castalia bank configured', evidenceIds: [], project: '' }))
+  defineInvokeHandler(params.context, castaliaMemoryPsyche, () => null)
 }
