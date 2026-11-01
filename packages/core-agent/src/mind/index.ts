@@ -30,4 +30,4 @@ export {
 export type { SenseDigest, SenseKind, SenseObservation, SensePort } from './sense'
 export { blindSense, digestSense } from './sense'
 export type { HeldBackReason, InnerVoiceMaterial } from './inner-voice'
-export { composeInnerVoice, diaryTitle, screenBusy, stripDiaryHeader } from './inner-voice'
+export { composeInnerVoice, diaryTitle, sameSubject, screenBusy, screenSummary, stripDiaryHeader } from './inner-voice'

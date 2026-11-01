@@ -33,8 +33,40 @@ export const useSelfInitiatedSpeechStore = defineStore('self-initiated-speech', 
 
   const running = ref(false)
   let ticker: ReturnType<typeof createSpeechTicker> | undefined
-  /** Traffic control for self-initiated messages: gap, quiet hours, cap, slowdown. */
-  let outbound = createOutboundState(Date.now())
+  /**
+   * Traffic control for self-initiated messages: gap, quiet hours, cap, slowdown.
+   *
+   * Persisted: the app restarts often (deploys, reboots), and an in-memory state
+   * reset let her send the same notice again right after every reload —实测三次
+   * 一模一样的「还是安静的」就是重载把 2 小时间隔抹掉了。
+   */
+  const OUTBOUND_KEY = 'castalia/self-initiated-outbound'
+  function loadOutbound(): ReturnType<typeof createOutboundState> {
+    const fresh = createOutboundState(Date.now())
+    try {
+      const raw = localStorage.getItem(OUTBOUND_KEY)
+      if (!raw)
+        return fresh
+      const saved = JSON.parse(raw)
+      if (!saved || typeof saved !== 'object')
+        return fresh
+      return {
+        ...fresh,
+        ...saved,
+        recentTopics: saved.recentTopics && typeof saved.recentTopics === 'object' ? saved.recentTopics : {},
+      }
+    }
+    catch {
+      return fresh
+    }
+  }
+  function saveOutbound(state: ReturnType<typeof createOutboundState>) {
+    try {
+      localStorage.setItem(OUTBOUND_KEY, JSON.stringify(state))
+    }
+    catch { /* 存不下就算了，节流退化成内存态 */ }
+  }
+  let outbound = loadOutbound()
   /** The owner message time seen at the last tick, so a new one ends the unanswered run. */
   let lastOwnerAt: number | null = null
   /** Topic of the message the current tick would send. It comes from the tick's own read. */
@@ -109,8 +141,15 @@ export const useSelfInitiatedSpeechStore = defineStore('self-initiated-speech', 
         }
         const now = Date.now()
         outbound = recordOutbound(outbound, { now, hour: new Date(now).getHours(), topic: currentTopic })
+        saveOutbound(outbound)
         lastGateReason.value = undefined
-        return chat.notifyConversation(sessionId, { source: SELF_INITIATED_SOURCE, text: SELF_INITIATED_NOTICE })
+        // 状态机自己的上下文：把「刚才在心里想什么 / 此刻看到什么 / 现在的状态」一起带上。
+        // 不带的话，她每次主动开口都像凭空冒一句，和自己那串自言自语接不上。
+        const context = useMindStore().innerContextLine(3)
+        const text = context ? `${SELF_INITIATED_NOTICE}
+
+${context}` : SELF_INITIATED_NOTICE
+        return chat.notifyConversation(sessionId, { source: SELF_INITIATED_SOURCE, text })
       },
     })
 

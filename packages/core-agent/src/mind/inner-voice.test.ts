@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { composeInnerVoice, diaryTitle, screenBusy, stripDiaryHeader } from './inner-voice'
+import { composeInnerVoice, diaryTitle, screenBusy, screenSummary, stripDiaryHeader } from './inner-voice'
 
 const idle = { fatigue: 10, boredom: 5, curiosity: 5, focus: 0 }
 const bored = { fatigue: 10, boredom: 70, curiosity: 10, focus: 0 }
@@ -58,11 +58,36 @@ describe('screenBusy', () => {
   it('reads a game as busy', () => {
     expect(screenBusy('全屏的 Steam 游戏画面').busy).toBe(true)
   })
+  it('reads a code editor as busy', () => {
+    const line = '**Active App/Page**: A desktop code editor/IDE (looks like VS Code) with a markdown document'
+    expect(screenBusy(line).reason).toBe('a code editor she is working in')
+  })
+
   it('fails open on an ordinary desktop', () => {
     expect(screenBusy('Chrome 里一个 Gemini 页面，标题是 AIRI 新版本').busy).toBe(false)
   })
   it('treats a missing line as idle', () => {
     expect(screenBusy(undefined).busy).toBe(false)
+  })
+})
+
+describe('screenSummary', () => {
+  it('strips markdown and field labels', () => {
+    const line = '**Active App/Page:** * **Foreground (Center):** Steam Client (Library tab).'
+    const out = screenSummary(line) ?? ''
+    expect(out).not.toContain('**')
+    expect(out).not.toContain('Active App')
+    expect(out.toLowerCase()).toContain('steam')
+  })
+
+  it('never cuts a word in half', () => {
+    const out = screenSummary('a desktop code editor showing a markdown document about memory', 20) ?? ''
+    expect(out.endsWith('…')).toBe(true)
+    expect(out).not.toMatch(/\s\S$/u)
+  })
+
+  it('is undefined for an empty line', () => {
+    expect(screenSummary('   ')).toBeUndefined()
   })
 })
 
@@ -88,6 +113,18 @@ describe('composeInnerVoice', () => {
   it('adds the drive when curiosity is high', () => {
     const line = composeInnerVoice({ diary: DIARY, drives: { ...idle, curiosity: 80 }, now: 0 })
     expect(line).toContain('想知道点什么')
+  })
+
+  it('carries the previous thought forward when it is the same topic', () => {
+    const previous = ['她疲惫到不想做任何事……先记着，不急。']
+    const line = composeInnerVoice({ diary: DIARY, drives: idle, now: 0, previous })
+    expect(line?.startsWith('还在想')).toBe(true)
+  })
+
+  it('does not claim continuity for an unrelated thought', () => {
+    const previous = ['屏幕上全屏的游戏画面……算了，先不打扰。']
+    const line = composeInnerVoice({ diary: DIARY, drives: idle, now: 0, previous })
+    expect(line?.startsWith('还在想')).toBe(false)
   })
 
   it('returns nothing when there is nothing to think about', () => {

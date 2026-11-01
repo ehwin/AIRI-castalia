@@ -19,6 +19,7 @@ import {
   record,
   renderStateLine,
   screenBusy,
+  screenSummary,
   surface,
 } from '@proj-airi/core-agent'
 
@@ -117,6 +118,8 @@ export const useMindStore = defineStore('mind', () => {
   const interruptReason = ref<string>()
   /** 想说话但被挡住时的冷却，避免每秒重算一次屏幕。 */
   let lastProvokeAt = 0
+  /** 屏幕上一次「变了」的时刻：一直在变说明她在忙，别插嘴。 */
+  let lastScreenChangeAt = 0
 
   // How many sends a changed state stays visible. SillyTavern calls the same
   // control "Sticky": an activated entry stays for N messages, then stops on its
@@ -214,11 +217,16 @@ export const useMindStore = defineStore('mind', () => {
 
       lastThinkAt = Date.now()
       lastDiaryText.value = diary
+      // 想之前先看一眼此刻的屏幕：不然「思考」和眼前正在发生的事没关系，
+      // 读起来就像她在念日记，而不是在过日子。
+      if (senseAttached.value)
+        await lookAround({ force: true }).catch(() => 0)
       // 日记是「记录」，念头是「自言自语」：把她刚想出来的东西加上刚看到的屏幕，
-      // 收敛成一句自己的话。拿不到素材就不写念头 —— 编一句不是想。
+      // 再接到她自己上一两句上，收敛成一句有连续性的话。
       const text = composeInnerVoice({
         diary,
         screen: lastScreenLine.value,
+        previous: recentSelfTalk(2),
         drives: drives.value,
         now: lastThinkAt,
       })
@@ -254,26 +262,50 @@ export const useMindStore = defineStore('mind', () => {
    * Returning the number of fresh observations keeps this testable without a
    * screen. A host calls it on a timer, or from `tick` as the app grows.
    */
-  async function lookAround(): Promise<number> {
+  async function lookAround(options: { force?: boolean } = {}): Promise<number> {
     const observationsSeen = await sense.look().catch(() => [])
     const digest = digestSense(observationsSeen, seenTexts)
+
+    // `force`：她要动脑子、或者想出声时，必须看到「此刻」的屏幕，
+    // 不能被 digestSense 的「和上次差不多」挡掉。
+    if (options.force) {
+      const latest = [...observationsSeen].reverse().find(item => String(item?.text ?? '').trim())
+      if (latest)
+        applyScreenLine(String(latest.text).replace(/\s+/g, ' ').trim())
+    }
+
     if (!digest.novel)
       return 0
 
     seenTexts = [...seenTexts, ...digest.texts].slice(-SENSE_MEMORY)
     for (const text of digest.texts)
       observe(text)
-    // 最近一行就是「刚看到的」，她自言自语和「要不要出声」都用它。
     const newest = digest.texts[digest.texts.length - 1]
-    if (newest) {
-      lastScreenLine.value = newest
-      const busy = screenBusy(newest)
-      interruptAllowed.value = !busy.busy
-      interruptReason.value = busy.reason
-    }
+    if (newest)
+      applyScreenLine(newest)
     // Something new is what raises curiosity at the next tick.
     novelty.value = true
     return digest.texts.length
+  }
+
+  /** 屏幕静止多久才算「她闲下来了」。一直在变说明她在干活，这时候开口就是打扰。 */
+  const SCREEN_SETTLE_MS = 3 * 60_000
+
+  /**
+   * 记住「刚看到的」并算出声裁决。
+   *
+   * 两把尺子：一是关键词（会议/全屏/游戏/编辑器…），二是「屏幕是不是一直在变」——
+   * 后者不依赖文案质量，用户切窗口、打字、滚页面都会让它判成忙。宁可少说一句。
+   */
+  function applyScreenLine(line: string) {
+    const previous = String(lastScreenLine.value ?? '').trim()
+    if (previous && previous !== line.trim())
+      lastScreenChangeAt = Date.now()
+    lastScreenLine.value = line
+    const busy = screenBusy(line)
+    const moving = lastScreenChangeAt > 0 && Date.now() - lastScreenChangeAt < SCREEN_SETTLE_MS
+    interruptAllowed.value = !busy.busy && !moving
+    interruptReason.value = busy.reason ?? (moving ? 'the screen keeps changing' : undefined)
   }
 
   /** 想搭话时重新看屏幕的最短间隔：一秒一个 tick，不能每秒抓一次屏。 */
@@ -292,7 +324,7 @@ export const useMindStore = defineStore('mind', () => {
     lastProvokeAt = now
 
     if (senseAttached.value)
-      await lookAround().catch(() => 0)
+      await lookAround({ force: true }).catch(() => 0)
 
     if (interruptAllowed.value)
       return { allowed: true }
@@ -315,6 +347,35 @@ export const useMindStore = defineStore('mind', () => {
       void innerThoughtsRepo.append(thought).catch(() => {})
     }
     return { allowed: false, reason: interruptReason.value ?? 'busy-screen' }
+  }
+
+  /** 最近几句自言自语（新的在后），不带日记原文。 */
+  function recentSelfTalk(limit = 2): string[] {
+    const entries = stream.value.entries ?? []
+    return entries
+      .filter(t => t.topic === 'self-cycle' || t.topic === 'held-back')
+      .slice(-Math.max(1, limit))
+      .map(t => String(t.text ?? '').trim())
+      .filter(Boolean)
+  }
+
+  /**
+   * 状态机自己的上下文：她在想什么、看到了什么、现在是什么状态。
+   *
+   * 这是「自言自语」这一层的自述，和聊天记录是两条线。出声时把它带上去，她开口才是接着
+   * 自己刚才那串念头说的，不是凭空冒一句。
+   */
+  function innerContextLine(limit = 3): string {
+    const parts: string[] = []
+    const thoughts = recentSelfTalk(limit)
+    if (thoughts.length)
+      parts.push(`你刚才在心里想：${thoughts.join(' / ')}`)
+    const screen = screenSummary(String(lastScreenLine.value ?? ''), 60)
+    if (screen)
+      parts.push(`你此刻看到：${screen}`)
+    const { boredom, curiosity, fatigue } = drives.value
+    parts.push(`你现在的状态：无聊 ${Math.round(boredom)} · 好奇 ${Math.round(curiosity)} · 累 ${Math.round(fatigue)}${interruptAllowed.value ? '' : '（屏幕上像是不方便打扰）'}`)
+    return parts.join('\n')
   }
 
   /** Advances every drive and lets the background lane write at most one thought. */
@@ -475,6 +536,7 @@ export const useMindStore = defineStore('mind', () => {
     interruptReason,
     lastScreenLine,
     lastDiaryText,
+    innerContextLine,
     thinkWired,
     thinkInFlight,
     lastThinkText,
