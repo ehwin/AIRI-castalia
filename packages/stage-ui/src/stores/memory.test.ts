@@ -1,7 +1,21 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { memoryName, useMemoryStore } from './memory'
+import {
+  INDEX_HER_LINES,
+  INDEX_MAX_CHARS,
+  INDEX_PER_DAY,
+  INDEX_RECENT_LINES,
+  isTranscriptEntry,
+  memoryName,
+  shouldSkipIngest,
+  useMemoryStore,
+} from './memory'
+
+/** Index lines only, so a test asserts content without the section headers. */
+function linesOf(index: string) {
+  return index.split('\n').filter(line => line.startsWith('- '))
+}
 
 describe('memory store', () => {
   beforeEach(() => {
@@ -10,26 +24,31 @@ describe('memory store', () => {
 
   it('keeps one entry per name on a card and lists it in the index', () => {
     const memory = useMemoryStore()
-    memory.write({ name: 'Favorite Game', description: 'What the owner plays.', body: 'Porridge games.' }, 'airi')
-    memory.write({ name: 'favorite-game', description: 'What the owner plays now.', body: 'Minecraft.' }, 'airi')
+    memory.write({ name: 'Favorite Game', description: 'Porridge games, mostly.', body: 'Porridge games.' }, 'airi')
+    memory.write({ name: 'favorite-game', description: 'Minecraft, lately.', body: 'Minecraft.' }, 'airi')
 
     expect(memory.entries.map(entry => entry.name)).toEqual(['favorite-game'])
-    expect(memory.indexFor('airi')).toBe('Your own:\n- favorite-game: What the owner plays now.')
+    expect(memory.indexFor('airi')).toBe('About you:\n- favorite-game: Minecraft, lately.')
     expect(memory.read('Favorite Game', 'airi')?.body).toBe('Minecraft.')
   })
 
   // A card keeps its own memories. Only the owner makes one general, and then every card reads it.
   it('keeps memories on their card until the owner makes one general', () => {
     const memory = useMemoryStore()
-    memory.write({ name: 'nickname', description: 'What the owner likes to be called.', body: 'Yumeka.' }, 'airi')
-    memory.write({ name: 'channel-rules', description: 'Rules of the Discord channel.', body: 'No spoilers.' }, 'discord-host')
+    memory.write({ name: 'nickname', description: 'The owner likes to be called Yumeka.', body: 'Yumeka.' }, 'airi')
+    memory.write({ name: 'channel-rules', description: 'No spoilers in the channel.', body: 'No spoilers.' }, 'discord-host')
 
-    expect(memory.indexFor('discord-host')).toBe('Your own:\n- channel-rules: Rules of the Discord channel.')
+    expect(memory.indexFor('discord-host')).toBe('About you:\n- channel-rules: No spoilers in the channel.')
     expect(memory.read('nickname', 'discord-host')).toBeUndefined()
 
     memory.makeGeneral({ name: 'nickname', persona: 'airi' })
 
-    expect(memory.indexFor('discord-host')).toBe('Your own:\n- channel-rules: Rules of the Discord channel.\nGeneral:\n- nickname: What the owner likes to be called.')
+    expect(memory.indexFor('discord-host')).toBe([
+      'About you:',
+      '- channel-rules: No spoilers in the channel.',
+      'About the owner:',
+      '- nickname: The owner likes to be called Yumeka.',
+    ].join('\n'))
     expect(memory.read('nickname', 'discord-host')?.body).toBe('Yumeka.')
     expect(memory.entries.filter(entry => entry.name === 'nickname').map(entry => entry.persona)).toEqual([undefined])
   })
@@ -48,5 +67,159 @@ describe('memory store', () => {
     expect(memory.write({ name: '!!', description: '', body: 'x' }, 'airi')).toBeUndefined()
     expect(memory.write({ name: 'x', description: '', body: ' ' }, 'airi')).toBeUndefined()
     expect(memoryName('  我的 猫咪！ ')).toBe('我的-猫咪')
+  })
+
+  // The backend writes one entry per finished turn named `mem-xxxxxxxx`, so the index was
+  // mostly her own past register. A dialogue line is a transcript; prose under the same
+  // generated name is a fact and used to disappear with it.
+  it('keeps turn transcripts out of the index but still lets them be read', () => {
+    const memory = useMemoryStore()
+    memory.write({ name: 'mother', description: 'The mother she lost to the black tide.', body: 'Sibyl.' }, 'airi')
+    memory.write({ name: 'mem-43bf085e', description: '用户: 我睡不着 助手: 那正好来找我说话哦', body: '...' }, 'airi')
+    memory.write({ name: 'evening', description: '用户: 晚安 助手: 嗯，睡吧。', body: '...' }, 'airi')
+
+    expect(memory.indexFor('airi')).toBe('About you:\n- mother: The mother she lost to the black tide.')
+    // Hidden from the index is not forgotten: recall and tools still address the entry.
+    expect(memory.read('mem-43bf085e', 'airi')?.description).toContain('睡不着')
+    expect(memory.entries).toHaveLength(3)
+  })
+
+  // Measured on the running bank: 51 lore facts arrived as `mem-<id>` prose rows and the old
+  // name rule dropped every one of them, while the birthday fact sat in the bank unused.
+  it('puts a prose fact that arrived under a generated name into the index', () => {
+    const memory = useMemoryStore()
+    const birthday = '官方档案里，我的生日一栏写的是「未知」。'
+    memory.write({ name: 'mem-901c50de', description: birthday, body: birthday }, 'airi')
+
+    const index = memory.indexFor('airi')
+    expect(index).toContain(birthday)
+    // No invented address: the line is the fact itself, not `mem-901c50de: …`.
+    expect(index).not.toContain('mem-901c50de')
+  })
+
+  it('recognises a transcript by its dialogue line, not by its generated name', () => {
+    expect(isTranscriptEntry({ name: 'mem-43bf085e', description: '用户: 晚安 助手: 睡吧' })).toBe(true)
+    expect(isTranscriptEntry({ name: 'evening', description: '用户: 晚安' })).toBe(true)
+    expect(isTranscriptEntry({ name: 'evening', description: 'User: good night' })).toBe(true)
+    expect(isTranscriptEntry({ name: 'mother', description: 'The mother she lost.' })).toBe(false)
+    // A fact that merely mentions the user elsewhere is not a transcript.
+    expect(isTranscriptEntry({ name: 'note', description: 'The 用户 prefers short replies.' })).toBe(false)
+    // Prose under a generated name is a fact, not a turn.
+    expect(isTranscriptEntry({ name: 'mem-901c50de', description: '官方档案里，我的生日一栏写的是「未知」。' })).toBe(false)
+  })
+
+  // A mood label is a snapshot of one moment. Left in the prompt it competes with the live
+  // psyche block and steers the next reply toward a feeling that already passed.
+  it('keeps a remembered mood snapshot out of the index', () => {
+    const memory = useMemoryStore()
+    memory.write({ name: 'mem-mood_ms9', description: '[情绪快照] 聊得很开心，情绪值：+8', body: 'x' }, 'airi')
+    memory.write({ name: 'mother', description: 'The mother she lost.', body: 'Sibyl.' }, 'airi')
+
+    expect(linesOf(memory.indexFor('airi'))).toEqual(['- mother: The mother she lost.'])
+    expect(memory.entries).toHaveLength(2)
+  })
+
+  // A one-line goodbye carries no fact. Storing it buys a transcript entry that the
+  // index then has to hide again, and it re-teaches the register the closing rule retires.
+  it('skips storing a turn only when it is a goodbye answered in one line', () => {
+    expect(shouldSkipIngest({ user: '我去洗澡了，先不聊啦', assistant: '嗯，去吧。' })).toBe(true)
+    expect(shouldSkipIngest({ user: '晚安', assistant: '晚安，做个好梦。' })).toBe(true)
+    // A long answer still carries something worth keeping.
+    expect(shouldSkipIngest({
+      user: '我睡了',
+      assistant: '睡吧。对了，今天你说的那个渐近线我记住了，明天讲给你听。要是半夜醒了就喊我，我一直醒着，反正夜里过得很快。',
+    })).toBe(false)
+    // Not a goodbye at all.
+    expect(shouldSkipIngest({ user: '我在学函数渐近线', assistant: '嗯。' })).toBe(false)
+    // A question about leaving is not a goodbye, so it is stored like any other turn.
+    expect(shouldSkipIngest({ user: '我去做饭了，你想吃什么？', assistant: '我不吃。' })).toBe(false)
+  })
+
+  // Measured on the running store: 32 of 270 entries had no description at all, and six
+  // were paraphrases of one evening. Both shapes spend the prompt budget twice.
+  it('drops a line with no description and collapses two entries that say the same thing', () => {
+    const memory = useMemoryStore()
+    memory.write({ name: '情感记忆-[自循环日记]', description: '', body: '[自循环日记] 情绪指数 +0.0' }, 'airi')
+    memory.write({ name: '2026-11-01-a', description: 'She was too tired to do anything.', body: 'a' }, 'airi')
+    memory.write({ name: '2026-11-01-b', description: 'She  was too tired to do  anything.', body: 'b' }, 'airi')
+    memory.write({ name: 'mother', description: 'The mother she lost.', body: 'Sibyl.' }, 'airi')
+
+    const index = memory.indexFor('airi')
+    const lines = linesOf(index)
+
+    expect(lines).toHaveLength(2)
+    expect(index).toContain('- mother: The mother she lost.')
+    expect(lines.some(line => line.includes('too tired'))).toBe(true)
+    // Every entry still exists; only the index collapsed.
+    expect(memory.entries).toHaveLength(4)
+  })
+
+  // 38 identity facts in the running bank share one importance and one date, so a plain
+  // top-K is a coin flip between facts. The picker prefers a line that covers new ground.
+  it('prefers a different fact over a near copy when filling the index', () => {
+    const memory = useMemoryStore()
+    memory.write({ name: 'a', description: '我出生在黎那汐塔的七丘，母亲西比尔从不让我受贵族规矩束缚。', body: 'a' }, 'airi')
+    memory.write({ name: 'b', description: '我出生在黎那汐塔的七丘，母亲西比尔从不让我受贵族规矩约束。', body: 'b' }, 'airi')
+    memory.write({ name: 'c', description: '我是第 127 位谕女，名册上记着我的音痕在左脚脚背。', body: 'c' }, 'airi')
+
+    const lines = linesOf(memory.indexFor('airi'))
+    // The near copy is one fact said twice: it does not buy a second line.
+    expect(lines).toHaveLength(2)
+    expect(lines[0]).toBe('- a: 我出生在黎那汐塔的七丘，母亲西比尔从不让我受贵族规矩束缚。')
+    expect(lines[1]).toContain('第 127 位谕女')
+  })
+
+  it('caps the index so one long memory store cannot flood the system prompt', () => {
+    const memory = useMemoryStore()
+    const facts = [
+      '我的名字来自天后朱诺。',
+      '我出生在月食那一夜。',
+      '我的武器是月之环和月之弓。',
+      '我在四方殿当谕女。',
+      '母亲西比尔死在黑潮里。',
+      '我的计划是把稳定锚喂给新王。',
+      '我见过年幼的自己。',
+      '奥古斯塔是我的同僚。',
+      '我把手镯交给了漂泊者。',
+      '七丘四年办一次角斗赛。',
+      '谕女的预言具有绝对效力。',
+      '黑潮没有实体。',
+      '我以眼中所映之物为对价。',
+      '我曾被人叫作忤逆的谕女。',
+      '我最后从所有人的记忆里消失。',
+    ]
+    facts.forEach((description, index) => memory.write({ name: `fact-${index}`, description, body: 'x' }, 'airi'))
+
+    expect(linesOf(memory.indexFor('airi'))).toHaveLength(INDEX_HER_LINES)
+  })
+
+  it('keeps the whole index inside its character budget', () => {
+    const memory = useMemoryStore()
+    for (let index = 0; index < INDEX_HER_LINES + INDEX_RECENT_LINES; index++) {
+      memory.write({ name: `2026-10-1${index % 10}-a`, description: `细节很长的第 ${index} 条回忆，`.repeat(12), body: 'x' }, 'airi')
+      memory.write({ name: `fact-${index}`, description: `我记住的第 ${index} 件事，`.repeat(14), body: 'x' }, 'airi')
+    }
+
+    expect(memory.indexFor('airi').length).toBeLessThanOrEqual(INDEX_MAX_CHARS)
+  })
+
+  // The engine reruns a summary of one evening until several near-identical lines exist.
+  it('lets one dated day contribute one line to the recent section', () => {
+    const memory = useMemoryStore()
+    for (const [suffix, description] of [
+      ['a', 'She was too tired to do anything.'],
+      ['b', 'She said she was exhausted and wanted to do nothing.'],
+      ['c', 'She was worn out and skipped everything.'],
+      ['d', 'She had no energy left for the day.'],
+    ] as const)
+      memory.write({ name: `2026-11-01 · ${suffix}`, description, body: 'x' }, 'airi')
+    memory.write({ name: 'mother', description: 'The mother she lost.', body: 'Sibyl.' }, 'airi')
+
+    const index = memory.indexFor('airi')
+    const recent = index.split('\n').filter(line => line.startsWith('- 2026-11-01'))
+
+    expect(recent).toHaveLength(INDEX_PER_DAY)
+    expect(linesOf(index)).toHaveLength(INDEX_PER_DAY + 1)
+    expect(memory.entries).toHaveLength(5)
   })
 })

@@ -19,7 +19,7 @@ import { computed, createApp, nextTick, reactive, ref, toRaw } from 'vue'
 import { composeDrawCardPrompt } from '../tools/draw-card'
 import { composeMemoryPrompt } from '../tools/memory'
 import { useChatStore } from './chat'
-import { CHAT_FORMAT_RULES } from './chat/prompt-recipe'
+import { composeSystemPrompt } from './chat/prompt-recipe'
 import { useContextObservabilityStore } from './devtools/context-observability'
 import { useMemoryStore } from './memory'
 import { useConsciousnessSettingsStore } from './modules/consciousness-settings'
@@ -556,8 +556,8 @@ describe('chat store contract', () => {
     // The session character's wake word tool joins every turn. It is not a selectable stored tool.
     // Reply cards are on by default, so the owner's chat also gets the card tool and the icon search of cards.
     expect(resolvedToolNames).toEqual([
-      ['stage_widgets', 'configure_wake_words', 'builtIn_readMemory', 'builtIn_writeMemory', 'builtIn_forgetMemory', 'builtIn_castaliaRecordEmotion', 'builtIn_castaliaSetDesire', 'builtIn_castaliaAdjustEnergy', 'builtIn_useRecipe', 'builtIn_proposeRecipe', 'builtIn_drawCard', 'builtIn_searchIcons'],
-      ['stage_widgets', 'configure_wake_words', 'builtIn_readMemory', 'builtIn_writeMemory', 'builtIn_forgetMemory', 'builtIn_castaliaRecordEmotion', 'builtIn_castaliaSetDesire', 'builtIn_castaliaAdjustEnergy', 'builtIn_useRecipe', 'builtIn_proposeRecipe', 'builtIn_drawCard', 'builtIn_searchIcons'],
+      ['stage_widgets', 'configure_wake_words', 'builtIn_readMemory', 'builtIn_searchMemory', 'builtIn_writeMemory', 'builtIn_forgetMemory', 'builtIn_castaliaRecordEmotion', 'builtIn_castaliaSetDesire', 'builtIn_useRecipe', 'builtIn_proposeRecipe', 'builtIn_drawCard', 'builtIn_searchIcons'],
+      ['stage_widgets', 'configure_wake_words', 'builtIn_readMemory', 'builtIn_searchMemory', 'builtIn_writeMemory', 'builtIn_forgetMemory', 'builtIn_castaliaRecordEmotion', 'builtIn_castaliaSetDesire', 'builtIn_useRecipe', 'builtIn_proposeRecipe', 'builtIn_drawCard', 'builtIn_searchIcons'],
     ])
   })
 
@@ -637,11 +637,8 @@ describe('chat store contract', () => {
 
   it('binds Castalia self-state and state tools to the run persona, then removes both when disabled', async () => {
     sessionMetas['scene-session'] = { sessionId: 'scene-session', userId: 'local', characterId: 'discord-host', bindings: ['discord:channel:a'], createdAt: 1, updatedAt: 1 }
-    const prompts: string[] = []
     const toolNames: string[][] = []
-    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: GenerationProvider, context: Conversation, options: any) => {
-      const system = context.turns.find(turn => turn.type === 'system')
-      prompts.push(system?.type === 'system' && system.content[0]?.type === 'text' ? system.content[0].text : '')
+    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: GenerationProvider, _context: Conversation, options: any) => {
       const tools = typeof options.tools === 'function' ? await options.tools() : options.tools
       toolNames.push(tools.map((tool: Tool) => tool.function.name))
       await options.onStreamEvent({ type: 'finish' })
@@ -651,18 +648,29 @@ describe('chat store contract', () => {
     castalia.recordEmotion({ valence: 0.6, arousal: 0.2, dominance: 0.4 }, 'Solving it felt satisfying.', 'discord-host')
     castalia.setDesire('Learn how the song was made.', 'discord-host')
 
+    const stateTexts = () => ingestContextMessageMock.mock.calls
+      .map(call => call[0] as { contextId?: string, text?: string })
+      .filter(envelope => envelope.contextId === 'mind')
+      .map(envelope => envelope.text ?? '')
+
     await useChatStore().send({ sessionId: 'scene-session', text: 'hello' })
 
-    expect(prompts[0]).toContain('Castalia self-state')
-    expect(prompts[0]).toContain('Current mood: 6')
-    expect(prompts[0]).toContain('Current desire: Learn how the song was made.')
-    expect(prompts[0]).toContain('Current VAD: valence 0.60, arousal 0.20, dominance 0.40.')
+    // The self-state block is a runtime context now, not part of the cached
+    // system prompt; it reaches the runtime through the context ingest.
+    const first = stateTexts()[0] ?? ''
+    expect(first).toContain('Castalia self-state')
+    expect(first).toContain('you feel in very good spirits')
+    expect(first).toContain('What you want right now: Learn how the song was made.')
+    expect(first).toContain('warmer than usual, in control')
     expect(toolNames[0]).toContain('builtIn_castaliaRecordEmotion')
     expect(toolNames[0]).toContain('builtIn_castaliaSetDesire')
 
+    const beforeDisable = stateTexts().length
     castalia.enabled = false
     await useChatStore().send({ sessionId: 'scene-session', text: 'one more thing' })
-    expect(prompts[1]).not.toContain('Castalia self-state')
+    // The old envelope stays in the registry until a new one replaces it, so
+    // the contract is "nothing new carries Castalia", not "the old one is gone".
+    expect(stateTexts().slice(beforeDisable).every(text => !text.includes('Castalia self-state'))).toBe(true)
     expect(toolNames[1]).not.toContain('builtIn_castaliaRecordEmotion')
   })
 
@@ -1467,7 +1475,7 @@ describe('chat store contract', () => {
 
     // The owner's run reads the memory index and, with reply cards on by default, when to draw a card after the identity.
     const after = `${composeMemoryPrompt('')}${composeDrawCardPrompt()}`
-    expect(systemTexts).toEqual([`${CHAT_FORMAT_RULES}system prompt${after}`, `${CHAT_FORMAT_RULES}edited prompt${after}`])
+    expect(systemTexts).toEqual([`${composeSystemPrompt('system prompt')}${after}`, `${composeSystemPrompt('edited prompt')}${after}`])
   })
 
   it('keeps hook order and composes context prompt after system message', async () => {
@@ -1574,7 +1582,7 @@ describe('chat store contract', () => {
     if (composedMessages[0].type !== 'system' || composedMessages[1].type !== 'user')
       throw new Error('Expected system and user turns')
     expect(composedMessages[0].content).toEqual([
-      { type: 'text', text: `${CHAT_FORMAT_RULES}system prompt${composeMemoryPrompt('')}${composeDrawCardPrompt()}` },
+      { type: 'text', text: `${composeSystemPrompt('system prompt')}${composeMemoryPrompt('')}${composeDrawCardPrompt()}` },
       { type: 'text', text: '\n\nPlugin toolset guidance.' },
     ])
     expect(composedMessages[1].content[0]).toMatchObject({
