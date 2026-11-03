@@ -12,6 +12,9 @@ function options() {
     search: vi.fn(async (query: string) => query === 'birthday'
       ? [{ text: 'My birthday column says "unknown".', score: 1.4, memType: 'general', createdAt: '2026-10-28T18:55:00.000Z' }]
       : []),
+    searchFacts: vi.fn(async (query: string) => query === 'winter'
+      ? [{ subject: 'user', predicate: 'name', object: '小托（Xiao Tuo）', confidence: 0.95, similarity: 0.72 }]
+      : []),
     write: vi.fn((input: Pick<MemoryEntry, 'name' | 'description' | 'body'>): MemoryEntry => ({ ...input, updatedAt: 0 })),
     forget: vi.fn(() => true),
   }
@@ -46,6 +49,19 @@ describe('memory tools', () => {
     expect(bound.search).toHaveBeenCalledWith('birthday')
     expect(await search!.execute({ query: 'hair colour' }, call)).toBe('No memory matched "hair colour".')
     expect(await search!.execute({}, call)).toBe('Give a search query.')
+  })
+
+  // A fact is the one-line answer the rows only imply ("who is 小托"), so it rides along with
+  // the search instead of costing a second tool call.
+  it('prints the near facts beside the hits, and still answers when no row matches', async () => {
+    const bound = { ...options(), search: vi.fn(async () => []) }
+    const search = (await createMemoryTools(bound)).find(tool => tool.function.name === SEARCH_MEMORY_TOOL_NAME)!
+    const call = { messages: [], toolCallId: 'call' }
+
+    expect(await search!.execute({ query: 'winter' }, call)).toBe('known facts:\n- user · name · 小托（Xiao Tuo）')
+    expect(bound.searchFacts).toHaveBeenCalledWith('winter')
+    // Facts alone still answer: a query with no matching row must not read as "nothing known".
+    expect(await search!.execute({ query: 'nobody' }, call)).toBe('No memory matched "nobody".')
   })
 
   // A hit is a row, not a blob: the store header becomes the address, so the model can read

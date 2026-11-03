@@ -50,6 +50,22 @@ export interface CastaliaMemorySearchInput {
 
 export const castaliaMemorySearch = defineInvokeEventa<CastaliaSearchedMemory[], CastaliaMemorySearchInput>('eventa:invoke:castalia:memory:search')
 
+/**
+ * One structured fact (subject · predicate · object) found by the same lookup.
+ *
+ * Facts are the one-line answers the memory rows only imply, so the search tool prints them
+ * beside the rows instead of asking the model for a second call.
+ */
+export interface CastaliaSearchedFact {
+  subject: string
+  predicate: string
+  object: string
+  confidence: number
+  similarity?: number
+}
+
+export const castaliaMemoryFacts = defineInvokeEventa<CastaliaSearchedFact[], CastaliaMemorySearchInput>('eventa:invoke:castalia:memory:facts')
+
 /** 一轮对话的写回（自回归结束后调用）。失败不抛错，返回 {ok:false}。 */
 export interface CastaliaIngestTurnInput {
   user: string

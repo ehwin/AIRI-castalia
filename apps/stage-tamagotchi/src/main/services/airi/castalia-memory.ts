@@ -8,7 +8,7 @@ import { defineInvokeHandler } from '@moeru/eventa'
 import { createCastaliaMemoryRepository } from '@proj-airi/castalia-plugin/memory'
 import { app } from 'electron'
 
-import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySelfCycle, castaliaMemorySetEnergy, castaliaOpenConsole, castaliaTuningGet, castaliaTuningSave } from '../../../shared/eventa/castalia-memory'
+import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryFacts, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySelfCycle, castaliaMemorySetEnergy, castaliaOpenConsole, castaliaTuningGet, castaliaTuningSave } from '../../../shared/eventa/castalia-memory'
 import type { CastaliaMaintainReport } from '../../../shared/eventa/castalia-memory'
 import { openCastaliaConsole } from './castalia-console'
 import type { CastaliaEngineMemory } from './castalia-engine'
@@ -307,6 +307,9 @@ export function setupCastaliaMemoryService(params: {
     defineInvokeHandler(params.context, castaliaMemorySearch, input => engine.search
       ? engine.search(String(input?.query ?? ''), input?.topK)
       : Promise.resolve([]))
+    defineInvokeHandler(params.context, castaliaMemoryFacts, input => engine.facts
+      ? engine.facts(String(input?.query ?? ''), input?.topK)
+      : Promise.resolve([]))
     // 自回归结束后把这一轮写回库：这是"她记得刚才说过什么"的唯一入口。
     // 没有 ingest 的实现（stdio 旧路径）时返回 ok:false，不抛错、不影响回复。
     defineInvokeHandler(params.context, castaliaMemoryIngest, turn => engine.ingest
@@ -349,11 +352,14 @@ export function setupCastaliaMemoryService(params: {
   const memory = getRepository(params.databasePath)
   defineInvokeHandler(params.context, castaliaMemoryList, () => memory.list())
   defineInvokeHandler(params.context, castaliaMemorySave, entry => memory.save(entry))
-  defineInvokeHandler(params.context, castaliaMemoryForget, entry => memory.forget(entry))
+  defineInvokeHandler(params.context, castaliaMemoryForget, entry => entry.name
+    ? memory.forget({ name: entry.name, ...(entry.persona ? { persona: entry.persona } : {}) })
+    : false)
   // The local repository holds entries only, so a recall has no ranked text to render.
   defineInvokeHandler(params.context, castaliaMemoryRecall, () => ({ text: '', count: 0, topSim: 0, chars: 0 }))
   // 本地仓储同样没有语义检索：明确返回空列表（模型会如实说"没找到"）。
   defineInvokeHandler(params.context, castaliaMemorySearch, () => [])
+  defineInvokeHandler(params.context, castaliaMemoryFacts, () => [])
   // 本地 sqlite 仓储只有条目、没有对话日志表，所以落库明确返回不可用。
   defineInvokeHandler(params.context, castaliaMemoryIngest, () => ({ ok: false, error: 'no castalia bank configured' }))
   defineInvokeHandler(params.context, castaliaMemoryMaintain, () => ({ ok: false, startedAt: new Date().toISOString(), ms: 0, reflectConfigured: false, error: 'no castalia bank configured' }))

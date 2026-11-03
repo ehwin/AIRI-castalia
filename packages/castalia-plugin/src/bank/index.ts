@@ -46,6 +46,14 @@ export interface BankHandle {
   engineVersion: string
   save: (params: Record<string, unknown>) => Promise<any>
   search: (options: Record<string, unknown>) => Promise<any[]>
+  /**
+   * Structured facts (subject · predicate · object) nearest to a query.
+   *
+   * The chat tool merges these into a search result: facts are one-line answers the memory rows
+   * only imply ("who is 小托", "what is her name"), so reading them beside the rows beats another
+   * tool call.
+   */
+  facts: (query: string, options?: { topK?: number, minConfidence?: number }) => Promise<any[]>
   recent: (limit?: number) => any[]
   recall: (query: string, options?: Record<string, unknown>) => Promise<any>
   forget: (id: string, reason?: string) => any
@@ -226,6 +234,7 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
     // VAD 由引擎 store.saveMemory 在写路径补(见 vendor/engine/store.ts),宿主层不重复写一次。
     save: params => store.saveMemory(params as any),
     search: options2 => search.searchMemory(options2 as any),
+    facts: (query, options3 = {}) => search.searchFacts(query, { project, characterId: charId, ...options3 }),
     // 签名: getRecentMemories(characterId, limit, hoursBack, project?, memType?)
     recent: (limit = 5) => search.getRecentMemories(charId, limit, 24 * 365, project) as any[],
     recall: (query, o) => inject.recallForInjection(query, o as any),

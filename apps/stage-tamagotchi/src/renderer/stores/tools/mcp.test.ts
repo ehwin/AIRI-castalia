@@ -70,7 +70,8 @@ describe('useTamagotchiMcpToolsStore', async () => {
       arguments: JSON.stringify({ query: 'hello', limit: 10 }),
     }, toolOptions)
 
-    expect(invokeMocks.listMcpTools).toHaveBeenCalledTimes(1)
+    // One probe to decide whether to mount the wrappers, one for the call itself.
+    expect(invokeMocks.listMcpTools).toHaveBeenCalledTimes(2)
     expect(invokeMocks.callMcpTool).toHaveBeenCalledWith({
       name: 'filesystem::search',
       arguments: { query: 'hello', limit: 10 },
@@ -93,5 +94,21 @@ describe('useTamagotchiMcpToolsStore', async () => {
     store.dispose()
 
     expect(llmToolsStore.tools.filter(tool => tool.id.startsWith('mcp:'))).toEqual([])
+  })
+
+  // No server configured is this machine's normal state: two always-on wrappers that can only
+  // answer "empty" cost prompt bytes every turn and teach the model a tool that never works.
+  it('mounts nothing when no server is configured, and unmounts what was there', async () => {
+    const llmToolsStore = useLlmToolsStore()
+    const store = useTamagotchiMcpToolsStore()
+
+    await store.refresh()
+    expect(llmToolsStore.tools.filter(tool => tool.id.startsWith('mcp:'))).toHaveLength(2)
+
+    invokeMocks.listMcpTools.mockResolvedValueOnce([])
+    await store.refresh()
+
+    expect(llmToolsStore.tools.filter(tool => tool.id.startsWith('mcp:'))).toEqual([])
+    expect(llmToolsStore.activeTools.map(tool => tool.function.name)).not.toContain('builtIn_mcpListTools')
   })
 })

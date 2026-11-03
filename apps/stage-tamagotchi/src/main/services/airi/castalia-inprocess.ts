@@ -161,6 +161,22 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
         }))
     },
 
+    async facts(query, topK = 3) {
+      if (closing)
+        return []
+      const bank = await ensure()
+      const rows = await bank.facts(query, { topK }) as Array<{ subject?: string, predicate?: string, object?: string, confidence?: number, similarity?: number }>
+      return (Array.isArray(rows) ? rows : [])
+        .filter(row => typeof row.object === 'string' && row.object.trim().length > 0)
+        .map(row => ({
+          subject: String(row.subject ?? ''),
+          predicate: String(row.predicate ?? ''),
+          object: String(row.object ?? ''),
+          confidence: typeof row.confidence === 'number' ? row.confidence : 0,
+          ...(typeof row.similarity === 'number' ? { similarity: row.similarity } : {}),
+        }))
+    },
+
     async ingest(turn) {
       if (closing)
         return { ok: false, error: 'closing' }

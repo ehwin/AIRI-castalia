@@ -682,7 +682,7 @@ export const useChatStore = defineStore('chat', () => {
     const persona = memory.enabled ? memory.resolvePersona(personaOf(sessionId)) : personaOf(sessionId)
     const sourceTools = async () => [
       ...(typeof tools === 'function' ? await tools() ?? [] : tools ?? []),
-      ...memory.enabled ? await createMemoryTools({ read: name => memory.read(name, persona), search: query => memory.search(query), write: entry => memory.write(entry, persona), forget: name => memory.forget(name, persona) }) : [],
+      ...memory.enabled ? await createMemoryTools({ read: name => memory.read(name, persona), search: query => memory.search(query), searchFacts: query => memory.searchFacts(query), write: entry => memory.write(entry, persona), forget: name => memory.forget(name, persona) }) : [],
       ...castalia.enabled
         ? await createCastaliaStateTools({
             recordEmotion: (vad, reason) => castalia.recordEmotion(vad, reason, persona),

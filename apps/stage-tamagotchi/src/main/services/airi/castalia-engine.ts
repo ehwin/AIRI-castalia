@@ -1,6 +1,6 @@
 import type { CastaliaMemoryEntry } from '@proj-airi/castalia-plugin/memory'
 
-import type { CastaliaRecalledMemory, CastaliaSearchedMemory } from '../../../shared/eventa/castalia-memory'
+import type { CastaliaRecalledMemory, CastaliaSearchedFact, CastaliaSearchedMemory } from '../../../shared/eventa/castalia-memory'
 
 import process from 'node:process'
 
@@ -106,6 +106,15 @@ interface EngineSearchRow {
   createdAt?: string
 }
 
+/** One row of the engine's `fact_search` result. */
+interface EngineFactRow {
+  subject?: string
+  predicate?: string
+  object?: string
+  confidence?: number
+  similarity?: number
+}
+
 /** SQLite `YYYY-MM-DD HH:MM:SS` (UTC) and ISO strings both become epoch ms. */
 function parseEngineTime(value: string | undefined): number {
   if (!value)
@@ -132,7 +141,7 @@ function unwrapContent(result: unknown): Record<string, unknown> {
 export interface CastaliaEngineMemory {
   list: () => Promise<CastaliaMemoryEntry[]>
   save: (entry: CastaliaMemoryEntry) => Promise<void>
-  forget: (entry: Pick<CastaliaMemoryEntry, 'id' | 'name' | 'persona'>) => Promise<boolean>
+  forget: (entry: { id?: string, name?: string, persona?: string }) => Promise<boolean>
   /**
    * Renders a context block for one query. The engine abstains with empty text,
    * so the caller appends the block without a relevance check of its own.
@@ -146,6 +155,8 @@ export interface CastaliaEngineMemory {
    * backend cannot search simply exposes no search tool result.
    */
   search?: (query: string, topK?: number) => Promise<CastaliaSearchedMemory[]>
+  /** Structured facts for the same query; `[]` when the backend has none or they are far off. */
+  facts?: (query: string, topK?: number) => Promise<CastaliaSearchedFact[]>
   /**
    * Writes one finished turn back into the bank (conversation_log). Optional: the
    * stdio transport predates it, so a host without it simply does not ingest.
@@ -312,6 +323,23 @@ export function createCastaliaEngineMemory(options: CastaliaEngineOptions): Cast
           ...(row.memType ? { memType: String(row.memType) } : {}),
           ...(row.category ? { category: String(row.category) } : {}),
           ...(row.createdAt ? { createdAt: String(row.createdAt) } : {}),
+        }))
+    },
+
+    async facts(query, topK = 3) {
+      if (closing)
+        return []
+      const envelope = await call('fact_search', { project: options.project, query, topK })
+      if (envelope.ok !== true)
+        throw new Error(`castalia engine fact search failed: ${JSON.stringify(envelope.error ?? envelope)}`)
+      return ((envelope.results ?? []) as EngineFactRow[])
+        .filter(row => typeof row.object === 'string' && row.object.trim().length > 0)
+        .map(row => ({
+          subject: String(row.subject ?? ''),
+          predicate: String(row.predicate ?? ''),
+          object: String(row.object ?? ''),
+          confidence: typeof row.confidence === 'number' ? row.confidence : 0,
+          ...(typeof row.similarity === 'number' ? { similarity: row.similarity } : {}),
         }))
     },
 

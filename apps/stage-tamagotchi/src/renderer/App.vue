@@ -47,7 +47,7 @@ import {
   i18nGetLocale,
   i18nSetLocale,
 } from '../shared/eventa'
-import { castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySelfCycle, castaliaMemorySetEnergy } from '../shared/eventa/castalia-memory'
+import { castaliaMemoryFacts, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySelfCycle, castaliaMemorySetEnergy } from '../shared/eventa/castalia-memory'
 import { electronModelAssetCancel, electronModelAssetEnsure, electronModelAssetRemove, electronModelAssetsClear, electronModelAssetsList, electronModelAssetStatusChanged } from '../shared/eventa/model-assets'
 import {
   electronPluginUpdateCapability,
@@ -96,6 +96,7 @@ const saveCastaliaMemory = useElectronEventaInvoke(castaliaMemorySave)
 const forgetCastaliaMemory = useElectronEventaInvoke(castaliaMemoryForget)
 const recallCastaliaMemory = useElectronEventaInvoke(castaliaMemoryRecall)
 const searchCastaliaMemory = useElectronEventaInvoke(castaliaMemorySearch)
+const factsCastaliaMemory = useElectronEventaInvoke(castaliaMemoryFacts)
 const ingestCastaliaMemory = useElectronEventaInvoke(castaliaMemoryIngest)
 memoryStore.attachRemote({
   list: listCastaliaMemory,
@@ -104,6 +105,8 @@ memoryStore.attachRemote({
   recall: query => recallCastaliaMemory(query),
   // 模型主动查记忆的检索通道：让她真的能"翻记忆体"，而不是只能按索引名逐条读。
   search: (query, topK) => searchCastaliaMemory({ query, topK }),
+  // 同一句查询顺带取结构化事实：一行事实常是记忆行只隐含的答案（她是谁、小托是谁）。
+  facts: (query, topK) => factsCastaliaMemory({ query, topK }),
   // 每轮对话的写回入口：没有它，她只说、不记。
   ingest: turn => ingestCastaliaMemory(turn),
 })

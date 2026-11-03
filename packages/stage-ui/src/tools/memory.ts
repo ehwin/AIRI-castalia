@@ -1,6 +1,6 @@
 import type { Tool } from '@xsai/shared-chat'
 
-import type { MemoryEntry, MemorySearchHit } from '../stores/memory'
+import type { MemoryEntry, MemoryFact, MemorySearchHit } from '../stores/memory'
 
 import { rawTool } from '@xsai/tool'
 import { array, description, maxLength, minLength, pipe, safeParse, strictObject, string } from 'valibot'
@@ -65,6 +65,8 @@ interface CreateMemoryToolsOptions {
   read: (name: string) => MemoryEntry | undefined
   /** Ranked lookup over the whole bank; empty when the backend has no search or nothing matched. */
   search: (query: string) => Promise<MemorySearchHit[]>
+  /** Structured facts near the same query; printed beside the hits, never as their own tool. */
+  searchFacts: (query: string) => Promise<MemoryFact[]>
   write: (entry: { name: string, description: string, body: string }) => MemoryEntry | undefined
   forget: (name: string) => boolean
 }
@@ -89,6 +91,12 @@ function formatHit(hit: MemorySearchHit) {
   ].filter(Boolean).join(' · ')
   const line = `${name ? `${name}: ` : ''}${text}`
   return meta ? `- ${line} (${meta})` : `- ${line}`
+}
+
+/** A structured fact reads as one line: who · what · value. */
+function formatFact(fact: MemoryFact) {
+  const value = String(fact.object ?? '')
+  return `- ${fact.subject} · ${fact.predicate} · ${value.length > 160 ? `${value.slice(0, 160)}…` : value}`
 }
 
 /** Creates the memory tools for one run. The run reads its card's memories and the general ones, and changes only its card's. */
@@ -119,8 +127,8 @@ export async function createMemoryTools(options: CreateMemoryToolsOptions): Prom
         const query = parsed.output.query.trim()
         if (!query)
           return 'Give a search query.'
-        const hits = await options.search(query)
-        if (!hits.length)
+        const [hits, facts] = await Promise.all([options.search(query), options.searchFacts(query)])
+        if (!hits.length && !facts.length)
           return `No memory matched "${query}".`
         const lines: string[] = []
         let used = 0
@@ -131,7 +139,12 @@ export async function createMemoryTools(options: CreateMemoryToolsOptions): Prom
           lines.push(line)
           used += line.length + 1
         }
-        const left = hits.length - lines.length
+        const hitLines = lines.length
+        // Facts ride along in their own lines: three short rows cost less than a second call,
+        // and they answer what the rows only imply (who someone is, what her own name is).
+        if (facts.length)
+          lines.push('known facts:', ...facts.slice(0, 3).map(formatFact))
+        const left = hits.length - hitLines
         return left > 0
           ? `${lines.join('\n')}\n(+${left} more hits; narrow the query to see them)`
           : lines.join('\n')

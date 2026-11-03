@@ -146,6 +146,15 @@ export interface MemorySearchHit {
   createdAt?: string
 }
 
+/** One structured fact (subject · predicate · object) that a search also found. */
+export interface MemoryFact {
+  subject: string
+  predicate: string
+  object: string
+  confidence: number
+  similarity?: number
+}
+
 export interface MemoryRemotePort { /** Every entry the remote holds. Replaces the local cache on start. */
   list: () => Promise<MemoryEntry[]>
   save: (entry: MemoryEntry) => Promise<void>
@@ -165,6 +174,13 @@ export interface MemoryRemotePort { /** Every entry the remote holds. Replaces t
    * empty array means "nothing matched", not "nothing worth injecting".
    */
   search?: (query: string, topK?: number) => Promise<MemorySearchHit[]>
+  /**
+   * Structured facts for the same query.
+   *
+   * A fact is one line ("user · name · 小托"), so the search tool prints the close ones beside
+   * the rows instead of spending a second call. Far-off facts are the caller's to drop.
+   */
+  facts?: (query: string, topK?: number) => Promise<MemoryFact[]>
   /**
    * Writes one finished turn into the durable store.
    *
@@ -608,6 +624,30 @@ export const useMemoryStore = defineStore('memory', () => {
   }
 
   /**
+   * Facts close enough to the query to be worth printing (cosine 0.6, measured on the real bank:
+   * "小托" reaches 0.73 while an unrelated query like "生日" tops out at 0.51 and stays out).
+   */
+  async function searchFacts(query: string, topK = 3): Promise<MemoryFact[]> {
+    if (!enabled.value || !remote?.facts)
+      return []
+    const text = query.trim()
+    if (!text)
+      return []
+    try {
+      const facts = await remote.facts(text, topK)
+      markRemoteOk()
+      return (Array.isArray(facts) ? facts : [])
+        .filter(fact => fact?.object && (fact.similarity ?? 1) >= 0.6)
+        .slice(0, topK)
+    }
+    catch (cause) {
+      console.warn('[memory] remote fact search failed:', cause)
+      markRemoteFailure(cause)
+      return []
+    }
+  }
+
+  /**
    * Records the turn that just finished: what the user said, what she answered.
    *
    * This is the only path that keeps a conversation the model did not explicitly
@@ -661,6 +701,7 @@ export const useMemoryStore = defineStore('memory', () => {
     indexFor,
     read,
     search,
+    searchFacts,
     write,
     makeGeneral,
     forget,
