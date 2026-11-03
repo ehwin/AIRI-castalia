@@ -261,8 +261,10 @@ function pickDiverse(candidates: MemoryEntry[], limit: number, now: number) {
 /** One line of the index: a name when the entry has one, otherwise the fact itself. */
 export function indexLine(entry: MemoryEntry) {
   const fact = (entry.description || entry.body || '').replace(/\s+/g, ' ').trim()
-  const named = !TRANSCRIPT_NAME.test(entry.name) && !/^\d{4}-\d{2}-\d{2}\s*·/.test(entry.name)
-  const text = named && fact ? `${entry.name}: ${fact}` : fact
+  const day = DAY_PREFIX.exec(entry.name)?.[1]
+  const named = !TRANSCRIPT_NAME.test(entry.name) && !day
+  // A dated summary keeps its day: "when" is half of what makes a recent moment useful.
+  const text = day ? `${day} · ${fact}` : named && fact ? `${entry.name}: ${fact}` : fact
   return text.length > INDEX_LINE_CHARS ? `${text.slice(0, INDEX_LINE_CHARS - 1)}…` : text
 }
 

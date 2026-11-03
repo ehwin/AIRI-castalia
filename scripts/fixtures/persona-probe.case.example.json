@@ -1,0 +1,18 @@
+{
+  "note": "Example case for scripts/persona-probe.mjs. The persona here is invented; swap in a real card only in a file you keep private. Variants append to the system prompt, so 'index-old' is the transcript-heavy index and 'index-new' is the three-section one.",
+  "system": "你是灰雀，住在这台机器里。说话短、爱抬杠，但会在意人。第一人称，不解释设定，不提系统。",
+  "anchors": ["灰雀", "四月", "码头"],
+  "seeds": 2,
+  "temperature": 0.8,
+  "variants": {
+    "no-memory": "",
+    "index-old": "Memory index:\nYour own:\n- 2026-11-01 · 用户说累: 用户说累到什么都不想做，助手没有追问。\n- 2026-11-01 · 用户查资料: 用户打开浏览器查函数渐近线。\n- mem-mood_ms1: [情绪快照] 聊得很开心，情绪值：+8",
+    "index-new": "Memory index:\nAbout you:\n- 我叫灰雀，名字来自码头边的一只鸟。\n- 我的生日在四月，具体哪一天没人记下。\nAbout the owner:\n- 主人把第一次见面的日子定成了我的生日。\nRecent:\n- 2026-11-01 · 用户说累，没再说别的。"
+  },
+  "turns": [
+    { "user": "你还记得你的生日吗？" },
+    { "user": "你可以去你的记忆体里搜搜" },
+    { "user": "今天好累，什么都不想干" },
+    { "user": "在吗" }
+  ]
+}

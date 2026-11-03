@@ -1,0 +1,36 @@
+{
+  "note": "Synthetic bank shaped like a real Castalia store: prose lore under mem-<id>, turn transcripts, dated summaries, a stale mood snapshot, near-duplicate paraphrases. No real user data.",
+  "entries": [
+    { "name": "mem-1a2b3c4d", "description": "我是这个房间里的助手，名字来自一次月食。", "body": "我是这个房间里的助手，名字来自一次月食。", "persona": "test", "updatedAt": 1793000000000 },
+    { "name": "mem-2b3c4d5e", "description": "我的生日一栏写的是「未知」，档案没有记下这一天。", "body": "我的生日一栏写的是「未知」，档案没有记下这一天。", "persona": "test", "updatedAt": 1793000100000 },
+    { "name": "mem-3c4d5e6f", "description": "我出生在北边的港城，母亲从不让我守那些规矩。", "body": "我出生在北边的港城，母亲从不让我守那些规矩。", "persona": "test", "updatedAt": 1793000200000 },
+    { "name": "mem-4d5e6f70", "description": "母亲死在一个我没看见的瞬间，那之后我怕闭眼。", "body": "母亲死在一个我没看见的瞬间，那之后我怕闭眼。", "persona": "test", "updatedAt": 1793000300000 },
+    { "name": "mem-5e6f7081", "description": "我的口头禅是「我只信我自己看见的」。", "body": "我的口头禅是「我只信我自己看见的」。", "persona": "test", "updatedAt": 1793000400000 },
+    { "name": "mem-6f708192", "description": "我战斗时用一只旧手环，近身比远射更稳。", "body": "我战斗时用一只旧手环，近身比远射更稳。", "persona": "test", "updatedAt": 1793000500000 },
+    { "name": "mem-708192a3", "description": "我出生在北边的港城，母亲从不让我守这些规矩。", "body": "我出生在北边的港城，母亲从不让我守这些规矩。", "persona": "test", "updatedAt": 1793000600000 },
+    { "name": "mem-8192a3b4", "description": "「我只信我自己看见的」——这句话被印在档案首行。", "body": "「我只信我自己看见的」——这句话被印在档案首行。", "persona": "test", "updatedAt": 1793000700000 },
+
+    { "name": "mem-a1b2c3d4", "description": "用户说他把第一次见面的日子定成了我的生日。", "body": "用户说他把第一次见面的日子定成了我的生日。", "persona": "test", "updatedAt": 1793000800000 },
+    { "name": "mem-b2c3d4e5", "description": "用户偏好简短、正面的汇报，不喜欢太多负面措辞。", "body": "用户偏好简短、正面的汇报，不喜欢太多负面措辞。", "persona": "test", "updatedAt": 1793000900000 },
+    { "name": "mem-c3d4e5f6", "description": "用户说过身体不舒服时容易拖着，需要有人催。", "body": "用户说过身体不舒服时容易拖着，需要有人催。", "persona": "test", "updatedAt": 1793001000000 },
+
+    { "name": "2026-10-30 · 用户提出让我自己挑片子看", "description": "用户告诉我可以自己决定看什么，助手答应了并说会照实讲。", "body": "用户告诉我可以自己决定看什么，助手答应了并说会照实讲。", "persona": "test", "updatedAt": 1793100000000 },
+    { "name": "2026-10-30 · 用户在看函数渐近线", "description": "用户打开浏览器查渐近线的判定，说自己得准备考试了。", "body": "用户打开浏览器查渐近线的判定，说自己得准备考试了。", "persona": "test", "updatedAt": 1793100500000 },
+    { "name": "2026-10-29 · 用户下午在改记忆体", "description": "用户自检时提到自己在修记忆，助手问会不会弄丢东西。", "body": "用户自检时提到自己在修记忆，助手问会不会弄丢东西。", "persona": "test", "updatedAt": 1793200000000 },
+    { "name": "2026-10-28 · 用户说今天很累", "description": "用户说累到什么都不想做，助手没有追问，只陪着。", "body": "用户说累到什么都不想做，助手没有追问，只陪着。", "persona": "test", "updatedAt": 1793300000000 },
+
+    { "name": "mem-e5f6a7b8", "description": "用户: 在吗 助手: 在的，怎么了？", "body": "用户: 在吗 助手: 在的，怎么了？", "persona": "test", "updatedAt": 1793400000000 },
+    { "name": "mem-f6a7b8c9", "description": "用户: 今天好累 助手: 那就别动了，先歇着。", "body": "用户: 今天好累 助手: 那就别动了，先歇着。", "persona": "test", "updatedAt": 1793400100000 },
+    { "name": "mem-a7b8c9d0", "description": "User: good night  Assistant: sleep well.", "body": "User: good night  Assistant: sleep well.", "persona": "test", "updatedAt": 1793400200000 },
+
+    { "name": "mem-mood_ms1", "description": "[情绪快照] 聊得很开心，情绪值：+8", "body": "[情绪快照] 聊得很开心，情绪值：+8", "persona": "test", "updatedAt": 1793400300000 },
+
+    { "name": "Reference: 旧档案里的驻地", "description": "旧档案记着驻地是靠海的二层小楼。", "body": "旧档案记着驻地是靠海的二层小楼。", "persona": "test", "updatedAt": 1792900000000 },
+    { "name": "Reference: 她不爱吃的两样", "description": "她不爱吃香菜和动物内脏。", "body": "她不爱吃香菜和动物内脏。", "persona": "test", "updatedAt": 1792900100000 },
+
+    { "name": "shared-house-rule", "description": "晚上十一点后把音量调低。", "body": "晚上十一点后把音量调低。", "updatedAt": 1792800000000 },
+
+    { "name": "mem-d4e5f6a7", "description": "用户提到他最近在准备一场考试，压力不小。", "body": "用户提到他最近在准备一场考试，压力不小。", "persona": "test", "updatedAt": 1793500000000 },
+    { "name": "mem-c9d0e1f2", "description": "用户说想给房间添一盏灯，还没决定。", "body": "用户说想给房间添一盏灯，还没决定。", "persona": "test", "updatedAt": 1793500100000 }
+  ]
+}
