@@ -62,3 +62,14 @@ export const SELF_INITIATED_NOTICE = 'A quiet moment passed. Act on your own onl
 
 /** The notice source that marks the stored turn. */
 export const SELF_INITIATED_SOURCE = 'self-initiated-speech'
+
+/**
+ * Topic key of an utterance, scoped to one character.
+ *
+ * The outbound gate dedupes by topic. Without the scope, every character without a desire shares the single key
+ * `idle`, so one character's idle line mutes every other character for the whole dedupe window.
+ */
+export function scopedTopic(personaId: string, desire: string | null | undefined): string {
+  const key = String(desire ?? '').trim().toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '')
+  return `${personaId}:${key || 'idle'}`
+}

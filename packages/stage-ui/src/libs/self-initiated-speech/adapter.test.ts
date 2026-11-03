@@ -2,7 +2,7 @@ import type { ChatHistoryItem } from '@proj-airi/core-agent'
 
 import { describe, expect, it } from 'vitest'
 
-import { lastOwnerMessageAt, toAutonomyInput } from './adapter'
+import { lastOwnerMessageAt, scopedTopic, toAutonomyInput } from './adapter'
 
 function ownerMessage(createdAt: number): ChatHistoryItem {
   return { role: 'user', content: 'hello', id: `u-${createdAt}`, createdAt }
@@ -73,5 +73,19 @@ describe('autonomy input', () => {
     expect(input.desire).toBe('finish the song')
     expect(input.arousal).toBe(-0.8)
     expect(input.relationshipDepth).toBe(3)
+  })
+
+  // ROOT CAUSE: every character without a desire shared the single topic key `idle`, so one character's idle line
+  // muted the dedupe for four hours for all the others. The key carries the persona now.
+  describe('scopedTopic', () => {
+    it('keeps two characters apart on the same desire', () => {
+      expect(scopedTopic('airi', 'idle')).not.toBe(scopedTopic('yuno', 'idle'))
+    })
+
+    it('normalizes the desire and falls back to idle', () => {
+      expect(scopedTopic('airi', '  Finish  the SONG ')).toBe('airi:finishthesong')
+      expect(scopedTopic('airi', null)).toBe('airi:idle')
+      expect(scopedTopic('airi', '   ')).toBe('airi:idle')
+    })
   })
 })

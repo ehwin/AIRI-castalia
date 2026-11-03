@@ -2,7 +2,7 @@ import { useCastaliaPluginStore } from '@proj-airi/castalia-plugin'
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
-import { SELF_INITIATED_NOTICE, SELF_INITIATED_SOURCE, toAutonomyInput } from '../../libs/self-initiated-speech/adapter'
+import { scopedTopic, SELF_INITIATED_NOTICE, SELF_INITIATED_SOURCE, toAutonomyInput } from '../../libs/self-initiated-speech/adapter'
 import {
   createOutboundState,
   decideOutbound,
@@ -17,6 +17,7 @@ import { useChatStore } from '../chat'
 import { useMindStore } from './mind'
 import { readStoredRelationship } from '../chat/context-providers/relational-policy'
 import { useChatSessionStore } from '../chat/session-store'
+import { useMemoryStore } from '../memory'
 
 /**
  * Lets the character open a turn without an owner message.
@@ -30,6 +31,7 @@ export const useSelfInitiatedSpeechStore = defineStore('self-initiated-speech', 
   const castalia = useCastaliaPluginStore()
   const chat = useChatStore()
   const chatSession = useChatSessionStore()
+  const memory = useMemoryStore()
 
   const running = ref(false)
   let ticker: ReturnType<typeof createSpeechTicker> | undefined
@@ -76,11 +78,6 @@ export const useSelfInitiatedSpeechStore = defineStore('self-initiated-speech', 
   const paused = ref(false)
   const gatedCount = ref(0)
 
-  /** Turns a desire into a topic key. The same unresolved desire is one topic. */
-  function topicOf(desire: string | null | undefined): string {
-    const key = String(desire ?? '').trim().toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '')
-    return key || 'idle'
-  }
 
   function start() {
     if (ticker) {
@@ -93,14 +90,18 @@ export const useSelfInitiatedSpeechStore = defineStore('self-initiated-speech', 
       now: Date.now,
       readInput: ({ now, lastSpokeAt }) => {
         const sessionId = chatSession.activeSessionId
-        const personaId = sessionId ? chatSession.sessionMetas[sessionId]?.characterId : undefined
+        const cardId = sessionId ? chatSession.sessionMetas[sessionId]?.characterId : undefined
         // A turn in flight already speaks. A second notice would queue behind it.
-        if (!sessionId || !personaId || !castalia.enabled || chat.sending) {
+        if (!sessionId || !cardId || !castalia.enabled || chat.sending) {
           return undefined
         }
 
+        // Castalia records the drives under the persona that chats, not under the card id: a card id and a bank
+        // persona are two names for one character (`default` reads `airi`). Reading the card id returned an empty
+        // state for every card whose persona differs, so the drives never reached the decision.
+        const personaId = memory.enabled ? memory.resolvePersona(cardId) : cardId
         const snapshot = castalia.snapshotFor(personaId)
-        currentTopic = topicOf(snapshot.currentDesire)
+        currentTopic = scopedTopic(personaId, snapshot.currentDesire)
         const input = toAutonomyInput({
           now,
           lastSpokeAt,
