@@ -87,6 +87,8 @@ describe('memory tools', () => {
     expect(composeMemoryPrompt('')).toContain('Never save what a recipe already holds')
     // The ambient block is fetched from the message text alone, so a bare "去搜搜" misleads it.
     expect(composeMemoryPrompt('')).toContain('search with the words you mean instead of trusting that block')
+    // Measured: a keyword list drops the fact the single phrase finds.
+    expect(composeMemoryPrompt('')).toContain('one short phrase')
     // Memory is a reference for voice, not a script to re-enact, and an old line is not now.
     expect(composeMemoryPrompt('')).toContain('Memory is reference, not a script.')
     expect(composeMemoryPrompt('')).toContain('not of now')

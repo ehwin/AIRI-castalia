@@ -15,9 +15,15 @@ const nameSchema = pipe(string(), minLength(1), maxLength(64), description('The 
 const readParameters = strictObject({
   names: pipe(array(nameSchema), minLength(1), description('Every entry that the reply needs, so one call reads them all.')),
 })
-/** A search carries only the query: the backend decides how many rows a lookup needs. */
+/**
+ * A search carries only the query: the backend decides how many rows a lookup needs.
+ *
+ * Why one phrase and not a keyword list: measured on the live bank (2026-11-03), the query
+ * "拔牙" ranked the dentist fact first, while the list "拔牙 牙齿 牙医 看牙" did not return it
+ * in the top five at all. Extra terms dilute the vector match faster than they add recall.
+ */
 const searchParameters = strictObject({
-  query: pipe(string(), minLength(1), maxLength(200), description('What to look for, in the words the remembered fact would use.')),
+  query: pipe(string(), minLength(1), maxLength(200), description('One short phrase, in the words the remembered fact would use. A single phrase ranks better than a keyword list: extra terms dilute the match.')),
 })
 /** Forgetting an entry takes only its name. */
 const forgetParameters = strictObject({ name: nameSchema })
@@ -42,6 +48,7 @@ export function composeMemoryPrompt(index: string) {
     'Long-term memory. You keep it yourself. The index is a map, not a dump: facts about you, facts about the owner, then the last few moments.',
     `Read one entry with ${READ_MEMORY_TOOL_NAME} when its line is too short to act on. A line that already states the fact needs no read.`,
     `Search with ${SEARCH_MEMORY_TOOL_NAME} whenever the reply depends on something the index does not state, and whenever someone asks you to look something up. The index is a short list, not the whole memory.`,
+    'Search with one short phrase, the words the fact itself would use. A keyword list dilutes the match; one phrase ranks the fact higher.',
     'An empty search means that fact is not in memory: say so plainly, never fill the gap with a guess.',
     'The recalled block attached to a turn is fetched from the owner\'s message text alone, so an instruction like "去搜搜" carries no topic and brings back the wrong memories: search with the words you mean instead of trusting that block.',
     'Memory is reference, not a script. Use it to stay consistent; do not re-enact old lines, and never narrate the lookup.',
