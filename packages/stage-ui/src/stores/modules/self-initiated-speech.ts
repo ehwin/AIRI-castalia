@@ -125,7 +125,10 @@ export const useSelfInitiatedSpeechStore = defineStore('self-initiated-speech', 
           return { allow: false, reason: verdict.reason }
         // 出声前再看一眼她在干什么：屏幕在开会/全屏/游戏时，心里说一句就算了。
         // 裁决由 mind 的 lookAround 维护（每 5 分钟一次），这里只读，不额外抓屏。
+        // 睡着时同理：夜间维护正在改库，这时候开口既打扰也容易被半成品记忆带偏。
         const mind = useMindStore()
+        if (mind.asleep || mind.napping)
+          return { allow: false, reason: mind.asleep ? 'sleeping' : 'napping' }
         if (!mind.interruptAllowed)
           return { allow: false, reason: `screen:${mind.interruptReason ?? 'busy'}` }
         return { allow: true, reason: verdict.reason }

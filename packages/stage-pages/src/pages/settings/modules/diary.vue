@@ -100,7 +100,7 @@ const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: '2-dig
       </ul>
 
       <div :class="['flex', 'justify-end']">
-        <GhostButton :label="lastDistilled === day.date ? t(`${KEY}.distilled`) : t(`${KEY}.distill`)" @click="diary.distill(day.date)" />
+        <GhostButton :label="diary.hasDistilled(day.date) ? t(`${KEY}.distilled`) : t(`${KEY}.distill`)" @click="diary.distill(day.date)" />
       </div>
     </section>
   </div>

@@ -11,8 +11,11 @@ import { DatabaseSync } from 'node:sqlite'
 
 const VEC_CANDIDATES = [
   process.env.CASTALIA_VEC_EXT,
-  'D:/system/AIRI/castalia/Castalia-Anima/node_modules/sqlite-vec-windows-x64/vec0.dll',
-  'D:/AI/castalia/Castalia-Anima/node_modules/sqlite-vec-windows-x64/vec0.dll',
+  // 运行库优先：AIRI 只依赖 D:/castalia/run（/d/system/AIRI/castalia 是指向它的 junction）。
+  // 2026-11-02: 删掉 D:/AI/castalia（源码仓）兜底 —— 那条路会让 AIRI 在运行库缺件时
+  // 静默回落到源码层，等于把源码树变成隐式依赖。
+  'D:/castalia/run/Castalia-Anima/node_modules/sqlite-vec-windows-x64/vec0.dll',
+  'D:/castalia/run/Castalia/node_modules/sqlite-vec-windows-x64/vec0.dll',
 ].filter(Boolean) as string[]
 
 export function resolveVecExtension(): string | undefined {

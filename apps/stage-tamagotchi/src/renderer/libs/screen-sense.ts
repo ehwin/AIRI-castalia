@@ -33,7 +33,7 @@ export function createScreenSense() {
   /** 最近一次 look 走到哪一步、拿到什么。没有它，「她看不见」和「她坏了」长得一模一样。 */
   let last: Record<string, unknown> = { stage: 'idle' }
   /** Display layout hardly changes; re-reading it every look would cost an extra CLI run each time. */
-  let displays: Array<{ name: string, isPrimary: boolean, frame: { x: number, y: number, w: number, h: number }, scale: number }> = []
+  let displays: Array<{ name: string, isPrimary: boolean, frame: { x: number, y: number, w: number, h: number }, logical: { x: number, y: number, w: number, h: number }, scale: number }> = []
   let displaysAt = 0
 
   async function ask(imageDataUrl: string, workloadId: 'screen:activity' | 'screen:interpret') {
@@ -68,19 +68,26 @@ export function createScreenSense() {
           const listed = await run({ argv: ['invoke', 'display.list', '--json'] })
           const parsed = parseJson(listed?.output)
           const rows = Array.isArray(parsed?.result?.displays) ? parsed.result.displays : []
-          displays = rows.map((row: any) => ({
-            name: String(row?.name ?? 'display'),
-            isPrimary: row?.is_primary === true,
-            frame: {
+          displays = rows.map((row: any) => {
+            const scale = Number(row?.scale_factor ?? 1) || 1
+            const frame = {
               x: Number(row?.frame?.origin?.x ?? 0),
               y: Number(row?.frame?.origin?.y ?? 0),
               w: Number(row?.frame?.size?.width ?? 0),
               h: Number(row?.frame?.size?.height ?? 0),
-            },
-            scale: Number(row?.scale_factor ?? 1) || 1,
-          })).filter((row: { frame: { w: number, h: number } }) => row.frame.w > 0 && row.frame.h > 0)
+            }
+            // `display.list` 的 frame 是物理像素，光标是逻辑坐标：命中测试必须换算到
+            // 同一空间，否则两块屏缩放不同（1.5 / 1.25）时右边那块会被判成左边的。
+            return {
+              name: String(row?.name ?? 'display'),
+              isPrimary: row?.is_primary === true,
+              frame,
+              logical: { x: frame.x / scale, y: frame.y / scale, w: frame.w / scale, h: frame.h / scale },
+              scale,
+            }
+          }).filter((row: { logical: { w: number, h: number } }) => row.logical.w > 0 && row.logical.h > 0)
           displaysAt = Date.now()
-          last = { ...last, displays: displays.map(d => ({ name: d.name, frame: d.frame, scale: d.scale })) }
+          last = { ...last, displays: displays.map(d => ({ name: d.name, frame: d.frame, logical: d.logical, scale: d.scale })) }
         }
 
         let pointer: { x: number, y: number } | undefined
@@ -94,8 +101,8 @@ export function createScreenSense() {
         catch { /* 光标读不到就退回主屏 */ }
 
         const target = pointer
-          ? displays.find(d => pointer!.x >= d.frame.x && pointer!.x < d.frame.x + d.frame.w
-            && pointer!.y >= d.frame.y && pointer!.y < d.frame.y + d.frame.h)
+          ? displays.find(d => pointer!.x >= d.logical.x && pointer!.x < d.logical.x + d.logical.w
+            && pointer!.y >= d.logical.y && pointer!.y < d.logical.y + d.logical.h)
           : undefined
         const chosen = target ?? displays.find(d => d.isPrimary) ?? displays[0]
 
@@ -104,15 +111,16 @@ export function createScreenSense() {
         let route = 'display.capture'
         if (chosen && !chosen.isPrimary) {
           route = 'screen.captureRegion'
-          const scale = chosen.scale || 1
           capture = await run({
+            // 负坐标必须写成 `--x=-1920`：分写时 clap 会把 `-1920` 当成新的旗标，
+            // 报 `invalid value '--x' ... invalid float literal`。左副屏的 x 恒为负，踩过。
             argv: [
               'invoke',
               'screen.captureRegion',
-              '--x', String(Math.round(chosen.frame.x / scale)),
-              '--y', String(Math.round(chosen.frame.y / scale)),
-              '--width', String(Math.round(chosen.frame.w / scale)),
-              '--height', String(Math.round(chosen.frame.h / scale)),
+              `--x=${Math.round(chosen.logical.x)}`,
+              `--y=${Math.round(chosen.logical.y)}`,
+              `--width=${Math.round(chosen.logical.w)}`,
+              `--height=${Math.round(chosen.logical.h)}`,
               '--json',
             ],
           })

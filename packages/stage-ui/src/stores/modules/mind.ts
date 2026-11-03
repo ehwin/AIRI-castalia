@@ -1,32 +1,47 @@
-import type { Drives, InnerStream, SensePort, Thought } from '@proj-airi/core-agent'
+import type { Drives, InnerStream, SensePort, SleepClock, SleepStageReport, Thought } from '@proj-airi/core-agent'
 
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
 import {
+  settleBoutGap,
   advanceDrives,
+  beginBout,
   blindSense,
   composeInnerVoice,
   composeThought,
   createRefusalState,
   createStream,
   decide,
+  defaultDriveConfig,
+  defaultNapBout,
+  defaultNapPolicy,
+  defaultSleepBout,
   digestSense,
   evaluateRefusal,
   inferRequestTraits,
+  NAP_BOREDOM_RELIEF_PER_MINUTE,
+  NAP_QUALITY,
+  NAP_WAKE_GAP,
   planReturn,
   recent,
   record,
   renderStateLine,
   screenBusy,
   screenSummary,
+  sleepQualityFrom,
   surface,
 } from '@proj-airi/core-agent'
 
 import { innerThoughtsRepo } from '../../database/repos/inner-thoughts.repo'
+import { ownsLease } from './mind-lease'
 
 /** One tick per 45 seconds. Fast enough to notice, slow enough to stay cheap. */
 const TICK_MS = 45_000
+/** A lease held by a window that died is taken over after this long. */
+const LEASE_TTL_MS = 4 * TICK_MS
+/** Shared between windows of the same profile: who is allowed to advance. */
+const LEASE_KEY = 'castalia/mind-owner'
 
 /** How many observations the lane may draw on. */
 const OBSERVATION_LIMIT = 8
@@ -78,6 +93,9 @@ export const useMindStore = defineStore('mind', () => {
   const opening = ref<string>()
   const heldBack = ref<Thought>()
   const initialized = ref(false)
+  /** False in a second window: it displays but does not advance or persist. */
+  const isOwner = ref(true)
+  const instanceId = `mind-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`
   /** True once a sense is attached, so a host can show what it can perceive. */
   const senseAttached = ref(false)
 
@@ -102,6 +120,113 @@ export const useMindStore = defineStore('mind', () => {
   let thinkExecutor: (() => Promise<string | undefined>) | undefined
   let thinking = false
   let lastThinkAt = 0
+
+  /**
+   * Sleep: the other half of the fatigue loop.
+   *
+   * `advanceDrives` raises fatigue on every tick; nothing lowered it unless the
+   * app was closed (`restDrives` on the away path). A host that runs for days
+   * therefore reached the sleep threshold and stayed there. These fields hold
+   * the bout: while `asleep`, the tick advances the sleep clock instead of the
+   * awake one, and fatigue falls at the rate the maintenance cycle earned.
+   */
+  const asleep = ref(false)
+  /** A nap is a bout too, just shorter and with no memory work behind it. */
+  const napping = ref(false)
+  const sleepCount = ref(0)
+  const napCount = ref(0)
+  const lastSleepQuality = ref(1)
+  const sleepWired = ref(false)
+  const sleepInFlight = ref(false)
+  const lastSleepReport = ref<SleepStageReport>()
+  let sleepClock: SleepClock | null = null
+  let sleepExecutor: (() => Promise<SleepStageReport | undefined>) | undefined
+  /** One maintenance call may take a minute; a hung one must not keep her in bed forever. */
+  const SLEEP_EXECUTOR_TIMEOUT_MS = 180_000
+  /**
+   * When the owner last finished a turn.
+   *
+   * The old tick passed `idleMs: elapsed`, which is 45 seconds — always under
+   * the one-minute "user is active" line, so boredom was relieved on every tick
+   * and never grew. That is why provoke almost never fired and why a nap could
+   * not have a trigger. Idle has to mean "since the owner spoke", not "since the
+   * last tick".
+   */
+  let lastOwnerAt = Date.now()
+  let lastNapAt = 0
+  /** Daily cap: a dull afternoon gets one nap, not five. */
+  let napsToday = 0
+  let napDay = new Date().toDateString()
+  function rollNapDay(now: number) {
+    const day = new Date(now).toDateString()
+    if (day !== napDay) {
+      napDay = day
+      napsToday = 0
+    }
+  }
+
+  /**
+   * Drives survive a reload.
+   *
+   * Without this every launch started at zero fatigue and `planReturn` rested
+   * from zero, so closing the window was a full battery — the same free refill
+   * as `restDrives` on a host that never restarts.
+   */
+  // Scoped by character: two characters in the same profile must not share a
+  // fatigue gauge. `initialize(characterId)` sets it before the first read.
+  let mindScope = 'default'
+  function mindStateKey(): string {
+    return `castalia/mind-state/${mindScope}`
+  }
+  function loadMindState(): { drives?: Drives, asleep?: boolean, napping?: boolean, clock?: SleepClock, lastNapAt?: number, napsToday?: number, napDay?: string, at?: number } | undefined {
+    try {
+      // One-time migration: state used to live under the unscoped key.
+      const scoped = globalThis.localStorage?.getItem(mindStateKey())
+      const raw = scoped ?? (mindScope === 'default' ? null : globalThis.localStorage?.getItem('castalia/mind-state'))
+      return raw ? JSON.parse(raw) : undefined
+    }
+    catch {
+      return undefined
+    }
+  }
+  function persistMindState() {
+    try {
+      globalThis.localStorage?.setItem(mindStateKey(), JSON.stringify({
+        drives: drives.value,
+        asleep: asleep.value,
+        napping: napping.value,
+        clock: sleepClock,
+        lastNapAt,
+        napsToday,
+        napDay,
+        at: Date.now(),
+      }))
+    }
+    catch { /* 存不下就退化成内存态，不影响本轮 */ }
+  }
+  /**
+   * Takes over another window's snapshot without double-counting.
+   *
+   * Used when this window becomes the owner (first launch or stale lease). The
+   * snapshot carries its own timestamp, so the gap since the previous owner's
+   * last tick is settled once, by the tick that calls this.
+   */
+  function adoptPersisted(now: number) {
+    const saved = loadMindState()
+    if (!saved)
+      return
+    if (saved.drives)
+      drives.value = saved.drives
+    if (saved.clock)
+      sleepClock = saved.clock
+    lastNapAt = saved.lastNapAt ?? 0
+    napsToday = saved.napsToday ?? 0
+    napDay = saved.napDay ?? new Date().toDateString()
+    asleep.value = Boolean(saved.asleep && saved.clock)
+    napping.value = Boolean(saved.napping && saved.clock)
+    lastTickAt = Number.isFinite(saved.at) ? Math.min(now, saved.at!) : now
+  }
+
   /** 可观测：host 有没有把「怎么想」交进来。没接上时 `thinkNow()` 直接返回 false。 */
   const thinkWired = ref(false)
   /** 可观测：现在是不是正在想（卡住时能看见）。 */
@@ -190,6 +315,127 @@ export const useMindStore = defineStore('mind', () => {
   }
 
   /**
+   * Tells the mind how to spend a night.
+   *
+   * AIRI passes one Castalia maintenance call: reflect, consolidate, digest.
+   * The report is reduced to the three booleans sleep cares about, so the
+   * recovery rate reflects what actually ran. No executor still sleeps — just
+   * at half rate — because a missing memory backend must not mean insomnia.
+   */
+  function attachSleep(executor: (() => Promise<SleepStageReport | undefined>) | undefined) {
+    sleepExecutor = executor
+    sleepWired.value = Boolean(executor)
+  }
+
+  /** Ends a night. Returns whether there was one to end. */
+  function wakeUp(): boolean {
+    if (!asleep.value)
+      return false
+    asleep.value = false
+    sleepClock = null
+    sleepCount.value += 1
+    wokeUp.value = true
+    persistMindState()
+    return true
+  }
+
+  /**
+   * Ends a nap. A nap is not a night: it does not raise `wokeUp`, because the
+   * state line should not tell the owner she "slept" after twenty minutes.
+   */
+  function endNap(now = Date.now()): boolean {
+    if (!napping.value)
+      return false
+    napping.value = false
+    sleepClock = null
+    lastNapAt = now
+    napCount.value += 1
+    // A doze takes the edge off "nothing to do" as well; without this she wakes
+    // exactly as bored as she lay down and the nap buys nothing.
+    drives.value = { ...drives.value, boredom: Math.max(0, drives.value.boredom - 15) }
+    persistMindState()
+    return true
+  }
+
+  /**
+   * Dozes off for a bounded stretch.
+   *
+   * No maintenance call: a nap must cost nothing, otherwise the cheapest way to
+   * be bored would become the most expensive. Recovery stops at its own cap or
+   * `NAP_WAKE_GAP` points above where it started, so it is a lift, not a night.
+   */
+  function napNow(now = Date.now()): boolean {
+    if (asleep.value || napping.value || sleepInFlight.value)
+      return false
+    if (drives.value.fatigue >= 80)
+      return false
+    rollNapDay(now)
+    if (napsToday >= defaultNapPolicy.maxPerDay)
+      return false
+    napsToday += 1
+    const wakeAt = Math.max(20, drives.value.fatigue - NAP_WAKE_GAP)
+    napping.value = true
+    sleepClock = beginBout(now, { quality: NAP_QUALITY, wakeAt, ...defaultNapBout })
+    persistMindState()
+    return true
+  }
+
+  /**
+   * Lies down and runs the night's maintenance, once.
+   *
+   * The maintenance call starts now but the bout lasts as long as the gauge
+   * needs. Until the report lands the recovery runs at half rate, then at the
+   * rate the report earned — a failed consolidation is a lighter sleep, so she
+   * naturally stays down longer instead of waking "rested" on paper.
+   */
+  async function sleepNow(now = Date.now()): Promise<boolean> {
+    if (asleep.value || napping.value || sleepInFlight.value)
+      return false
+
+    napping.value = false
+    asleep.value = true
+    sleepInFlight.value = true
+    sleepClock = beginBout(now, {
+      quality: sleepCount.value === 0 ? 0.5 : lastSleepQuality.value,
+      ...defaultSleepBout,
+    })
+    persistMindState()
+
+    if (!sleepExecutor) {
+      lastSleepQuality.value = 0.5
+      sleepClock.quality = 0.5
+      sleepInFlight.value = false
+      return true
+    }
+
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      const report = await Promise.race([
+        sleepExecutor(),
+        new Promise<undefined>((resolve) => {
+          timer = setTimeout(() => resolve(undefined), SLEEP_EXECUTOR_TIMEOUT_MS)
+        }),
+      ])
+      lastSleepReport.value = report
+      lastSleepQuality.value = sleepQualityFrom(report)
+    }
+    catch {
+      lastSleepQuality.value = 0.4
+    }
+    finally {
+      if (timer)
+        clearTimeout(timer)
+    }
+
+    // The clock may have woken her already if the call took longer than the cap.
+    if (sleepClock)
+      sleepClock.quality = lastSleepQuality.value
+    sleepInFlight.value = false
+    persistMindState()
+    return true
+  }
+
+  /**
    * One real think, if the host wired one and the cooldown allows it.
    *
    * Returns whether anything happened, so a probe can assert on it without
@@ -217,6 +463,12 @@ export const useMindStore = defineStore('mind', () => {
 
       lastThinkAt = Date.now()
       lastDiaryText.value = diary
+      // A thought that landed is engagement with internal information, which
+      // counts as attention spent (Eastwood 2012), not as idle time.
+      drives.value = {
+        ...drives.value,
+        boredom: Math.max(0, drives.value.boredom - defaultDriveConfig.boredomReliefOnThink),
+      }
       // 想之前先看一眼此刻的屏幕：不然「思考」和眼前正在发生的事没关系，
       // 读起来就像她在念日记，而不是在过日子。
       if (senseAttached.value)
@@ -372,26 +624,77 @@ export const useMindStore = defineStore('mind', () => {
     if (screen)
       parts.push(`你此刻看到：${screen}`)
     const { boredom, curiosity, fatigue } = drives.value
-    parts.push(`你现在的状态：无聊 ${Math.round(boredom)} · 好奇 ${Math.round(curiosity)} · 累 ${Math.round(fatigue)}${interruptAllowed.value ? '' : '（屏幕上像是不方便打扰）'}`)
+    parts.push(`你现在的状态：无聊 ${Math.round(boredom)} · 好奇 ${Math.round(curiosity)} · 累 ${Math.round(fatigue)}${asleep.value ? '（正在睡）' : napping.value ? '（在打盹）' : ''}${interruptAllowed.value ? '' : '（屏幕上像是不方便打扰）'}`)
     return parts.join('\n')
   }
 
   /** Advances every drive and lets the background lane write at most one thought. */
   function tick(now = Date.now()) {
+    const wasOwner = isOwner.value
+    if (!ownsLease(globalThis.localStorage, LEASE_KEY, instanceId, now, LEASE_TTL_MS)) {
+      isOwner.value = false
+      lastTickAt = now
+      return
+    }
+    isOwner.value = true
+    if (!wasOwner)
+      adoptPersisted(now)
+
     const elapsed = Math.max(0, now - lastTickAt)
     lastTickAt = now
 
+    // Asleep: only the sleep clock runs. Adding awake fatigue here would mean
+    // the night never ends, and thinking/speaking during it would defeat it.
+    if ((asleep.value || napping.value) && sleepClock) {
+      // A suspended laptop wakes us with a two-hour delta. Settle to the bout's
+      // boundary and treat the rest as awake, or the nap cap never applies.
+      const step = settleBoutGap(sleepClock, drives.value, now, {
+        boredomReliefPerMinute: napping.value ? NAP_BOREDOM_RELIEF_PER_MINUTE : 0,
+      })
+      sleepClock = step.clock
+      drives.value = step.drives
+      persistMindState()
+      // One predicate for both bouts: a night ends under its wake threshold,
+      // a nap on that threshold or its 35-minute cap.
+      if (step.closed) {
+        if (napping.value)
+          endNap(now)
+        else
+          wakeUp()
+      }
+      return
+    }
+
+    // Real idle: since the owner last spoke, not since the last tick. The old
+    // `idleMs: elapsed` was 45 s, which reads as "user active" forever, so
+    // boredom was relieved on every tick and could never reach a nap.
+    rollNapDay(now)
+    const idleMs = Math.max(0, now - lastOwnerAt)
     drives.value = advanceDrives(drives.value, elapsed, {
-      idleMs: elapsed,
+      idleMs,
       fullscreen: false,
       micActive: false,
       hourOfDay: new Date(now).getHours(),
       novelty: novelty.value,
     })
     novelty.value = false
+    persistMindState()
 
-    // 驱力说话：好奇过阈值就真去想一次；无聊到想搭话时，先看一眼屏幕再决定打不打搅。
-    const action = decide(drives.value)
+    // 驱力说话：累到阈值就睡；长时间没人又无聊就小睡；好奇过阈值就真去想一次；
+    // 无聊到想搭话时，先看一眼屏幕再决定打不打搅。
+    const action = decide(drives.value, undefined, {
+      idleMs,
+      sinceNapMs: lastNapAt ? now - lastNapAt : undefined,
+      napsToday,
+    })
+    if (action === 'sleep') {
+      void sleepNow(now)
+      return
+    }
+    if (action === 'nap') {
+      napNow(now)
+      return
+    }
     if (action === 'think')
       void thinkNow(now)
     else if (action === 'provoke')
@@ -413,10 +716,14 @@ export const useMindStore = defineStore('mind', () => {
   }
 
   /** Loads the stream, reports what happened while away, and starts the tick. */
-  async function initialize() {
+  async function initialize(characterId?: string) {
     if (initialized.value)
       return
     initialized.value = true
+    if (characterId)
+      mindScope = characterId
+    // The first window to get here owns the mind; the others only display it.
+    isOwner.value = ownsLease(globalThis.localStorage, LEASE_KEY, instanceId, Date.now(), LEASE_TTL_MS)
 
     const [saved, lastSeenAt] = await Promise.all([
       innerThoughtsRepo.readAll().catch(() => []),
@@ -426,7 +733,29 @@ export const useMindStore = defineStore('mind', () => {
     for (const thought of saved)
       stream.value = record(stream.value, thought)
 
-    const awayMs = lastSeenAt ? Date.now() - lastSeenAt : 0
+    // Load the drives before deciding what the away time meant. Otherwise a
+    // restart starts from zero, `planReturn` rests a battery that was never
+    // spent, and the awake branch below then copies that result over the saved
+    // drives — a restart at fatigue 70 came back at 0.
+    const remembered = loadMindState()
+    if (remembered?.drives)
+      drives.value = remembered.drives
+    if (remembered?.clock)
+      sleepClock = remembered.clock
+    lastNapAt = remembered?.lastNapAt ?? 0
+    napsToday = remembered?.napsToday ?? 0
+    napDay = remembered?.napDay ?? new Date().toDateString()
+    rollNapDay(Date.now())
+    asleep.value = Boolean(remembered?.asleep && sleepClock)
+    napping.value = Boolean(remembered?.napping && sleepClock)
+    // Coming back from a shutdown is not the same as being interrupted: the
+    // owner has been away too, so a nap counter starts fresh.
+    lastOwnerAt = Date.now()
+
+    // The saved snapshot says how long the process was gone; the thought log
+    // only knows when she last spoke. Prefer the snapshot, fall back to the log.
+    const awayFrom = remembered?.at ?? lastSeenAt
+    const awayMs = awayFrom ? Math.max(0, Date.now() - awayFrom) : 0
     const report = planReturn({
       awayMs,
       drives: drives.value,
@@ -434,10 +763,40 @@ export const useMindStore = defineStore('mind', () => {
       hourOfDay: new Date().getHours(),
     })
 
-    drives.value = report.drives
-    wokeUp.value = report.slept
-    opening.value = report.opening
+    if ((asleep.value || napping.value) && sleepClock) {
+      // The app was closed mid-bout. Credit the away time at the bout's rate,
+      // not as a generic return, and keep it open if she is still under.
+      // A closed window can be handed back hours later. Stop at the bout's own
+      // boundary and settle the rest as awake time, or a 35-minute nap eats the
+      // whole gap.
+      const step = settleBoutGap(sleepClock, drives.value, Date.now(), {
+        boredomReliefPerMinute: napping.value ? NAP_BOREDOM_RELIEF_PER_MINUTE : 0,
+      })
+      sleepClock = step.clock
+      drives.value = step.drives
+      if (step.closed) {
+        if (napping.value) {
+          napping.value = false
+          lastNapAt = Date.now()
+          napCount.value += 1
+        }
+        else {
+          asleep.value = false
+          sleepCount.value += 1
+          wokeUp.value = true
+        }
+        sleepClock = null
+      }
+      opening.value = report.opening
+    }
+    else {
+      drives.value = report.drives
+      wokeUp.value = report.slept
+      opening.value = report.opening
+    }
 
+    if (isOwner.value)
+      persistMindState()
     lastTickAt = Date.now()
     timer = setInterval(() => tick(), TICK_MS)
   }
@@ -495,10 +854,21 @@ export const useMindStore = defineStore('mind', () => {
   function attachTurnComplete(register: (cb: () => Promise<void>) => () => void) {
     detachTurnComplete?.()
     detachTurnComplete = register(async () => {
+      // The owner spoke: a night or a nap ends here, not at the wake threshold.
+      // She answers first — nothing in the reply path is gated by sleep — and
+      // the bout closes afterwards so the state line matches what just happened.
+      lastOwnerAt = Date.now()
+      if (asleep.value)
+        wakeUp()
+      if (napping.value)
+        endNap(Date.now())
       drives.value = {
         ...drives.value,
         fatigue: Math.min(100, drives.value.fatigue + 1),
         focus: Math.min(100, drives.value.focus + 2),
+        // A real exchange is the one thing that pays boredom down. Typing in
+        // another window does not: she is in the room and still unengaged.
+        boredom: Math.max(0, drives.value.boredom - defaultDriveConfig.boredomReliefOnTurn),
       }
     })
   }
@@ -522,13 +892,28 @@ export const useMindStore = defineStore('mind', () => {
     wokeUp,
     heldBack,
     initialized,
+    isOwner,
     initialize,
     observe,
     tick,
     poke,
     attachSense,
     attachThink,
+    attachSleep,
     thinkNow,
+    sleepNow,
+    napNow,
+    wakeUp,
+    endNap,
+    asleep,
+    napping,
+    sleepCount,
+    napCount,
+    lastNapAt: computed(() => lastNapAt),
+    lastSleepQuality,
+    lastSleepReport,
+    sleepWired,
+    sleepInFlight,
     considerSpeaking,
     interruptAllowed,
     interruptReason,

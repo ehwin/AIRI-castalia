@@ -1,6 +1,6 @@
 import type { CastaliaMemoryEntry } from '@proj-airi/castalia-plugin/memory'
 
-import type { CastaliaRecalledMemory } from '../../../shared/eventa/castalia-memory'
+import type { CastaliaRecalledMemory, CastaliaSearchedMemory } from '../../../shared/eventa/castalia-memory'
 
 import process from 'node:process'
 
@@ -96,6 +96,16 @@ interface EngineStoreRow {
   createdAt?: string
 }
 
+/** One row of the engine's `memory_search` result. */
+interface EngineSearchRow {
+  id?: string
+  text?: string
+  score?: number
+  memType?: string
+  category?: string
+  createdAt?: string
+}
+
 /** SQLite `YYYY-MM-DD HH:MM:SS` (UTC) and ISO strings both become epoch ms. */
 function parseEngineTime(value: string | undefined): number {
   if (!value)
@@ -129,6 +139,14 @@ export interface CastaliaEngineMemory {
    */
   recall: (query: string) => Promise<CastaliaRecalledMemory>
   /**
+   * Ranked lookup over the bank for one query (the engine's `memory_search`).
+   *
+   * Unlike `recall` there is no similarity gate and no injection block: the result is
+   * a ranked list, and an empty list means nothing matched. Optional so a host whose
+   * backend cannot search simply exposes no search tool result.
+   */
+  search?: (query: string, topK?: number) => Promise<CastaliaSearchedMemory[]>
+  /**
    * Writes one finished turn back into the bank (conversation_log). Optional: the
    * stdio transport predates it, so a host without it simply does not ingest.
    */
@@ -137,6 +155,8 @@ export interface CastaliaEngineMemory {
   maintain?: (options?: { limit?: number }) => Promise<CastaliaMaintainReport>
   /** 引擎当前的 psyche 状态（情绪坐标 + 慢层心境 + band）。没有实现的后端返回 null。 */
   psycheState?: (options?: { characterId?: string }) => Promise<import('../../../shared/eventa/castalia-memory').CastaliaPsycheSnapshot | null>
+  /** Mirrors the mind's energy into the engine's own prompt state. */
+  setSelfEnergy?: (value: number) => Promise<void>
   /** Run one bounded self-cycle on the same engine/bank. */
   selfCycle?: (options?: { project?: string, characterId?: string, limit?: number, hoursBack?: number, minIntervalHours?: number }) => Promise<CastaliaSelfCycleReport>
   close: () => Promise<void>
@@ -197,7 +217,7 @@ export function createCastaliaEngineMemory(options: CastaliaEngineOptions): Cast
           MEMORY_CONFIG: join(options.bankDir, 'config.json'),
           CASTALIA_PROJECT: options.project,
           CHAR_ID: options.character,
-          MCP_TOOLS: 'store,self_cycle,memory_recent',
+          MCP_TOOLS: 'store,self_cycle,memory_recent,memory_search',
           HEALTH_PORT: '0',
           CONSOLIDATE_AUTO_ON_START: '0',
         },
@@ -275,6 +295,24 @@ export function createCastaliaEngineMemory(options: CastaliaEngineOptions): Cast
         topSim: typeof envelope.topSim === 'number' ? envelope.topSim : 0,
         chars: typeof envelope.chars === 'number' ? envelope.chars : 0,
       }
+    },
+
+    async search(query, topK = 5) {
+      if (closing)
+        return []
+      const envelope = await call('memory_search', { project: options.project, query, topK })
+      if (envelope.ok !== true)
+        throw new Error(`castalia engine search failed: ${JSON.stringify(envelope.error ?? envelope)}`)
+      return ((envelope.results ?? []) as EngineSearchRow[])
+        .filter(row => typeof row.text === 'string' && row.text.trim().length > 0)
+        .map(row => ({
+          ...(row.id ? { id: String(row.id) } : {}),
+          text: String(row.text),
+          score: typeof row.score === 'number' ? row.score : 0,
+          ...(row.memType ? { memType: String(row.memType) } : {}),
+          ...(row.category ? { category: String(row.category) } : {}),
+          ...(row.createdAt ? { createdAt: String(row.createdAt) } : {}),
+        }))
     },
 
     async selfCycle(input = {}) {

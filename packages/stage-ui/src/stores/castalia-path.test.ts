@@ -18,8 +18,8 @@ describe('castalia prompt and reply paths', () => {
     const prompt = formatAgentStatePrompt(castalia.snapshotFor('alice'))
 
     expect(prompt).toContain('Castalia self-state')
-    expect(prompt).toContain('Current desire: Learn how the song was made.')
-    expect(prompt).toContain('Current VAD: valence 0.60, arousal 0.20, dominance 0.40.')
+    expect(prompt).toContain('What you want right now: Learn how the song was made.')
+    expect(prompt).toContain('warmer than usual, in control')
     expect(castalia.moodHistory).toHaveLength(1)
   })
 
@@ -30,14 +30,13 @@ describe('castalia prompt and reply paths', () => {
     const tools = await createCastaliaStateTools({
       recordEmotion: (vad, reason) => castalia.recordEmotion(vad, reason, persona),
       setDesire: desire => castalia.setDesire(desire, persona),
-      adjustEnergy: change => castalia.boostEnergy(change, persona),
     })
 
     const setDesire = tools.find(tool => tool.function.name === CASTALIA_SET_DESIRE_TOOL_NAME)
     await setDesire!.execute({ desire: 'Hear the rest of the song.' }, { messages: [], toolCallId: 'reply' })
 
     expect(castalia.snapshotFor('alice').currentDesire).toBe('Hear the rest of the song.')
-    expect(formatAgentStatePrompt(castalia.snapshotFor('alice'))).toContain('Current desire: Hear the rest of the song.')
+    expect(formatAgentStatePrompt(castalia.snapshotFor('alice'))).toContain('What you want right now: Hear the rest of the song.')
     expect(castalia.activeCharacterId).toBe('alice')
   })
 })

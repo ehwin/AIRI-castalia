@@ -139,6 +139,28 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
       }
     },
 
+    async search(query, topK = 5) {
+      if (closing)
+        return []
+      const bank = await ensure()
+      const rows = await bank.search({
+        query,
+        topK,
+        project: options.project,
+        characterId: options.character,
+      }) as Array<{ id?: string, text?: string, score?: number, memType?: string, category?: string, createdAt?: string }>
+      return (Array.isArray(rows) ? rows : [])
+        .filter(row => typeof row.text === 'string' && row.text.trim().length > 0)
+        .map(row => ({
+          ...(row.id ? { id: String(row.id) } : {}),
+          text: String(row.text),
+          score: typeof row.score === 'number' ? row.score : 0,
+          ...(row.memType ? { memType: String(row.memType) } : {}),
+          ...(row.category ? { category: String(row.category) } : {}),
+          ...(row.createdAt ? { createdAt: String(row.createdAt) } : {}),
+        }))
+    },
+
     async ingest(turn) {
       if (closing)
         return { ok: false, error: 'closing' }
@@ -163,6 +185,12 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
       return bank.maintain(options)
     },
 
+    async setSelfEnergy(value) {
+      if (closing)
+        return
+      const bank = await ensure()
+      return bank.setSelfEnergy(value)
+    },
     async psycheState(options) {
       if (closing)
         return null

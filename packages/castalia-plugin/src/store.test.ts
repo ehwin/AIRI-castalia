@@ -38,4 +38,35 @@ describe('castalia plugin state', () => {
     expect(store.currentEnergy).toBe(100)
     expect(store.snapshotFor('never-recorded').energy).toBe(100)
   })
+
+  it('mirrors the mind\'s fatigue without decaying it back', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-02T00:00:00Z'))
+    const store = useCastaliaPluginStore()
+    store.setEnergy(25, 'airi')
+
+    expect(store.snapshotFor('airi').energy).toBe(25)
+
+    vi.setSystemTime(new Date('2026-11-02T00:01:00Z'))
+    expect(store.snapshotFor('airi').energy).toBe(25)
+  })
+
+  it('does not refund energy when the psyche mirror syncs', () => {
+    vi.useFakeTimers()
+    const start = new Date('2026-11-02T00:00:00Z').getTime()
+    vi.setSystemTime(start)
+    const store = useCastaliaPluginStore()
+    store.setEnergy(40, 'airi')
+
+    // Six hours of the five-minute mirror. Before this, every sync moved
+    // `lastUpdated` without settling the gauge, so the debt was forgiven.
+    for (let i = 1; i <= 72; i++) {
+      const at = start + i * 5 * 60_000
+      vi.setSystemTime(at)
+      store.syncPsyche({ vad: { valence: 0, arousal: 0, dominance: 0 }, at }, 'airi')
+    }
+
+    expect(store.snapshotFor('airi').energy).toBeLessThan(40)
+    expect(store.snapshotFor('airi').energy).toBeGreaterThan(20)
+  })
 })

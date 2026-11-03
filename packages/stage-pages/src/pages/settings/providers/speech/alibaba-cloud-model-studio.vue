@@ -17,9 +17,10 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const providerId = 'alibaba-cloud-model-studio'
-const defaultModel = 'cosyvoice-v1'
+const defaultModel = 'cosyvoice-v3.5-plus'
+const defaultVoice = 'cosyvoice-v3.5-plus-bailian-48f9e6aa815148158d6f8a8630dc24d4'
 
-// Default voice settings specific to ElevenLabs
+// Default voice settings specific to Alibaba Cloud Model Studio
 const defaultVoiceSettings = {
   speed: 1.0,
 }
@@ -54,13 +55,13 @@ async function handleGenerateSpeech(input: string, voiceId: string, _useSSML: bo
 
   // Get model from configuration or use default
   const model = providerConfig.model as string | undefined || defaultModel
+  const voice = voiceId || (providerConfig.voice as string | undefined) || defaultVoice
 
-  // ElevenLabs doesn't need SSML conversion, but if SSML is provided, use it directly
   return await speechStore.speech(
     provider,
     model,
     input,
-    voiceId,
+    voice,
     {
       ...providerConfig,
       ...defaultVoiceSettings,
@@ -147,7 +148,7 @@ watchDebounced([
         :available-voices="availableVoices"
         :generate-speech="handleGenerateSpeech"
         :api-key-configured="apiKeyConfigured"
-        default-text="Hello! This is a test of the ElevenLabs voice synthesis."
+        default-text="你好，这是阿里云百炼克隆音色测试。"
       />
     </template>
   </SpeechProviderSettings>

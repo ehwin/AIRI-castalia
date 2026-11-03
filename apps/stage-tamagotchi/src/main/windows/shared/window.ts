@@ -14,6 +14,7 @@ import { isMacOS, isWindows } from 'std-env'
 import { setupCastaliaMemoryService } from '../../services/airi/castalia-memory'
 import { createServerChannelService } from '../../services/airi/channel-server'
 import { createI18nService } from '../../services/airi/i18n'
+import { createAppVideoEngine, createVideoService } from '../../services/airi/video'
 import { createAppService, createAppVersionService, createPowerMonitorService, createScreenService, createSystemPreferencesService, createWindowService } from '../../services/electron'
 import { WindowBackdropService } from '../../services/electron/window-backdrop'
 
@@ -186,6 +187,9 @@ export async function setupBaseWindowElectronInvokes(params: {
   createAppVersionService({ window: params.window })
   createPowerMonitorService({ context: params.context, window: params.window })
   createSystemPreferencesService({ context: params.context, window: params.window })
+  // Every window owns an engine: the video actions run in the synced leader (the main window),
+  // so registering only for chat windows left the capability probe and every decode unreachable.
+  createVideoService({ context: params.context, engine: createAppVideoEngine() })
   setupCastaliaMemoryService({ context: params.context, databasePath: join(app.getPath('userData'), 'castalia', 'memory.sqlite') })
   WindowBackdropService.install(params.window)
 

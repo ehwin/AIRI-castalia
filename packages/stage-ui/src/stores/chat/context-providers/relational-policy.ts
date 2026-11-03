@@ -1,6 +1,6 @@
 import type { ContextMessage, RelationshipState } from '@proj-airi/core-agent'
 
-import { createCrisisWatch, createRelationalPolicy, inferRelationalSignals, renderRelationalPolicyContext } from '@proj-airi/core-agent'
+import { closingFromRun, createCrisisWatch, createRelationalPolicy, inferRelationalSignals, nextClosingRun, renderRelationalPolicyContext } from '@proj-airi/core-agent'
 import { ContextUpdateStrategy } from '@proj-airi/server-sdk'
 import { nanoid } from 'nanoid'
 
@@ -81,13 +81,25 @@ export function createRelationalPolicyContextProvider() {
    * a crisis when something counts them together, and that counter is here.
    */
   const watches = new Map<string, ReturnType<typeof createCrisisWatch>>()
+  /**
+   * Farewell turns in a row, per session and persona.
+   *
+   * One "我去洗澡了" is a pre-closing and could still be followed by another topic;
+   * a second one in a row is someone leaving. Core sees one message at a time, so
+   * the count has to live here. Any non-farewell turn resets it.
+   */
+  // TODO(closing): unit-test the run counting (two in a row → closed, any other
+  // turn → reset, one messageId → one count). See docs/fork/closing-state-todo.md T1c.
+  const closingRuns = new Map<string, number>()
 
   return function createRelationalPolicyContext(
     sessionId: string,
     lastUser?: { id: string, text: string },
     ownerId: string = sessionId,
   ): ContextMessage | undefined {
-    if (!lastUser?.id || !lastUser.text)
+    // A blank turn (attachment only, or a gamepad input) has nothing to read:
+    // building a policy for it would still advance the depth and write storage.
+    if (!lastUser?.id || !lastUser.text.trim())
       return undefined
 
     let turn = turns.get(turnKey(sessionId, ownerId))
@@ -97,6 +109,11 @@ export function createRelationalPolicyContextProvider() {
       const now = Date.now()
       const key = turnKey(sessionId, ownerId)
       const signals = inferRelationalSignals(lastUser.text)
+      // Count the run here; core only gets the verdict.
+      const runKey = turnKey(sessionId, ownerId)
+      const closingRun = nextClosingRun(closingRuns.get(runKey) ?? 0, signals.closing)
+      closingRuns.set(runKey, closingRun)
+      const closing = closingFromRun(closingRun, signals.closing)
       const watch = watches.get(key) ?? createCrisisWatch()
       watches.set(key, watch)
       // The watch can lift a turn to safety-first, and it never lowers one that a
@@ -131,6 +148,7 @@ export function createRelationalPolicyContextProvider() {
         // user message never counts as a second step closer.
         eventId: lastUser.id,
         ...signals,
+        closing,
         safety,
         candidateHypotheses: [],
       })
@@ -146,6 +164,7 @@ export function createRelationalPolicyContextProvider() {
           turns.delete(oldest.value)
           // The watch of an evicted session goes with it, so a stale run of rough
           // turns cannot escalate a later, unrelated conversation.
+          closingRuns.delete(oldest.value)
           const evicted = oldest.value.split('\u0000')[0]
           for (const candidate of [...watches.keys()]) {
             if (candidate.startsWith(`${evicted}\u0000`))

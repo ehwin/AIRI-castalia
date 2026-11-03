@@ -41,6 +41,18 @@ interface SpeechInput {
   providerConfig: Record<string, unknown>
 }
 
+/**
+ * In-flight synthesis caps below the pipeline default of 4.
+ *
+ * Bailian's `cosyvoice` allows 3 requests in the same second; the fourth of a burst answers
+ * `Throttling.RateQuota` (HTTP 429) within ~0.25 s. Measured against this account: 3 concurrent pass, 6 concurrent
+ * lose 3. A long reply reaches that burst on its own, and one rejected segment voids every later segment of the
+ * same reply, which is heard as "she stops talking halfway through".
+ */
+const SPEECH_MAX_CONCURRENT: Record<string, number> = {
+  'alibaba-cloud-model-studio': 3,
+}
+
 // Request status belongs to this renderer's RPC wait, not to replicated speech settings.
 const useSpeechCatalogRequests = defineStore('speech-catalog-requests', () => {
   const status = refManualReset<Record<string, { loading: boolean, error: string | null }>>(() => ({}))
@@ -80,6 +92,15 @@ export const useSpeechStore = defineStore('speech', () => {
   const activeSpeechModel = useLocalStorageManualReset<string>('settings/speech/active-model', '', persistenceOptions)
   const activeSpeechVoiceId = useLocalStorageManualReset<string>('settings/speech/voice', '', persistenceOptions)
   const activeSpeechVoice = refManualReset<VoiceInfo | undefined>(undefined)
+
+  // Migrate the active runtime selection as well as the provider editor config.
+  // Existing cards can still explicitly override this selection later.
+  if (activeSpeechProvider.value === 'alibaba-cloud-model-studio') {
+    if (activeSpeechModel.value === 'cosyvoice-v1' || activeSpeechModel.value === 'cosyvoice-v2' || !activeSpeechModel.value)
+      activeSpeechModel.value = 'cosyvoice-v3.5-plus'
+    if (!activeSpeechVoiceId.value || activeSpeechVoiceId.value === 'alloy')
+      activeSpeechVoiceId.value = 'cosyvoice-v3.5-plus-bailian-48f9e6aa815148158d6f8a8630dc24d4'
+  }
 
   const pitch = useLocalStorageManualReset<number>('settings/speech/pitch', 0, persistenceOptions)
   const rate = useLocalStorageManualReset<number>('settings/speech/rate', 1, persistenceOptions)
@@ -124,11 +145,6 @@ export const useSpeechStore = defineStore('speech', () => {
   })
 
   const supportsSSML = computed(() => {
-    // Currently only ElevenLabs and some other providers support SSML
-    // only part voices are support SSML in cosyvoice-v2 which is provided by alibaba
-    if (activeSpeechProvider.value === 'alibaba-cloud-model-studio' && activeSpeechModel.value === 'cosyvoice-v2') {
-      return true
-    }
     return ['elevenlabs', 'microsoft-speech', 'azure-speech'].includes(activeSpeechProvider.value)
   })
 
@@ -438,7 +454,7 @@ export const useSpeechStore = defineStore('speech', () => {
     const model = selection.model || (typeof config.model === 'string' ? config.model : '')
     const voiceId = selection.voice_id || (typeof config.voice === 'string' ? config.voice : '')
     const useSSML = ssmlEnabled.value
-    const canUseSSML = ['elevenlabs', 'microsoft-speech', 'azure-speech'].includes(providerId) || (providerId === 'alibaba-cloud-model-studio' && model === 'cosyvoice-v2')
+    const canUseSSML = ['elevenlabs', 'microsoft-speech', 'azure-speech'].includes(providerId)
     const pitchValue = pitch.value
     const language = voice?.languages[0]?.code
     if (!providerId || providerId === 'speech-noop')
@@ -446,7 +462,7 @@ export const useSpeechStore = defineStore('speech', () => {
     if (!model || !voiceId)
       throw new Error('Speech requires a model and voice')
     const provider = providersStore.getProviderInstance<SpeechProviderWithExtraOptions<string, Record<string, unknown>>>(providerId)
-    return { ...output, language, synthesize: async (request, signal) => {
+    return { ...output, language, ttsMaxConcurrent: SPEECH_MAX_CONCURRENT[providerId], synthesize: async (request, signal) => {
       signal.throwIfAborted()
       const client = await provider
       signal.throwIfAborted()

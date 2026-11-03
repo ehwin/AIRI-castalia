@@ -336,7 +336,7 @@ export interface ChatOrchestratorRuntimeDeps {
    * put it into the registry verbatim, where structuredClone rejected it and took
    * the whole send down.
    */
-  runtimeContextProviders?: Array<() => ContextMessage | null | undefined | Promise<ContextMessage | null | undefined>>
+  runtimeContextProviders?: Array<(sessionId: string) => ContextMessage | null | undefined | Promise<ContextMessage | null | undefined>>
   /**
    * Tools whose calls show as content of the reply, by tool name. A reply keeps no slice for their calls, and the model
    * still sees the calls in the provider transcript.
@@ -603,11 +603,11 @@ export function createChatOrchestratorRuntime(deps: ChatOrchestratorRuntimeDeps)
       deps.foregroundStream.reset()
   }
 
-  async function ingestRuntimeContexts() {
+  async function ingestRuntimeContexts(sessionId: string) {
     for (const provider of deps.runtimeContextProviders ?? []) {
       let contextMessage: ContextMessage | null | undefined
       try {
-        contextMessage = await provider()
+        contextMessage = await provider(sessionId)
       }
       catch (error) {
         console.warn('[core-agent] runtime context provider failed:', error instanceof Error ? error.message : String(error))
@@ -686,7 +686,7 @@ export function createChatOrchestratorRuntime(deps: ChatOrchestratorRuntimeDeps)
     // It is applied at message-assembly time (see below) as a system-prompt
     // date anchor + per-message [HH:MM] prefixes, which is more KV-cache
     // friendly and less prone to weak models echoing timestamps verbatim.
-    await ingestRuntimeContexts()
+    await ingestRuntimeContexts(sessionId)
 
     const sendingCreatedAt = now()
 

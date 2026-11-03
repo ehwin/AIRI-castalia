@@ -16,6 +16,7 @@ export type { RefusalDecision, RefusalInput, RefusalPolicy, RefusalState } from 
 export { createRefusalState, defaultRefusalPolicy, evaluateRefusal } from './refusal-policy'
 export type {
   BoundarySignal,
+  ClosingSignal,
   DisclosureLevel,
   MeaningHypothesis,
   MeaningHypothesisCandidate,
@@ -25,7 +26,7 @@ export type {
   RelationshipState,
   SafetyLevel,
 } from './relational-policy'
-export { createRelationalPolicy, inferRelationalSignals, renderRelationalPolicyContext, reviewMeaningHypotheses, updateRelationship } from './relational-policy'
+export { closingFromRun, createRelationalPolicy, inferRelationalSignals, looksLikeFarewell, nextClosingRun, renderRelationalPolicyContext, reviewMeaningHypotheses, updateRelationship } from './relational-policy'
 export type { RelationshipEvidence, RelationshipGateDecision, RelationshipGatePolicy, RelationshipLevelRequirement, RelationshipStage } from './relationship-gate'
 export { decideRelationshipStage, pruneEvidence, RELATIONSHIP_GATE_DEFAULTS } from './relationship-gate'
 export type { RequestTraitsWithKind } from './request-traits'

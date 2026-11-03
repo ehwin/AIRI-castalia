@@ -83,6 +83,34 @@ describe('in-process bank', () => {
     expect(byId.get(b.id)).toBe(0)   // 孤儿被软删
   })
 
+  it('runs the embedded self-cycle and keeps diary isolated', async () => {
+    const turn = await bank.ingestTurn({ user: '我今天完成了一个重要任务', assistant: '我记住了这次进展。' })
+    expect(turn.ok).toBe(true)
+    const result = await bank.selfCycle({ minIntervalHours: 0, hoursBack: 48, limit: 6 })
+    expect(result.ok).toBe(true)
+    expect(result.skipped).toBe(false)
+    expect(result.diaryId).toBeTruthy()
+    expect(result.evidenceIds).toContain(turn.id)
+
+    const { DatabaseSync } = await import('node:sqlite')
+    const db = new DatabaseSync(join(dir, 'testproj', 'project', 'memory.sqlite'))
+    const diary = db.prepare('SELECT source, subject, metadata FROM memory WHERE id = ?').get(result.diaryId!) as any
+    const metadata = JSON.parse(String(diary?.metadata || '{}'))
+    db.close()
+    const evidenceDb = new DatabaseSync(join(dir, 'testproj', 'general', 'memory.sqlite'))
+    const evidence = evidenceDb.prepare('SELECT source FROM memory WHERE id = ?').get(turn.id!) as any
+    evidenceDb.close()
+    expect(diary?.source).toBe('agent_diary')
+    expect(diary?.subject).toBe('self')
+    expect(metadata.generated_by).toBe('self_cycle')
+    expect(metadata.evidence_ids).toContain(turn.id)
+    expect(evidence?.source).toBe('conversation_log')
+
+    const again = await bank.selfCycle({ minIntervalHours: 0, hoursBack: 48, limit: 6 })
+    expect(again.skipped).toBe(true)
+    expect(again.reason).toBe('no_new_evidence')
+  })
+
   it('reports stats through the same shim', () => {
     const stats = bank.stats()
     const general = stats.find(s => s.memType === 'general')
@@ -243,5 +271,14 @@ describe('store tools (memory_store_* port)', () => {
     // 纯工具调用轮次可能不产出正文；写进去只会是半句残行。
     expect((await bank.ingestTurn({ user: '有话说', assistant: '   ' })).ok).toBe(false)
     expect((await bank.ingestTurn({ user: '', assistant: '有话答' })).ok).toBe(false)
+  })
+
+  it('refuses to hot-switch to another bank instead of silently reusing the first one', async () => {
+    // 跨 bank 换库 = 用 A 的 config 去开 B 的库：alignEmbedSpace 会把 B 的向量索引清掉。
+    // 旧行为是继续返回同一个引擎句柄（写入落回 A），比抛错更难查。
+    const other = mkdtempSync(join(tmpdir(), 'castalia-bank-other-'))
+    await expect(openBank({ bankDir: other, project: 'testproj', charId: 'airi', allowNoConfig: true }))
+      .rejects.toThrow(/不能热切换 bank/)
+    try { rmSync(other, { recursive: true, force: true }) } catch {}
   })
 })

@@ -29,6 +29,27 @@ export interface CastaliaMemoryForgetInput {
 export const castaliaMemoryForget = defineInvokeEventa<boolean, CastaliaMemoryForgetInput>('eventa:invoke:castalia:memory:forget')
 export const castaliaMemoryRecall = defineInvokeEventa<CastaliaRecalledMemory, string>('eventa:invoke:castalia:memory:recall')
 
+/**
+ * One ranked hit of an explicit lookup (the model's search tool, not the injection block).
+ *
+ * `score` is the engine's relevance; an empty list means nothing matched.
+ */
+export interface CastaliaSearchedMemory {
+  id?: string
+  text: string
+  score: number
+  memType?: string
+  category?: string
+  createdAt?: string
+}
+
+export interface CastaliaMemorySearchInput {
+  query: string
+  topK?: number
+}
+
+export const castaliaMemorySearch = defineInvokeEventa<CastaliaSearchedMemory[], CastaliaMemorySearchInput>('eventa:invoke:castalia:memory:search')
+
 /** 一轮对话的写回（自回归结束后调用）。失败不抛错，返回 {ok:false}。 */
 export interface CastaliaIngestTurnInput {
   user: string
@@ -54,7 +75,7 @@ export interface CastaliaSelfCycleReport {
   project: string
 }
 
-export const castaliaMemorySelfCycle = defineInvokeEventa<CastaliaSelfCycleReport, { limit?: number, hoursBack?: number, minIntervalHours?: number } | undefined>('eventa:invoke:castalia:memory:self-cycle')
+export const castaliaMemorySelfCycle = defineInvokeEventa<CastaliaSelfCycleReport, { limit?: number, hoursBack?: number, minIntervalHours?: number, energy?: number } | undefined>('eventa:invoke:castalia:memory:self-cycle')
 
 /**
  * 引擎当前的 psyche（情绪坐标 + 慢层心境 + band）。
@@ -71,6 +92,7 @@ export interface CastaliaPsycheSnapshot {
   version: number
   updatedAt: number
 }
+export const castaliaMemorySetEnergy = defineInvokeEventa<{ ok: boolean }, { value: number }>('eventa:invoke:castalia:memory:set-energy')
 export const castaliaMemoryPsyche = defineInvokeEventa<CastaliaPsycheSnapshot | null, { characterId?: string } | undefined>('eventa:invoke:castalia:memory:psyche')
 
 /** 记忆维护（抽取 + 整合 + digest），全部在主进程内跑；失败不抛错，报告里带 error。 */
@@ -85,6 +107,9 @@ export interface CastaliaMaintainReport {
   before?: Record<string, number>
   after?: Record<string, number>
   error?: string
+  /** The request hit the shared cooldown; the stages below are the last run. */
+  skipped?: boolean
+  skippedReason?: string
 }
 export const castaliaMemoryMaintain = defineInvokeEventa<CastaliaMaintainReport, { limit?: number } | undefined>('eventa:invoke:castalia:memory:maintain')
 

@@ -17,7 +17,10 @@ export type Gauge = number
 export interface Drives {
   /** Grows while awake. A tired companion stops interrupting. */
   fatigue: Gauge
-  /** Grows while the user is quiet. A bored companion looks for something to do. */
+  /**
+   * Grows while attention has nothing to hold on to — even if the owner is
+   * busy in another window. A bored companion looks for something to do.
+   */
   boredom: Gauge
   /** Spikes on novelty, then decays. A curious companion investigates. */
   curiosity: Gauge
@@ -51,13 +54,39 @@ export const quietEnvironment: EnvironmentSignals = {
 export interface DriveConfig {
   fatiguePerMinute: number
   fatigueRecoverPerHour: number
+  /**
+   * Logistic onset rate. Human boredom saturates: it builds while attention
+   * fails, then flattens instead of climbing in a straight line.
+   * Source: Eastwood et al. 2012 (boredom = failure to engage attention);
+   * Goetz et al. 2014 (boredom has a plateau, not a single ramp).
+   */
   boredomPerMinute: number
-  boredomReliefPerMinute: number
+  /**
+   * One real exchange, applied once per turn by the host.
+   * A user typing in another window is not engagement: she is in the room and
+   * still unengaged, which is the most common kind of human boredom.
+   */
+  boredomReliefOnTurn: number
+  /** Something new to look at: attention found an object. */
+  boredomReliefOnNovelty: number
+  /** A thought that landed. Internal engagement counts too (Eastwood 2012). */
+  boredomReliefOnThink: number
+  /** Crossing the provoke line primes exploration, not just talking (Bench & Lench 2013). */
+  boredomCuriositySpike: number
   curiosityHalfLifeMs: number
   curiositySpikeOnNovelty: number
   focusRisePerMinute: number
   focusDecayPerMinute: number
 }
+
+/**
+ * Boredom at which the companion starts looking for alternatives.
+ * Source: Bench & Lench 2013 — boredom motivates pursuit of a new goal, not
+ * complaint about the old one; van Tilburg & Igou 2012 — it is the felt lack
+ * of challenge and meaning, not the absence of people.
+ */
+export const BOREDOM_SEEKING_ONSET = 60
+
 
 /**
  * Defaults assume a desktop companion that runs all day.
@@ -68,8 +97,12 @@ export interface DriveConfig {
 export const defaultDriveConfig: DriveConfig = {
   fatiguePerMinute: 0.08,
   fatigueRecoverPerHour: 12.5,
-  boredomPerMinute: 1.5,
-  boredomReliefPerMinute: 3,
+  // 2.2/min with saturation: 60 around 42 min, 75 around 63 min, 90 around 105 min.
+  boredomPerMinute: 2.2,
+  boredomReliefOnTurn: 12,
+  boredomReliefOnNovelty: 25,
+  boredomReliefOnThink: 8,
+  boredomCuriositySpike: 60,
   curiosityHalfLifeMs: 10 * 60_000,
   curiositySpikeOnNovelty: 30,
   focusRisePerMinute: 6,
@@ -100,13 +133,20 @@ export function advanceDrives(
 
   const fatigue = clamp(previous.fatigue + minutes * config.fatiguePerMinute, 0, 100)
 
-  const boredomGain = minutes * config.boredomPerMinute
-  const boredomRelief = active ? minutes * config.boredomReliefPerMinute : 0
+  // Boredom is unengaged attention, not silence: it grows even while the owner
+  // types in another window, and only an actual exchange pays it down.
+  const room = Math.max(0.05, 1 - previous.boredom / 100)
+  const boredomGain = minutes * config.boredomPerMinute * room
+  const boredomRelief = signals.novelty ? config.boredomReliefOnNovelty : 0
   const boredom = clamp(previous.boredom + boredomGain - boredomRelief, 0, 100)
 
   const curiosityDecay = Math.pow(0.5, Math.max(0, elapsedMs) / config.curiosityHalfLifeMs)
-  const curiositySpike = signals.novelty ? config.curiositySpikeOnNovelty : 0
-  const curiosity = clamp(previous.curiosity * curiosityDecay + curiositySpike, 0, 100)
+  const noveltySpike = signals.novelty ? config.curiositySpikeOnNovelty : 0
+  // Boredom is a switching signal: once it crosses the line she starts looking
+  // for something to do, so exploration gets first refusal before speech.
+  const startsSeeking = previous.boredom < BOREDOM_SEEKING_ONSET && boredom >= BOREDOM_SEEKING_ONSET
+  const seekingSpike = startsSeeking ? config.boredomCuriositySpike : 0
+  const curiosity = clamp(previous.curiosity * curiosityDecay + noveltySpike + seekingSpike, 0, 100)
 
   const focus = active
     ? clamp(previous.focus + minutes * config.focusRisePerMinute, 0, 100)
@@ -128,6 +168,27 @@ export function restDrives(
 ): Drives {
   const hours = Math.max(0, offlineMs) / 3_600_000
   const fatigue = clamp(previous.fatigue - hours * config.fatigueRecoverPerHour, 0, 100)
+  return { ...previous, fatigue }
+}
+
+/**
+ * Recovers fatigue while the process is still running.
+ *
+ * `restDrives` only covers time the app was closed, so a host that never shuts
+ * down never lets her rest — the gauge climbs to the sleep threshold and stays
+ * there. This is the online half: the same recovery rate, scaled by how well
+ * the sleep cycle went (a failed consolidation is a lighter sleep, not a full
+ * battery). It touches fatigue only; boredom and curiosity stay where they are.
+ */
+export function sleepDrives(
+  previous: Drives,
+  elapsedMs: number,
+  quality = 1,
+  config: DriveConfig = defaultDriveConfig,
+): Drives {
+  const hours = Math.max(0, elapsedMs) / 3_600_000
+  const q = clamp(Number.isFinite(quality) ? quality : 0, 0, 1)
+  const fatigue = clamp(previous.fatigue - hours * config.fatigueRecoverPerHour * q, 0, 100)
   return { ...previous, fatigue }
 }
 
@@ -194,7 +255,7 @@ export function gatesFrom(
   return { allowProvoke: !blocked, allowThink: true }
 }
 
-export type MindAction = 'idle' | 'think' | 'provoke'
+export type MindAction = 'idle' | 'think' | 'provoke' | 'sleep' | 'nap'
 
 export interface ActionThresholds {
   /** Above this fatigue the companion rests instead of acting. */
@@ -205,13 +266,75 @@ export interface ActionThresholds {
   provoke: number
   /** Curiosity that makes the companion investigate. */
   think: number
+  /** Boredom at which an idle, mildly tired companion dozes instead of talking. */
+  napBoredom: number
+  /** Below this fatigue a nap is pointless: she is not tired enough to switch off. */
+  napFatigue: number
+  /** Quiet this long before a night can start; otherwise she dozes mid-chat. */
+  sleepIdleMs: number
 }
 
 export const defaultActionThresholds: ActionThresholds = {
   sleep: 80,
-  wake: 55,
+  // A night has to actually restore her. Waking at 55 would end every bout
+  // after two hours and leave her permanently half-tired; 20 is a full sleep.
+  wake: 20,
   provoke: 60,
   think: 55,
+  napBoredom: 75,
+  napFatigue: 35,
+  sleepIdleMs: 10 * 60_000,
+}
+
+/** What the loop knows and the drives do not. */
+export interface MindContext {
+  /** Milliseconds since the owner last said anything. */
+  idleMs?: number
+  /** Milliseconds since the last nap ended. Absent means never. */
+  sinceNapMs?: number
+  /** Naps already taken today, so a dull afternoon cannot become five naps. */
+  napsToday?: number
+}
+
+export interface NapPolicy {
+  /** A nap needs a long quiet stretch, not a lull between two messages. */
+  idleMs: number
+  /** At least this long between two naps. */
+  cooldownMs: number
+  /** Hard daily cap. Two is an afternoon and an evening, not a hibernation. */
+  maxPerDay: number
+}
+
+export const defaultNapPolicy: NapPolicy = {
+  idleMs: 45 * 60_000,
+  cooldownMs: 3 * 3_600_000,
+  maxPerDay: 2,
+}
+
+/**
+ * Whether this is a nap moment.
+ *
+ * Boredom alone is not enough: a bored companion talks. Fatigue alone is not
+ * enough: a tired companion with something to do keeps going. A nap needs the
+ * intersection — nothing to do, quiet long enough, tired enough that a short
+ * doze helps, and not so tired that the night has already started. Pure, so the
+ * decision is testable without a clock.
+ */
+export function canNap(
+  drives: Drives,
+  context: MindContext = {},
+  thresholds: ActionThresholds = defaultActionThresholds,
+  policy: NapPolicy = defaultNapPolicy,
+): boolean {
+  const idle = Math.max(0, context.idleMs ?? 0)
+  const sinceNap = context.sinceNapMs ?? Number.POSITIVE_INFINITY
+  if ((context.napsToday ?? 0) >= policy.maxPerDay)
+    return false
+  return drives.boredom >= thresholds.napBoredom
+    && drives.fatigue >= thresholds.napFatigue
+    && drives.fatigue < thresholds.sleep
+    && idle >= policy.idleMs
+    && sinceNap >= policy.cooldownMs
 }
 
 /**
@@ -221,17 +344,30 @@ export const defaultActionThresholds: ActionThresholds = {
  * decides whether the intent becomes speech, a bubble, or a held-back thought.
  * Mixing the two here made "wants to talk but is blocked" impossible.
  *
- * Fatigue still wins over every other drive: a tired companion wants nothing,
- * and rest is the only way back.
+ * Only onsets live here. How a sleep or a nap ends belongs to the bout clock
+ * (`beginBout` / `advanceBout`): a night ends on a fatigue threshold, a nap on
+ * a wake threshold *and* a duration cap, and splitting those across two
+ * functions is what produced the flip-flopping this replaced.
  */
 export function decide(
   drives: Drives,
   thresholds: ActionThresholds = defaultActionThresholds,
+  context: MindContext = {},
+  policy: NapPolicy = defaultNapPolicy,
 ): MindAction {
-  if (drives.fatigue >= thresholds.sleep)
-    return 'idle'
-  if (drives.boredom >= thresholds.provoke)
+  const idle = Math.max(0, context.idleMs ?? 0)
+  if (drives.fatigue >= thresholds.sleep && idle >= thresholds.sleepIdleMs)
+    return 'sleep'
+  if (canNap(drives, context, thresholds, policy))
+    return 'nap'
+  if (drives.boredom >= thresholds.provoke) {
+    // Boredom is a switching signal, not a complaint: if something also looks
+    // worth investigating, she goes and looks before she asks for company.
+    // Source: Bench & Lench 2013 — boredom readies pursuit of alternatives.
+    if (drives.curiosity >= thresholds.think)
+      return 'think'
     return 'provoke'
+  }
   if (drives.curiosity >= thresholds.think)
     return 'think'
   return 'idle'

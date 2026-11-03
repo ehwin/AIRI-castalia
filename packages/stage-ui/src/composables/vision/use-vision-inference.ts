@@ -25,7 +25,16 @@ export interface VisionInferenceInput {
 }
 
 // TODO: this should be configurable
-const VISION_INFERENCE_TIMEOUT_MS = 60_000
+const VISION_INFERENCE_TIMEOUT_MS = 90_000
+
+/**
+ * Caps how much the vision model writes per image.
+ *
+ * A local vision model on this class of hardware decodes at 10–25 tok/s. Without a cap the
+ * `tool:image` workload rambles past the request deadline, the read aborts, and the chat model
+ * receives "The vision model failed to read this image." even though the screenshot was fine.
+ */
+const VISION_INFERENCE_MAX_TOKENS = 320
 
 /** The read queue of this window, shared by attachments, tool images, and the screen ticker. */
 const visionReadQueue = new VisionReadQueue()
@@ -78,38 +87,53 @@ export function useVisionInference() {
       content: [{ type: 'text', text: prompt }, { type: 'image', url }],
     }] }
 
-    let buffer = ''
-    const abortController = new AbortController()
-    const timeoutHandle = setTimeout(() => {
-      abortController.abort(new Error(`Vision inference timed out after ${VISION_INFERENCE_TIMEOUT_MS}ms`))
-    }, VISION_INFERENCE_TIMEOUT_MS)
+    /** One streamed read. Without `maxTokens` the model may write as long as it likes. */
+    async function readOnce(maxTokens: number | undefined) {
+      let buffer = ''
+      const abortController = new AbortController()
+      const timeoutHandle = setTimeout(() => {
+        abortController.abort(new Error(`Vision inference timed out after ${VISION_INFERENCE_TIMEOUT_MS}ms`))
+      }, VISION_INFERENCE_TIMEOUT_MS)
 
-    try {
-      await llmStore.stream(modelId, visionProvider, context, {
-        // A frame description calls no tools. The chat tool list only costs context,
-        // and a provider without tool calling rejects it.
-        supportsTools: false,
-        abortSignal: input.abortSignal ? AbortSignal.any([input.abortSignal, abortController.signal]) : abortController.signal,
-        onStreamEvent: (event) => {
-          if (event.type === 'text-delta') {
-            buffer += event.text
-          }
-        },
-      })
-    }
-    catch (error) {
-      if (abortController.signal.aborted) {
-        throw abortController.signal.reason instanceof Error
-          ? abortController.signal.reason
-          : new Error(`Vision inference timed out after ${VISION_INFERENCE_TIMEOUT_MS}ms`)
+      try {
+        await llmStore.stream(modelId, visionProvider, context, {
+          // A frame description calls no tools. The chat tool list only costs context,
+          // and a provider without tool calling rejects it.
+          supportsTools: false,
+          ...(maxTokens === undefined ? {} : { maxTokens }),
+          abortSignal: input.abortSignal ? AbortSignal.any([input.abortSignal, abortController.signal]) : abortController.signal,
+          onStreamEvent: (event) => {
+            if (event.type === 'text-delta') {
+              buffer += event.text
+            }
+          },
+        })
       }
-      throw error
-    }
-    finally {
-      clearTimeout(timeoutHandle)
+      catch (error) {
+        if (abortController.signal.aborted) {
+          throw abortController.signal.reason instanceof Error
+            ? abortController.signal.reason
+            : new Error(`Vision inference timed out after ${VISION_INFERENCE_TIMEOUT_MS}ms`)
+        }
+        throw error
+      }
+      finally {
+        clearTimeout(timeoutHandle)
+      }
+
+      return buffer.trim()
     }
 
-    return buffer.trim()
+    const capped = await readOnce(VISION_INFERENCE_MAX_TOKENS)
+    if (capped)
+      return capped
+
+    // A thinking model counts its reasoning toward the cap, so a relay or a provider that keeps
+    // thinking on can spend every allowed token there and return no text at all. The caller would
+    // then report "the vision model failed to read this image" for a screenshot that was fine.
+    // Spend one more request without a cap: a real answer beats a silent empty one.
+    input.abortSignal?.throwIfAborted()
+    return await readOnce(undefined)
   }
 
   async function runVisionInference(input: VisionInferenceInput) {

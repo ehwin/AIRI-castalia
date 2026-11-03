@@ -10,6 +10,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 
 import { providerSettingsRouteOf } from '../libs/providers/metadata'
+import { useMemoryStore } from '../stores/memory'
 import { useAiriCardStore } from '../stores/modules/airi-card'
 import { useConsciousnessStore } from '../stores/modules/consciousness'
 import { startsInputOnSpeech, useHearingStore } from '../stores/modules/hearing'
@@ -274,6 +275,7 @@ export function useSettingsNeedsAttention() {
   const hearingStore = useHearingStore()
   const visionStore = useVisionStore()
   const cardStore = useAiriCardStore()
+  const memoryStore = useMemoryStore()
   const audioDevice = useSettingsAudioDevice()
   /** The fingerprint of the cause at the time of the dismissal, by item id. */
   const dismissed = useLocalStorage<Record<string, string>>('settings/needs-attention/dismissed', {})
@@ -567,8 +569,35 @@ export function useSettingsNeedsAttention() {
     }]
   })
 
+  /**
+   * Memory whose port is still attached while every call fails.
+   *
+   * Nothing else reports this: the backend is reached over a transport that stays open after the
+   * engine behind it dies, so the index and the recall block simply go empty and the reply looks
+   * like one from a character with nothing to remember.
+   */
+  const memoryProblems = computed((): Problem[] => {
+    if (!memoryStore.enabled || !memoryStore.remoteDegraded)
+      return []
+    const count = memoryStore.remoteHealth.consecutiveFailures
+    return [{
+      item: {
+        id: 'memory-degraded',
+        title: t('settings.needs-attention.memory-degraded', { count }),
+        detail: memoryStore.remoteHealth.lastError || t('settings.needs-attention.memory-degraded-detail'),
+        fallbackIcon: 'i-solar:leaf-bold-duotone',
+        modules: [moduleTitleOf('consciousness')],
+        blocking: false,
+        to: '/settings/memory',
+      },
+      fingerprint: fingerprintOf(`memory
+${memoryStore.remoteHealth.lastError}`),
+    }]
+  })
+
   const problems = computed(() => [
     ...providerProblems.value,
+    ...memoryProblems.value,
     ...unavailableProviderProblems.value,
     ...speechProblems.value,
     ...hearingProblems.value,

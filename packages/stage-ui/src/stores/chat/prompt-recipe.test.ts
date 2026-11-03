@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { composeRecipeSpacePrompt, composeSystemPrompt } from './prompt-recipe'
+import { composeRecipeSpacePrompt, composeSystemPrompt, localZoneLabel } from './prompt-recipe'
 
 describe('chat prompt recipe', () => {
   // https://github.com/moeru-ai/airi/discussions/2239
@@ -14,6 +14,24 @@ describe('chat prompt recipe', () => {
     expect(content).toContain('Do not use single dollar signs as math delimiters.')
     expect(content).not.toContain('eg: $ x^3 $')
     expect(content.endsWith('You are AIRI.')).toBe(true)
+  })
+  // The model only knows the time from the per-message prefix, so the prompt has to say what that prefix is.
+  // A fixed zone keeps it byte-stable: the clock itself never enters the cacheable prefix.
+  it('teaches the per-message time prefix before the identity', () => {
+    const content = composeSystemPrompt('You are AIRI.', 'Asia/Shanghai (UTC+08:00)')
+
+    expect(content).toContain('[YYYY-MM-DD HH:MM]')
+    expect(content).toContain('Asia/Shanghai (UTC+08:00)')
+    expect(content).toContain('The newest prefix is the current time')
+    expect(content.indexOf('[YYYY-MM-DD HH:MM]')).toBeLessThan(content.indexOf('You are AIRI.'))
+    // Nothing in the rule may be a live clock value, or the prompt cache breaks every minute.
+    expect(composeSystemPrompt('You are AIRI.', 'Asia/Shanghai (UTC+08:00)'))
+      .toBe(composeSystemPrompt('You are AIRI.', 'Asia/Shanghai (UTC+08:00)'))
+    expect(content).not.toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)
+  })
+  it('names the machine zone and renders an offset for it', () => {
+    expect(localZoneLabel(new Date(2026, 3, 25, 18, 47))).toMatch(/UTC[+-]\d{2}:\d{2}\)?$/)
+    expect(localZoneLabel(new Date(2026, 3, 25, 18, 47))).toBe(localZoneLabel(new Date(2026, 7, 25, 18, 47)))
   })
   // A recipe runs in its own session, so its steps join that session's prefix and never the conversation's.
   it('describes a task recipe space', () => {

@@ -1,7 +1,7 @@
 import { createEventHook, until } from '@vueuse/core'
 import { nanoid } from 'nanoid'
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
 import { displayModelsRepo } from '../database/repos/display-models.repo'
 
@@ -126,6 +126,24 @@ export const useDisplayModelsStore = defineStore('display-models', () => {
   async function ensureDisplayModelAvailable(id: string) {
     return await getDisplayModel(id)
   }
+
+  /**
+   * Cloud-sync surface that the model picker still reads.
+   *
+   * NOTICE: upstream 0.13 keeps the model directory and its upload queue in the user's account.
+   * `components/scenarios/dialogs/model-selector/model-selector.vue` — the component behind the
+   * "select model" button — destructures `cloudOnlyModels`, `syncStatuses` and `syncErrors` from
+   * this store while rendering, so a local-only tree that drops them makes the picker throw and
+   * the entry opens nothing at all. This fork has no catalog: no cloud-only models, no per-model
+   * sync state, no upload or delete-cloud actions. Keep the names and the empty values if the
+   * catalog ever returns.
+   */
+  const cloudOnlyModels = computed<DisplayModel[]>(() => [])
+  const syncStatuses = computed<Record<string, string>>(() => ({}))
+  const syncErrors = ref<Record<string, string>>({})
+
+  async function uploadDisplayModel(_id: string) {}
+  async function deleteCloudDisplayModel(_id: string) {}
 
   const loadLive2DModelPreview = (file: File) => generateLive2DPreview(file)
   const loadVrmModelPreview = (file: File) => generateVrmPreview(file)
@@ -268,6 +286,11 @@ export const useDisplayModelsStore = defineStore('display-models', () => {
     loadDisplayModelsFromIndexedDB,
     getDisplayModel,
     ensureDisplayModelAvailable,
+    cloudOnlyModels,
+    syncStatuses,
+    syncErrors,
+    uploadDisplayModel,
+    deleteCloudDisplayModel,
     addDisplayModel,
     renameDisplayModel,
     removeDisplayModel,

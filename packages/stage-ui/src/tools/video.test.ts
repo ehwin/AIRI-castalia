@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   cellsForDepth,
   createVideoTools,
+  defaultVideoBudget,
   timestampOfSeconds,
   VIDEO_OUTLINE_TOOL_NAME,
   VIDEO_PROBE_TOOL_NAME,
@@ -134,21 +135,49 @@ describe('video tools', () => {
     expect(runtime.sheet).not.toHaveBeenCalled()
   })
 
-  it('caps how many sheets one conversation may draw', async () => {
+  it('stops one video from being redrawn and still lets another video draw', async () => {
     const runtime = fakeRuntime()
-    const tools = await createVideoTools(runtime, { budget: { sheets: 2, zooms: 1 } })
+    const tools = await createVideoTools(runtime, {
+      budget: { ...defaultVideoBudget, sheetsPerSource: 2, sheetsPerBurst: 9, sheetsPerHour: 99 },
+    })
     const storyboard = tools[2]!
-    const zoom = tools[3]!
+    const sheet = { source: 'BV1', from_seconds: null, to_seconds: null, cells: 9 }
 
-    await storyboard.execute({ source: 'BV1', from_seconds: null, to_seconds: null, cells: 9 }, call)
-    await storyboard.execute({ source: 'BV1', from_seconds: null, to_seconds: null, cells: 9 }, call)
-    expect(await storyboard.execute({ source: 'BV1', from_seconds: null, to_seconds: null, cells: 9 }, call))
-      .toContain('No sheets left in this conversation')
+    await storyboard.execute(sheet, call)
+    await storyboard.execute(sheet, call)
+    const refused = await storyboard.execute(sheet, call)
+    expect(String(refused)).toContain('used up (2/2)')
+    expect(runtime.sheet).toHaveBeenCalledTimes(2)
 
-    await zoom.execute({ source: 'BV1', from_seconds: 10, to_seconds: 20, cells: 6 }, call)
-    expect(await zoom.execute({ source: 'BV1', from_seconds: 10, to_seconds: 20, cells: 6 }, call))
-      .toContain('No zooms left in this conversation')
+    // A different clip has its own budget, so a busy hour is not a locked door.
+    expect(JSON.stringify(await storyboard.execute({ ...sheet, source: 'BV2' }, call))).toContain('Contact sheet')
     expect(runtime.sheet).toHaveBeenCalledTimes(3)
+  })
+
+  it('stops a burst of sheets drawn back to back', async () => {
+    const runtime = fakeRuntime()
+    const tools = await createVideoTools(runtime, {
+      budget: { ...defaultVideoBudget, sheetsPerBurst: 2, sheetsPerHour: 99, sheetsPerSource: 99 },
+    })
+    const storyboard = tools[2]!
+    const sheet = { source: 'BV1', from_seconds: null, to_seconds: null, cells: 9 }
+
+    await storyboard.execute(sheet, call)
+    await storyboard.execute({ ...sheet, source: 'BV2' }, call)
+    expect(String(await storyboard.execute({ ...sheet, source: 'BV3' }, call))).toContain('back to back')
+    expect(runtime.sheet).toHaveBeenCalledTimes(2)
+  })
+
+  it('caps zooms per video', async () => {
+    const runtime = fakeRuntime()
+    const tools = await createVideoTools(runtime, {
+      budget: { ...defaultVideoBudget, zoomsPerSource: 1, zoomsPerBurst: 9, zoomsPerHour: 99 },
+    })
+    const zoom = tools[3]!
+    await zoom.execute({ source: 'BV1', from_seconds: 10, to_seconds: 20, cells: 6 }, call)
+    expect(String(await zoom.execute({ source: 'BV1', from_seconds: 10, to_seconds: 20, cells: 6 }, call)))
+      .toContain('used up (1/1)')
+    expect(runtime.sheet).toHaveBeenCalledTimes(1)
   })
 
   it('rejects a call with no source', async () => {

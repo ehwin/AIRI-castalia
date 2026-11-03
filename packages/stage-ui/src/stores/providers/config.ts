@@ -69,6 +69,26 @@ export const useProviderConfigStore = defineStore('provider-config', () => {
     Object.entries(providers.value).map(([providerId, provider]) => [providerId, provider.status === 'configured']),
   ))
 
+  // Migrate the Alibaba Cloud TTS configuration from the retired proxy/model
+  // defaults. Credentials remain untouched; only routing and voice fields move.
+  const alibaba = providers.value['alibaba-cloud-model-studio']
+  if (alibaba) {
+    const config = alibaba.config
+    const oldBaseUrl = config.baseUrl === 'https://unspeech.hyp3r.link/v1/'
+    const oldModel = config.model === 'cosyvoice-v1' || config.model === 'cosyvoice-v2'
+    if (oldBaseUrl || oldModel || !config.voice || config.voice === 'alloy') {
+      providers.value['alibaba-cloud-model-studio'] = {
+        ...alibaba,
+        config: {
+          ...config,
+          ...(oldBaseUrl ? { baseUrl: 'https://ws-ntfc49ta9az8bvz7.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer' } : {}),
+          ...(oldModel ? { model: 'cosyvoice-v3.5-plus' } : {}),
+          ...((oldBaseUrl || oldModel || !config.voice || config.voice === 'alloy') ? { voice: 'cosyvoice-v3.5-plus-bailian-48f9e6aa815148158d6f8a8630dc24d4' } : {}),
+        },
+      }
+    }
+  }
+
   function getProvider(providerId: string) {
     return providers.value[providerId]
   }

@@ -2,7 +2,7 @@ import type { ContextMessage } from '../../../types/chat'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { createMemoryRecallContext } from './memory-recall'
+import { createMemoryRecallContext, RECALL_TIMEOUT_MS } from './memory-recall'
 
 afterEach(() => {
   vi.useRealTimers()
@@ -50,7 +50,9 @@ describe('createMemoryRecallContext', () => {
     const provider = createMemoryRecallContext(recall)
 
     const pending = provider({ text: '你好' })
-    await vi.advanceTimersByTimeAsync(400)
+    // The deadline is 800ms; advancing a fixed 400 used to pass only while it was 300,
+    // so this test ended up waiting on the never-resolving recall instead of the timeout.
+    await vi.advanceTimersByTimeAsync(RECALL_TIMEOUT_MS + 100)
 
     expect(await pending).toBeUndefined()
   })

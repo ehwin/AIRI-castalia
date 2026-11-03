@@ -45,6 +45,14 @@ export type SpeechOutput = {
   readonly onPlaybackEnd?: (clip: SpeechClip, end: SpeechClipEnd) => void
   /** BCP 47 code of the voice. The words around a formula or a price select its language first. */
   readonly language?: string
+  /**
+   * How many synthesis requests the pipeline may have in flight at once.
+   *
+   * The pipeline defaults to 4, which is more than some hosted quotas allow: Bailian's `cosyvoice` answers the
+   * fourth request of a burst with `Throttling.RateQuota`, and one rejected segment voids the rest of the reply.
+   * A provider with a lower ceiling declares it here.
+   */
+  readonly ttsMaxConcurrent?: number
 } & ({
   readonly synthesize: SpeechPipelineOptions<Blob>['tts']
 } | {
@@ -122,6 +130,9 @@ export class SpeechStream {
     const pending = new Set<PlaybackItem<Blob>>()
 
     const pipeline = createSpeechPipeline<Blob>({
+      // A provider that answers a burst over its quota rejects one segment, and that rejection voids every later
+      // segment of the same reply. Caps the requested in-flight count; the pipeline floors it at 1.
+      ...(output.ttsMaxConcurrent !== undefined ? { ttsMaxConcurrent: output.ttsMaxConcurrent } : {}),
       tts: async (request, signal) => {
         try {
           const audio = await output.synthesize(request, AbortSignal.any([signal, this.signal, response.signal]))

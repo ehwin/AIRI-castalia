@@ -638,6 +638,8 @@ async function handleSave(activate: boolean) {
       if (missingModel) {
         showError.value = true
         errorMessage.value = t('settings.pages.card.creation.errors.model_required')
+        // The banner renders above the scroll container, so a save from a lower tab looks like a dead button.
+        toast.error(errorMessage.value)
         return
       }
     }
@@ -646,6 +648,7 @@ async function handleSave(activate: boolean) {
     if (!draftResult.success) {
       showError.value = true
       errorMessage.value = t(`settings.pages.card.creation.errors.${draftResult.error}`)
+      toast.error(errorMessage.value)
       return
     }
 

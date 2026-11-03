@@ -16,7 +16,8 @@ const MEMORY_RECALL_CONTEXT_ID = 'recalled'
  * "I looked through my notebook and found nothing" while the bank held the answer.
  * The bank now warms itself when opened, so 800 is a safety margin, not the norm.
  */
-const RECALL_TIMEOUT_MS = 800
+/** How long the turn waits for a recall before going on without it. Exported for the test. */
+export const RECALL_TIMEOUT_MS = 800
 
 /**
  * Resolves with an empty block when the recall is slower than the deadline.

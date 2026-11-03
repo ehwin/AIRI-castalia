@@ -36,8 +36,19 @@ export const useDiaryStore = defineStore('diary', () => {
   const loadedAt = ref<number>()
   /** Off by default. Turning it on is a deliberate act, not a setting to explore. */
   const reveal = useLocalStorageManualReset<boolean>('diary/reveal', false)
+  /**
+   * Days already turned into a memory.
+   *
+   * Persisted: a day that is already remembered must not be offered again after a
+   * restart, or the button says "记住这一天" for something the index already holds.
+   */
+  const distilledDays = useLocalStorageManualReset<string[]>('diary/distilled', [])
   /** The last day that became a memory, so the page can confirm it. */
-  const lastDistilled = ref<string>()
+  const lastDistilled = computed(() => distilledDays.value.at(-1))
+
+  function hasDistilled(date: string) {
+    return distilledDays.value.includes(date)
+  }
 
   const memory = useMemoryStore()
 
@@ -100,13 +111,14 @@ export const useDiaryStore = defineStore('diary', () => {
       return undefined
 
     memory.makeGeneral({ name: stored.name, persona: DISTILL_PERSONA })
-    lastDistilled.value = date
+    if (!hasDistilled(date))
+      distilledDays.value = [...distilledDays.value, date]
     return entry
   }
 
   function resetState() {
     reveal.reset()
-    lastDistilled.value = undefined
+    distilledDays.reset()
   }
 
   return {
@@ -115,6 +127,7 @@ export const useDiaryStore = defineStore('diary', () => {
     loadedAt,
     reveal,
     lastDistilled,
+    hasDistilled,
     byDay,
     shared,
     saidOutLoud,

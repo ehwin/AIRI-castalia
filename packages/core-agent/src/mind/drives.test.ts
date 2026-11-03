@@ -11,8 +11,11 @@ import {
   gatesFrom,
   isQuietHour,
   quietEnvironment,
+  canNap,
+  defaultNapPolicy,
   relieveAfterSpeech,
   restDrives,
+  sleepDrives,
 } from './drives'
 import { defaultProvocationPolicy, mayProvoke, planExpression } from './expression'
 
@@ -20,15 +23,41 @@ const idle = (): Drives => ({ fatigue: 0, boredom: 0, curiosity: 0, focus: 0 })
 const after = (minutes: number) => minutes * 60_000
 
 describe('advanceDrives', () => {
-  it('grows boredom while the user is silent', () => {
-    const next = advanceDrives(idle(), after(20), { ...quietEnvironment, idleMs: after(20) })
-    expect(next.boredom).toBeCloseTo(30, 5)
+  it('grows boredom while nothing holds her attention', () => {
+    let next = idle()
+    for (let i = 0; i < 20; i++)
+      next = advanceDrives(next, after(1), { ...quietEnvironment, idleMs: after(20) })
+    expect(next.boredom).toBeCloseTo(100 * (1 - 0.978 ** 20), 5)
   })
 
-  it('relieves boredom when the user is active', () => {
+  it('keeps growing while the owner works in another window', () => {
+    // idleMs 5s means the owner is at the keyboard, but not with her.
     const start = { ...idle(), boredom: 60 }
     const next = advanceDrives(start, after(1), { ...quietEnvironment, idleMs: 5_000 })
-    expect(next.boredom).toBeCloseTo(58.5, 5)
+    expect(next.boredom).toBeGreaterThan(60)
+  })
+
+  it('saturates instead of hitting 100 in one straight ramp', () => {
+    let twenty = idle()
+    for (let i = 0; i < 20; i++)
+      twenty = advanceDrives(twenty, after(1), quietEnvironment)
+    let sixty = idle()
+    for (let i = 0; i < 60; i++)
+      sixty = advanceDrives(sixty, after(1), quietEnvironment)
+    expect(twenty.boredom).toBeLessThan(40)
+    expect(sixty.boredom).toBeGreaterThan(70)
+    expect(sixty.boredom).toBeLessThan(80)
+  })
+
+  it('lets something new pay boredom down', () => {
+    const seen = advanceDrives({ ...idle(), boredom: 50 }, after(1), { ...quietEnvironment, novelty: true })
+    expect(seen.boredom).toBeCloseTo(50 + 1.1 - 25, 5)
+  })
+
+  it('starts looking for alternatives when boredom crosses the line', () => {
+    const next = advanceDrives({ ...idle(), boredom: 59.5 }, after(1), quietEnvironment)
+    expect(next.boredom).toBeGreaterThanOrEqual(60)
+    expect(next.curiosity).toBeGreaterThanOrEqual(60)
   })
 
   it('spikes curiosity on novelty and halves it after one half-life', () => {
@@ -65,6 +94,26 @@ describe('restDrives', () => {
   it('never goes below zero', () => {
     const next = restDrives({ ...idle(), fatigue: 5 }, 100 * 3_600_000)
     expect(next.fatigue).toBe(0)
+  })
+})
+
+describe('sleepDrives', () => {
+  it('recovers at the same rate as a night away', () => {
+    const next = sleepDrives({ ...idle(), fatigue: 100 }, 2 * 3_600_000)
+    expect(next.fatigue).toBeCloseTo(75, 5)
+  })
+
+  it('scales the recovery by sleep quality', () => {
+    const good = sleepDrives({ ...idle(), fatigue: 80 }, 2 * 3_600_000, 1)
+    const bad = sleepDrives({ ...idle(), fatigue: 80 }, 2 * 3_600_000, 0.5)
+    expect(good.fatigue).toBeCloseTo(55, 5)
+    expect(bad.fatigue).toBeCloseTo(67.5, 5)
+  })
+
+  it('leaves the other drives alone and ignores a negative interval', () => {
+    const start = { fatigue: 40, boredom: 30, curiosity: 20, focus: 10 }
+    expect(sleepDrives(start, -1_000)).toEqual(start)
+    expect(sleepDrives(start, 0)).toEqual(start)
   })
 })
 
@@ -118,8 +167,34 @@ describe('decide', () => {
     expect(decide({ ...idle(), boredom: 61 })).toBe('provoke')
   })
 
-  it('wants nothing when fatigue passes the sleep threshold, even when bored', () => {
-    expect(decide({ ...idle(), boredom: 90, fatigue: 85 })).toBe('idle')
+  it('goes to sleep when fatigue passes the sleep threshold and the room is quiet', () => {
+    expect(decide({ ...idle(), boredom: 90, fatigue: 85 }, defaultActionThresholds, {
+      idleMs: 11 * 60_000,
+    })).toBe('sleep')
+  })
+
+  it('does not doze off in the middle of a conversation', () => {
+    expect(decide({ ...idle(), boredom: 90, fatigue: 85 }, defaultActionThresholds, {
+      idleMs: 2 * 60_000,
+    })).not.toBe('sleep')
+  })
+
+  it('naps when a long quiet stretch meets a mildly tired, bored companion', () => {
+    expect(decide({ ...idle(), boredom: 80, fatigue: 40 }, defaultActionThresholds, {
+      idleMs: 60 * 60_000,
+    })).toBe('nap')
+  })
+
+  it('sleeps rather than naps once the night threshold is crossed', () => {
+    expect(decide({ ...idle(), boredom: 80, fatigue: 85 }, defaultActionThresholds, {
+      idleMs: 60 * 60_000,
+    })).toBe('sleep')
+  })
+
+  it('talks instead of napping when the owner is around', () => {
+    expect(decide({ ...idle(), boredom: 80, fatigue: 40 }, defaultActionThresholds, {
+      idleMs: 2 * 60_000,
+    })).toBe('provoke')
   })
 
   it('still wants to speak while the gates block it', () => {
@@ -135,12 +210,29 @@ describe('decide', () => {
   })
 
   it('prefers speaking over thinking when both cross their thresholds', () => {
-    expect(decide({ ...idle(), boredom: 70, curiosity: 70 })).toBe('provoke')
+    expect(decide({ ...idle(), boredom: 70, curiosity: 70 })).toBe('think')
+    expect(decide({ ...idle(), boredom: 70, curiosity: 10 })).toBe('provoke')
   })
 
   it('uses the configured thresholds', () => {
     const strict = { ...defaultActionThresholds, provoke: 95 }
     expect(decide({ ...idle(), boredom: 61 }, strict)).toBe('idle')
+  })
+})
+
+describe('canNap', () => {
+  const bored = { ...idle(), boredom: 80, fatigue: 40 }
+
+  it('needs boredom, fatigue, a long quiet stretch and a spent cooldown', () => {
+    expect(canNap(bored, { idleMs: defaultNapPolicy.idleMs })).toBe(true)
+    expect(canNap({ ...bored, boredom: 60 }, { idleMs: 60 * 60_000 })).toBe(false)
+    expect(canNap({ ...bored, fatigue: 20 }, { idleMs: 60 * 60_000 })).toBe(false)
+    expect(canNap(bored, { idleMs: 30 * 60_000 })).toBe(false)
+    expect(canNap(bored, { idleMs: 60 * 60_000, sinceNapMs: 30 * 60_000 })).toBe(false)
+  })
+
+  it('never naps once a night is due', () => {
+    expect(canNap({ ...bored, fatigue: 80 }, { idleMs: 60 * 60_000 })).toBe(false)
   })
 })
 

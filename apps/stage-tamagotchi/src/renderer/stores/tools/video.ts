@@ -7,7 +7,7 @@ import { useLlmToolsStore } from '@proj-airi/stage-ui/stores/ai/chat-llm/tools'
 import { useVideoStore } from '@proj-airi/stage-ui/stores/modules/video'
 import { useVideoWatchStore } from '@proj-airi/stage-ui/stores/modules/video-watch'
 import { TOOL_ICONS } from '@proj-airi/stage-ui/tools/icons'
-import { createVideoTools } from '@proj-airi/stage-ui/tools/video'
+import { createVideoTools, defaultVideoBudget } from '@proj-airi/stage-ui/tools/video'
 import { defineStore } from 'pinia'
 import { watch } from 'vue'
 
@@ -95,7 +95,16 @@ export const useTamagotchiVideoToolsStore = defineStore('tamagotchi-video-tools'
       return
     }
 
-    const tools = await createVideoTools(runtime, { depth: () => videoStore.depth })
+    const tools = await createVideoTools(runtime, {
+      depth: () => videoStore.depth,
+      // Counted per video and per rolling hour: the budget survives a turn and a session on
+      // purpose, so only the numbers the owner set decide when it trips.
+      budget: {
+        ...defaultVideoBudget,
+        sheetsPerSource: videoStore.sheetsPerSource,
+        sheetsPerHour: videoStore.sheetsPerHour,
+      },
+    })
 
     llmToolsStore.removeToolsByIds(...registeredToolIds())
     llmToolsStore.addTools(...tools.map(tool => ({
@@ -111,8 +120,12 @@ export const useTamagotchiVideoToolsStore = defineStore('tamagotchi-video-tools'
   // A renderer that is not the leader has no executors, so it leaves the registry to the leader.
   const syncedPinia = usePiniaSynced()
   watch(
-    () => [videoStore.enabled, videoStore.depth, videoStore.attachImages, videoStore.bilibiliCookie] as const,
+    () => [videoStore.enabled, videoStore.depth, videoStore.attachImages, videoStore.bilibiliCookie, videoStore.sheetsPerSource, videoStore.sheetsPerHour] as const,
     () => {
+      // The decoder probe stays local: every window asks its own engine and records the answer, so
+      // the settings page shows what this machine can decode instead of the leader's copy. Only the
+      // leader mounts executors, because the others have none.
+      void refreshCapabilities().catch(error => console.warn('[video] Could not read the decoder capabilities:', error))
       if (!syncedPinia.isLeader())
         return
       void refresh().catch(error => console.warn('[video] Failed to refresh the video tools:', error))
@@ -127,7 +140,7 @@ export const useTamagotchiVideoToolsStore = defineStore('tamagotchi-video-tools'
   }
 }, {
   synced: {
-    actions: ['dispose', 'refresh', 'refreshCapabilities'],
+    actions: ['dispose', 'refresh'],
     state: false,
   },
 })

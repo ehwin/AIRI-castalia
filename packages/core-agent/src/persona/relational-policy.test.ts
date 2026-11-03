@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { createRelationalPolicy, renderRelationalPolicyContext, reviewMeaningHypotheses, updateRelationship } from './relational-policy'
+import { closingFromRun, createRelationalPolicy, inferRelationalSignals, nextClosingRun, renderRelationalPolicyContext, reviewMeaningHypotheses, updateRelationship } from './relational-policy'
 
 describe('relational policy', () => {
   it('keeps an interpretation as a hypothesis with evidence', () => {
@@ -221,5 +221,90 @@ describe('relational policy', () => {
     // The depth line belongs to calm turns only: printing it here would report a
     // stage that the elevated tier refuses to move.
     expect(elevated).not.toContain('Depth:')
+  })
+
+  // A farewell is leaving, not a correction. BOUNDARY_PATTERN matches "不想聊了",
+  // so without the downgrade she would announce what she will change while the
+  // user is already walking out.
+  it('does not count a farewell as a boundary or a repair request', () => {
+    const state = updateRelationship(undefined, {
+      now: 100,
+      eventId: 'turn-bye',
+      closing: 'pre-closing',
+      boundary: 'stop',
+    })
+
+    expect(state.boundarySignals).toBe(0)
+    expect(state.evidence ?? []).toEqual([])
+
+    const policy = createRelationalPolicy({ now: 100, closing: 'pre-closing', boundary: 'stop' })
+    expect(policy.stability.repairNeeded).toBe(false)
+    expect(renderRelationalPolicyContext(policy)).not.toContain('Say what you will change')
+  })
+
+  it('reads a farewell from one message, and refuses to read it from a question', () => {
+    for (const text of [
+      '我得准备学习了',
+      '我去洗澡了，先不聊啦',
+      '算了不想了，我睡了',
+      '不聊了，我得去写了',
+      '我先躺着试试能不能睡着',
+      '晚安',
+      // No verb at all, but a departure mark and short: found in the owner's real turns.
+      '今天先这样,明天继续',
+      '那我先撤了',
+      '就到这儿吧',
+    ])
+      expect(inferRelationalSignals(text).closing, text).toBe('pre-closing')
+
+    for (const text of [
+      '我去做饭了，你想吃什么？',
+      '我在学习函数渐近线',
+      '睡不着的晚上总是很多',
+      '我觉得这个方案还得再想想',
+      // Marks that open ordinary sentences, not departures.
+      '好了，你别生气',
+      '算了，别提了',
+      '好的，明天继续吗？',
+      // Long enough that it is talking about the evening, not ending it.
+      '我今天先这样写一版，明天再继续把剩下那部分内容仔细处理一遍',
+    ])
+      expect(inferRelationalSignals(text).closing, text).toBe('open')
+  })
+
+  it('counts farewells in a row and resets on any other turn', () => {
+    // Two in a row is a departure; the count is what turns pre-closing into closed.
+    let run = nextClosingRun(0, 'pre-closing')
+    expect(run).toBe(1)
+    expect(closingFromRun(run, 'pre-closing')).toBe('pre-closing')
+
+    run = nextClosingRun(run, 'pre-closing')
+    expect(run).toBe(2)
+    expect(closingFromRun(run, 'pre-closing')).toBe('closed')
+
+    // A third farewell stays closed, it does not wrap or overflow.
+    run = nextClosingRun(run, 'pre-closing')
+    expect(closingFromRun(run, 'pre-closing')).toBe('closed')
+
+    // Any other turn clears the run, so a farewell tomorrow starts from one.
+    expect(nextClosingRun(run, 'open')).toBe(0)
+    expect(nextClosingRun(0, 'open')).toBe(0)
+    // A negative cache value cannot happen, but the counter never goes below zero.
+    expect(nextClosingRun(-5, 'pre-closing')).toBe(1)
+  })
+
+  it('answers a goodbye instead of asking one more question', () => {
+    const rendered = renderRelationalPolicyContext(createRelationalPolicy({
+      now: 100,
+      safety: 'elevated',
+      closing: 'pre-closing',
+    }))
+
+    expect(rendered).toContain('ending the conversation')
+    // The elevated branch would otherwise hand her "ask at most one short question".
+    expect(rendered).not.toContain('Ask at most one short question')
+    expect(rendered).not.toContain('having a hard time')
+    // The red line survives every branch.
+    expect(rendered).toContain('Never use your own feelings')
   })
 })

@@ -8,6 +8,24 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
+interface SelfCycleOptions {
+  project?: string
+  characterId?: string
+  limit?: number
+  hoursBack?: number
+  minIntervalHours?: number
+  now?: Date
+}
+
+type SelfCycleResult = {
+  ok: boolean
+  skipped: boolean
+  reason?: string
+  diaryId?: string
+  evidenceIds: string[]
+  project: string
+}
+
 export interface OpenBankOptions {
   /** memory-banks 下的实例目录，例如 .../memory-banks/airi */
   bankDir: string
@@ -58,7 +76,29 @@ export interface BankHandle {
    * MEMORY_AUTO_PROCESS=1 时改走引擎的完整 autoProcess(含 VAD 队列与会话缓冲,那两步要 LLM)。
    */
   ingestTurn: (turn: IngestTurn) => Promise<IngestResult>
+  /** 读取 conversation_log + psyche/AgentState，生成隔离的 agent_diary。 */
+  selfCycle: (options?: SelfCycleOptions) => Promise<SelfCycleResult>
+  /**
+   * 当前 psyche 状态（情绪坐标 + 慢层心境 + band）。
+   *
+   * 引擎是这份状态的唯一真源；UI 侧只读它来展示/镜像自己的 self-state，
+   * 不自己累积情绪，避免两套状态各说各话。
+   */
+  psycheState: (options?: { characterId?: string, project?: string }) => Promise<PsycheSnapshot>
+  /** Mirrors the mind's energy into the engine so its own prompts stop inventing one. */
+  setSelfEnergy: (value: number) => Promise<void>
   close: () => void
+}
+
+export interface PsycheSnapshot {
+  characterId: string
+  project: string
+  hasEvidence: boolean
+  band: string
+  vad: { valence: number, arousal: number, dominance: number }
+  mood: { valence: number, arousal: number, dominance: number }
+  version: number
+  updatedAt: number
 }
 
 export interface MaintainOptions {
@@ -116,8 +156,17 @@ export function currentBank(): BankHandle | null {
 
 /**
  * 在主进程内打开一个记忆体库。
- * 注意：引擎的 DatabaseManager 是进程级单例，一次只能绑定一个 bank/project；
- * 换库需要重开进程（或先 close 再换 env，引擎内部的实例缓存不会释放）。
+ *
+ * 一个进程只绑一个 bank —— 这不是懒，是被引擎的两处一次性初始化决定的：
+ *   1) `configLoader` 在 import 时解析 MEMORY_CONFIG 并把 embedding/LLM 参数注入 process.env，
+ *      模块缓存之后不会再读第二份 config；
+ *   2) `db.ts` 的 `alignEmbedSpace` 每次开库都拿「库内空间指纹」和「当前 env 的 model|dim」比，
+ *      不一致就**清空 vec 表与嵌入缓存**。于是"换个 bank 继续用同一个进程"= 用 A 的配置去开 B 的库，
+ *      指纹必然对不上 → 把 B 的向量全清掉（EMBED_MODE=none 时改为跳过对齐，索引同样不可用）。
+ * 所以跨 bank 直接拒绝，而不是照旧例默默返回一个看起来正常的句柄。
+ * 换 bank 的正确做法：一个 bank 一个引擎进程（桥/子进程），或重启宿主。
+ * 同一 bank 内换角色、换 project 不受影响：连接缓存自 v1.32 按库文件的**绝对路径**做键
+ * （engine `src/db.ts` 的 getInstance/getGlobal），同一 bank 的不同 project/分类各拿各的连接。
  */
 export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
   const bankDir = options.bankDir.replace(/\\/g, '/')
@@ -126,6 +175,16 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
   const configPath = options.configPath ?? join(bankDir, 'config.json')
 
   if (!existsSync(bankDir)) throw new Error(`[castalia-bank] bank dir 不存在: ${bankDir}`)
+
+  // 跨 bank 热切换会让 alignEmbedSpace 拿旧配置比对新库 → 清空向量索引，必须显式拒绝。
+  if (current && (current.bankDir !== bankDir || current.project !== project)) {
+    throw new Error(
+      `[castalia-bank] 同一进程不能热切换 bank（当前 ${current.bankDir}#${current.project}，`
+      + `请求 ${bankDir}#${project}）：引擎的 config.json 只在首次 import 时生效，`
+      + `换库后开库对齐会用旧配置的嵌入空间指纹比对新库，导致新库向量索引被清空。`
+      + `请为每个 bank 起独立进程，或重启宿主后再打开。`,
+    )
+  }
 
   if (existsSync(configPath)) {
     process.env.MEMORY_CONFIG = configPath
@@ -236,6 +295,13 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
             project,
             sessionId: turn.sessionId,
           })
+          // Flush what the batch already has, not only what the next maintenance
+          // finds. With a 15-entry threshold a normal conversation never reached
+          // a flush, so psyche sat at the same value for days while the panel
+          // kept re-reading it. force=false still respects the min batch and age.
+          void import('../vendor/engine/emotion')
+            .then(mod => mod.flushVadQueue(project, { force: false }))
+            .catch(() => {})
           return { ok: Boolean(result?.conversationSaved), mode: 'auto', details: result?.details ?? [] }
         }
         // 最小路径:conversation_log + 用户观察。两者都是本地计算,离线/无 key 也能跑。
@@ -266,6 +332,14 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
       catch (e: any) {
         return { ok: false, mode: fullAuto ? 'auto' : 'minimal', error: e?.message ?? String(e) }
       }
+    },
+    selfCycle: async (options = {}) => {
+      const selfCycle = await import('../vendor/engine/selfCycle')
+      return selfCycle.runSelfCycle({
+        ...options,
+        project,
+        characterId: options.characterId ?? charId,
+      })
     },
     maintain: async (options = {}) => {
       const startedAt = new Date().toISOString()
@@ -363,7 +437,23 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
         }
 
         report.after = snapshot()
-        report.ok = (report.reflect?.ok ?? false) || !report.reflectConfigured
+        // One boolean for the whole cycle: the reflect stage alone used to
+        // decide `ok`, so a failed consolidation or digest still reported a
+        // healthy maintenance and the sleep quality stayed high.
+        const stages: boolean[] = []
+        if (report.reflectConfigured)
+          stages.push(Boolean((report.reflect as any)?.ok))
+        if (report.consolidate)
+          stages.push(Boolean((report.consolidate as any)?.ok))
+        if (report.eventDigest) {
+          // A digest with no triage model says why it did nothing; that is not
+          // the same as a digest that ran and failed.
+          const digestStage = report.eventDigest as any
+          stages.push(Boolean(digestStage?.ok) || Boolean(digestStage?.skippedReason))
+        }
+        if (report.digest)
+          stages.push(Boolean((report.digest as any)?.success))
+        report.ok = stages.length > 0 && stages.every(Boolean)
       }
       catch (e: any) {
         report.ok = false
@@ -371,6 +461,32 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
       }
       report.ms = Date.now() - t0
       return report
+    },
+    setSelfEnergy: async (value) => {
+      const { getAgentState } = await import('../vendor/engine/agentState')
+      getAgentState(charId, project).setEnergy(value)
+    },
+    psycheState: async (options = {}) => {
+      const { getPsycheState } = await import('../vendor/engine/psycheState')
+      const state = getPsycheState(options.characterId ?? charId, options.project ?? project) as any
+      return {
+        characterId: options.characterId ?? charId,
+        project: options.project ?? project,
+        hasEvidence: Boolean(state?.hasEvidence),
+        band: String(state?.band ?? 'unknown'),
+        vad: {
+          valence: Number(state?.vad?.valence ?? 0),
+          arousal: Number(state?.vad?.arousal ?? 0),
+          dominance: Number(state?.vad?.dominance ?? 0),
+        },
+        mood: {
+          valence: Number(state?.mood?.valence ?? 0),
+          arousal: Number(state?.mood?.arousal ?? 0),
+          dominance: Number(state?.mood?.dominance ?? 0),
+        },
+        version: Number(state?.version ?? 0),
+        updatedAt: Number(state?.updatedAt ?? Date.now()),
+      } satisfies PsycheSnapshot
     },
     close: () => { current = null },
   }

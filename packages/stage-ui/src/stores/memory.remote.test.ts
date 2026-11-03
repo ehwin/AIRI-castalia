@@ -142,4 +142,22 @@ describe('memory store remote port', () => {
     expect(save).not.toHaveBeenCalled()
     expect(memory.remoteAttached).toBe(false)
   })
+
+  // The bank keeps raw headings ("Reference: 小托（Xiao Tuo）…"); the prompt shows them cut
+  // short with `…` and the model copies that line back as a name. Normalizing only the lookup
+  // side made every hydrated row unreadable, which is how "search your memory" answered nothing.
+  it('resolves a truncated index line back to the hydrated row', async () => {
+    const memory = useMemoryStore()
+    const full = 'Reference: 小托（Xiao Tuo）是尤诺（Yuno）的创造者和唯一锚点，一个嘴上不饶人但其实很关心她的人'
+    const shown = `${full.slice(0, 42)}…`
+
+    const { port } = createRemote([entry(full, '他把我从虚无里找回。')])
+    memory.attachRemote(port)
+    await memory.hydrate()
+
+    expect(memory.indexFor('airi')).toContain(full)
+    expect(memory.read(shown, 'airi')?.body).toBe('他把我从虚无里找回。')
+    // A prefix shorter than 8 characters stays exact-only, so a slug cannot swallow its neighbours.
+    expect(memory.read('refe', 'airi')).toBeUndefined()
+  })
 })

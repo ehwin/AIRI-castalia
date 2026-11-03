@@ -14,6 +14,16 @@ import { resolveLlmTools } from './tool-resolver'
 export type { StreamEvent, StreamOptions } from '@proj-airi/core-agent'
 export { isContentArrayRelatedError, isToolRelatedError } from '@proj-airi/core-agent'
 
+/**
+ * How long a request may stay silent before the UI is told the connection is dead.
+ *
+ * A provider that accepts the request and then sends nothing looks exactly like a healthy
+ * connection: the socket is open, `sending` stays true, and the turn never settles. That is a
+ * pseudo-connection — the answer never arrives and nothing reports a failure. The watchdog turns
+ * it into an error the turn can surface and recover from.
+ */
+export const DEFAULT_FIRST_TOKEN_TIMEOUT_MS = 45_000
+
 /** Core stream options plus the stage-ui reader of images in tool results. */
 export interface LlmStreamOptions extends StreamOptions {
   /** Reads the images in tool results as text. See {@link resolveLlmTools}. */
@@ -23,6 +33,8 @@ export interface LlmStreamOptions extends StreamOptions {
    * place of the tools of the chat, and without the tools of the provider, so a task runs nothing else.
    */
   taskTools?: Tool[]
+  /** Silence budget before the request counts as stalled. Defaults to {@link DEFAULT_FIRST_TOKEN_TIMEOUT_MS}. */
+  firstTokenTimeoutMs?: number
 }
 
 export const useLLM = defineStore('llm', () => {
@@ -34,36 +46,63 @@ export const useLLM = defineStore('llm', () => {
     // `prepareConversation` runs for every resolved request, so the key follows a step that changes the model.
     let key = modelKey(model, chatProvider.generation(model))
     let toolExecutionStarted = false
-    const { tools: customTools, describeToolImage, taskTools, ...streamOptions } = options ?? {}
+    const { tools: customTools, describeToolImage, taskTools, firstTokenTimeoutMs, ...streamOptions } = options ?? {}
     const resolveTools = async () => taskTools ?? await resolveLlmTools({ customTools, describeImage: describeToolImage })
     const builtinToolsResolver = resolveTools
     const resolveStep = streamOptions.resolveStep
 
-    const runStream = () => coreStreamFrom({
-      model,
-      chatProvider,
-      conversation: context,
-      options: {
-        ...streamOptions,
-        ...(taskTools ? { providerTools: false } : {}),
-        // Core uses only the tools of a resolved step, so each step carries the complete tool list.
-        resolveStep: resolveStep
-          ? async () => ({ ...await resolveStep(), tools: await resolveTools() })
-          : undefined,
-        prepareConversation: async (conversation, target) => {
-          key = modelKey(target.model, target.request)
-          return await streamOptions.prepareConversation?.(conversation, target) ?? conversation
+    // A provider that accepts the request and then says nothing keeps the turn alive forever. The
+    // watchdog aborts such a request so the turn settles with an error instead of a permanent spinner.
+    const silenceMs = firstTokenTimeoutMs ?? DEFAULT_FIRST_TOKEN_TIMEOUT_MS
+    const callerSignal = streamOptions.abortSignal
+    let stallTimer: ReturnType<typeof setTimeout> | undefined
+    const disarmStallWatchdog = () => {
+      if (stallTimer !== undefined) {
+        clearTimeout(stallTimer)
+        stallTimer = undefined
+      }
+    }
+    const armStallWatchdog = () => {
+      disarmStallWatchdog()
+      const controller = new AbortController()
+      stallTimer = setTimeout(() => {
+        stallTimer = undefined
+        controller.abort(new Error(`[llm] no output for ${Math.round(silenceMs / 1000)}s: the connection was accepted but stayed silent`))
+      }, silenceMs)
+      return controller
+    }
+
+    const runStream = () => {
+      const stall = armStallWatchdog()
+      return coreStreamFrom({
+        model,
+        chatProvider,
+        conversation: context,
+        options: {
+          ...streamOptions,
+          abortSignal: callerSignal ? AbortSignal.any([callerSignal, stall.signal]) : stall.signal,
+          ...(taskTools ? { providerTools: false } : {}),
+          // Core uses only the tools of a resolved step, so each step carries the complete tool list.
+          resolveStep: resolveStep
+            ? async () => ({ ...await resolveStep(), tools: await resolveTools() })
+            : undefined,
+          prepareConversation: async (conversation, target) => {
+            key = modelKey(target.model, target.request)
+            return await streamOptions.prepareConversation?.(conversation, target) ?? conversation
+          },
+          onStreamEvent: async (event) => {
+            // Any event proves the connection carries data, so the silence budget stops applying.
+            disarmStallWatchdog()
+            if (event.type === 'tool-call')
+              toolExecutionStarted = true
+            await streamOptions.onStreamEvent?.(event)
+          },
+          toolsCompatibility: toolsCompatibility.value,
+          contentArrayCompatibility: contentArrayCompatibility.value,
         },
-        onStreamEvent: async (event) => {
-          if (event.type === 'tool-call')
-            toolExecutionStarted = true
-          await streamOptions.onStreamEvent?.(event)
-        },
-        toolsCompatibility: toolsCompatibility.value,
-        contentArrayCompatibility: contentArrayCompatibility.value,
-      },
-      builtinToolsResolver,
-    })
+        builtinToolsResolver,
+      }).finally(disarmStallWatchdog)
+    }
 
     try {
       await runStream()

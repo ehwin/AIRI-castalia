@@ -6,7 +6,6 @@ import { toJsonSchema } from 'xsschema'
 
 export const CASTALIA_RECORD_EMOTION_TOOL_NAME = 'builtIn_castaliaRecordEmotion'
 export const CASTALIA_SET_DESIRE_TOOL_NAME = 'builtIn_castaliaSetDesire'
-export const CASTALIA_ADJUST_ENERGY_TOOL_NAME = 'builtIn_castaliaAdjustEnergy'
 
 const emotionParameters = strictObject({
   valence: pipe(number(), minValue(-1), maxValue(1), description('Your own emotional valence, from -1 to 1.')),
@@ -17,15 +16,11 @@ const emotionParameters = strictObject({
 const desireParameters = strictObject({
   desire: pipe(string(), maxLength(300), description('A current desire or an empty string to clear it.')),
 })
-const energyParameters = strictObject({
-  change: pipe(number(), minValue(-20), maxValue(20), description('Your own energy change, from -20 to 20.')),
-})
 
 /** Creates tools that update the current character's transient self-state. */
 export async function createCastaliaStateTools(options: {
   recordEmotion: (vad: { valence: number, arousal: number, dominance: number }, reason: string) => void
   setDesire: (desire: string) => void
-  adjustEnergy: (change: number) => void
 }): Promise<Tool[]> {
   return [
     rawTool({
@@ -51,18 +46,6 @@ export async function createCastaliaStateTools(options: {
           return 'Desire not changed. Use a short statement or an empty string to clear it.'
         options.setDesire(parsed.output.desire)
         return parsed.output.desire.trim() ? 'Your desire was updated for the next turn.' : 'Your desire was cleared.'
-      },
-    }),
-    rawTool({
-      name: CASTALIA_ADJUST_ENERGY_TOOL_NAME,
-      description: 'Adjust your own energy after a meaningful effort or rest. Use a change from -20 to 20 and avoid routine updates.',
-      parameters: await toJsonSchema(energyParameters),
-      execute: async (rawInput) => {
-        const parsed = safeParse(energyParameters, rawInput)
-        if (!parsed.success)
-          return 'Energy not changed. Give a change from -20 to 20.'
-        options.adjustEnergy(parsed.output.change)
-        return 'Your energy was updated for the next turn.'
       },
     }),
   ]

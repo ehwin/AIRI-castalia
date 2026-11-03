@@ -8,7 +8,8 @@ import { defineInvokeHandler } from '@moeru/eventa'
 import { createCastaliaMemoryRepository } from '@proj-airi/castalia-plugin/memory'
 import { app } from 'electron'
 
-import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemorySave, castaliaMemorySelfCycle, castaliaOpenConsole, castaliaTuningGet, castaliaTuningSave } from '../../../shared/eventa/castalia-memory'
+import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySelfCycle, castaliaMemorySetEnergy, castaliaOpenConsole, castaliaTuningGet, castaliaTuningSave } from '../../../shared/eventa/castalia-memory'
+import type { CastaliaMaintainReport } from '../../../shared/eventa/castalia-memory'
 import { openCastaliaConsole } from './castalia-console'
 import type { CastaliaEngineMemory } from './castalia-engine'
 
@@ -61,6 +62,119 @@ function writeMaintenanceLog(report: Awaited<ReturnType<NonNullable<ReturnType<t
 /** setupCastaliaMemoryService 每个窗口注册一次；维护只能有一个调度器，否则会并发整理同一个库 */
 let maintenanceScheduled = false
 
+/**
+ * 维护的落账与串行化。
+ *
+ * 两个入口共用这一份：04:00–06:00 的夜班，和 mind 睡下时的那一次。没有共享落账时，
+ * 她 23:00 睡下跑过一次，04:00 的定时器还会再跑一遍 —— 同一晚整理两次、烧两次 token。
+ */
+const maintenanceStateFile = () => join(app.getPath('userData'), 'castalia-maintenance.json')
+
+/** Twice a night is already too often; a failed run retries much sooner. */
+const MIN_GAP_MS = 20 * 3_600_000
+const RETRY_GAP_MS = 30 * 60_000
+
+/**
+ * The ledger answers two different questions: when did we last try, and when
+ * did it last work. Recording only the attempt (and doing it even on failure)
+ * used to suppress the nightly retry for a full day, and the sleep path had no
+ * cooldown at all, so 04:00 → morning sleep ran the whole cycle again.
+ */
+interface MaintenanceLedger {
+  lastAttemptAt?: number
+  lastSuccessAt?: number
+  lastOk?: boolean
+  lastReason?: string
+  /** Full report of the last finished run, reused when a request is skipped. */
+  lastReport?: CastaliaMaintainReport
+  /** Old shape, kept so an existing file is not read as "never ran". */
+  lastRunAt?: number
+}
+
+function readMaintenanceLedger(): MaintenanceLedger {
+  try {
+    const parsed = JSON.parse(readFileSync(maintenanceStateFile(), 'utf8'))
+    const legacy = Number(parsed?.lastRunAt) || 0
+    return {
+      ...parsed,
+      lastAttemptAt: Number(parsed?.lastAttemptAt) || legacy || undefined,
+      lastSuccessAt: Number(parsed?.lastSuccessAt) || legacy || undefined,
+    }
+  }
+  catch {
+    return {}
+  }
+}
+
+function writeMaintenanceLedger(ledger: MaintenanceLedger): void {
+  try {
+    writeFileSync(maintenanceStateFile(), JSON.stringify(ledger), 'utf8')
+  }
+  catch { /* 状态写不进去不影响本次维护 */ }
+}
+
+let maintenanceInFlight: Promise<CastaliaMaintainReport> | undefined
+/** @internal exported for the sleep path; both callers go through the same queue. */
+export async function runMaintenance(
+  engine: CastaliaEngineMemory,
+  reason: string,
+  limit = 30,
+  options: { force?: boolean } = {},
+): Promise<CastaliaMaintainReport> {
+  if (maintenanceInFlight)
+    return maintenanceInFlight
+
+  const now = Date.now()
+  const ledger = readMaintenanceLedger()
+  const gap = ledger.lastOk === false ? RETRY_GAP_MS : MIN_GAP_MS
+  if (!options.force && ledger.lastAttemptAt && now - ledger.lastAttemptAt < gap) {
+    const minutes = Math.round((gap / 60_000))
+    console.info(`[castalia] maintenance skipped (${reason}): last ${ledger.lastOk === false ? 'failed' : 'succeeded'} ${Math.round((now - ledger.lastAttemptAt) / 60_000)} min ago, gap ${minutes} min`)
+    return {
+      ...(ledger.lastReport ?? {}),
+      ok: Boolean(ledger.lastOk),
+      skipped: true,
+      skippedReason: `cooldown:${minutes}min`,
+      startedAt: ledger.lastReport?.startedAt ?? new Date().toISOString(),
+      ms: 0,
+      reflectConfigured: Boolean(ledger.lastReport?.reflectConfigured),
+    } as CastaliaMaintainReport
+  }
+
+  ledger.lastAttemptAt = now
+  ledger.lastReason = reason
+  writeMaintenanceLedger(ledger)
+  const task = (async () => {
+    console.info(`[castalia] maintenance start (${reason})`)
+    let report: CastaliaMaintainReport
+    try {
+      report = await engine.maintain!({ limit }) as CastaliaMaintainReport
+    }
+    catch (error) {
+      writeMaintenanceLedger({ ...ledger, lastAttemptAt: Date.now(), lastOk: false, lastReason: reason })
+      throw error
+    }
+    const ok = Boolean(report.ok)
+    writeMaintenanceLedger({
+      lastAttemptAt: Date.now(),
+      lastSuccessAt: ok ? Date.now() : ledger.lastSuccessAt,
+      lastOk: ok,
+      lastReason: reason,
+      lastReport: report,
+    })
+    writeMaintenanceLog(report)
+    console.info(`[castalia] maintenance done in ${report.ms}ms ok=${ok} (${reason})`)
+    return report
+  })()
+  maintenanceInFlight = task
+  try {
+    return await task
+  }
+  finally {
+    maintenanceInFlight = undefined
+  }
+}
+
 function scheduleMemoryMaintenance(engine: CastaliaEngineMemory) {
   if (maintenanceScheduled)
     return
@@ -73,42 +187,14 @@ function scheduleMemoryMaintenance(engine: CastaliaEngineMemory) {
     return
   }
 
-  const stateFile = () => join(app.getPath('userData'), 'castalia-maintenance.json')
-  const lastRunAt = (): number => {
-    try {
-      const parsed = JSON.parse(readFileSync(stateFile(), 'utf8'))
-      return Number(parsed?.lastRunAt) || 0
-    }
-    catch { return 0 }
-  }
-  const markRun = () => {
-    try { writeFileSync(stateFile(), JSON.stringify({ lastRunAt: Date.now() }), 'utf8') }
-    catch { /* 状态写不进去不影响本次维护 */ }
-  }
-
-  /** 两次维护之间至少隔这么久：既挡住重复触发，也避免同一晚跑两遍 */
-  const MIN_GAP_MS = 20 * 3_600_000
-  let running = false
   let timer: ReturnType<typeof setInterval> | undefined
 
   const run = async (reason: string) => {
-    if (running)
-      return
-    if (Date.now() - lastRunAt() < MIN_GAP_MS)
-      return
-    running = true
     try {
-      console.info(`[castalia] maintenance start (${reason})`)
-      const report = await engine.maintain!({ limit: 30 })
-      markRun()
-      writeMaintenanceLog(report)
-      console.info(`[castalia] maintenance done in ${report.ms}ms ok=${report.ok}`)
+      await runMaintenance(engine, reason, 30)
     }
     catch (error) {
       console.warn('[castalia] maintenance failed:', (error as Error).message)
-    }
-    finally {
-      running = false
     }
   }
 
@@ -217,6 +303,10 @@ export function setupCastaliaMemoryService(params: {
     defineInvokeHandler(params.context, castaliaMemorySave, entry => engine.save(entry))
     defineInvokeHandler(params.context, castaliaMemoryForget, entry => engine.forget(entry))
     defineInvokeHandler(params.context, castaliaMemoryRecall, query => engine.recall(query))
+    // 显式检索（模型主动查记忆）：与 recall 不同，不过相似度门槛、不渲染注入块。
+    defineInvokeHandler(params.context, castaliaMemorySearch, input => engine.search
+      ? engine.search(String(input?.query ?? ''), input?.topK)
+      : Promise.resolve([]))
     // 自回归结束后把这一轮写回库：这是"她记得刚才说过什么"的唯一入口。
     // 没有 ingest 的实现（stdio 旧路径）时返回 ok:false，不抛错、不影响回复。
     defineInvokeHandler(params.context, castaliaMemoryIngest, turn => engine.ingest
@@ -227,14 +317,19 @@ export function setupCastaliaMemoryService(params: {
     defineInvokeHandler(params.context, castaliaMemoryMaintain, async (input) => {
       if (!engine.maintain)
         return { ok: false, startedAt: new Date().toISOString(), ms: 0, reflectConfigured: false, error: 'backend has no maintain' }
-      const report = await engine.maintain({ limit: input?.limit })
-      writeMaintenanceLog(report)
-      return report
+      // Same queue and same ledger as the 04:00 sweep: a sleep-triggered run at
+      // 23:00 makes the nightly one a no-op instead of a second consolidation.
+      return runMaintenance(engine, 'renderer', input?.limit ?? 30)
     })
     defineInvokeHandler(params.context, castaliaMemoryPsyche, async (input) => {
       if (!engine.psycheState)
         return null
       return engine.psycheState(input ?? {})
+    })
+    defineInvokeHandler(params.context, castaliaMemorySetEnergy, async (input) => {
+      if (engine.setSelfEnergy)
+        await engine.setSelfEnergy(Number(input?.value) || 0)
+      return { ok: Boolean(engine.setSelfEnergy) }
     })
     defineInvokeHandler(params.context, castaliaMemorySelfCycle, async (input) => {
       if (!engine.selfCycle)
@@ -257,6 +352,8 @@ export function setupCastaliaMemoryService(params: {
   defineInvokeHandler(params.context, castaliaMemoryForget, entry => memory.forget(entry))
   // The local repository holds entries only, so a recall has no ranked text to render.
   defineInvokeHandler(params.context, castaliaMemoryRecall, () => ({ text: '', count: 0, topSim: 0, chars: 0 }))
+  // 本地仓储同样没有语义检索：明确返回空列表（模型会如实说"没找到"）。
+  defineInvokeHandler(params.context, castaliaMemorySearch, () => [])
   // 本地 sqlite 仓储只有条目、没有对话日志表，所以落库明确返回不可用。
   defineInvokeHandler(params.context, castaliaMemoryIngest, () => ({ ok: false, error: 'no castalia bank configured' }))
   defineInvokeHandler(params.context, castaliaMemoryMaintain, () => ({ ok: false, startedAt: new Date().toISOString(), ms: 0, reflectConfigured: false, error: 'no castalia bank configured' }))

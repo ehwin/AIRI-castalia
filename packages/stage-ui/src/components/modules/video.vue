@@ -8,7 +8,25 @@ import { useVideoStore } from '../../stores/modules/video'
 
 const { t } = useI18n()
 const videoStore = useVideoStore()
-const { enabled, depth, attachImages, bilibiliCookie, autonomous, ffmpegPath, ffmpegAvailable, ffmpegDetected, cacheDir, configured, runtimeAvailable } = storeToRefs(videoStore)
+const { enabled, depth, attachImages, bilibiliCookie, autonomous, ffmpegPath, ffmpegAvailable, ffmpegDetected, cacheDir, configured, runtimeAvailable, sheetsPerSource, sheetsPerHour } = storeToRefs(videoStore)
+
+/** `FieldInput` speaks strings; the store keeps numbers, so convert here and keep the range sane. */
+function clampNumber(value: string, minimum: number, maximum: number): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed))
+    return minimum
+  return Math.min(maximum, Math.max(minimum, Math.round(parsed)))
+}
+
+const sheetsPerVideoInput = computed({
+  get: () => String(sheetsPerSource.value),
+  set: value => sheetsPerSource.value = clampNumber(value, 1, 20),
+})
+
+const sheetsPerHourInput = computed({
+  get: () => String(sheetsPerHour.value),
+  set: value => sheetsPerHour.value = clampNumber(value, 1, 200),
+})
 
 const depthOptions = computed(() => [
   { label: t('settings.pages.modules.video.depth.skim'), value: 'skim' },
@@ -42,6 +60,20 @@ const depthOptions = computed(() => [
       v-model="autonomous"
       :label="t('settings.pages.modules.video.autonomous')"
       :description="t('settings.pages.modules.video.autonomous-description')"
+    />
+
+    <FieldInput
+      v-model="sheetsPerVideoInput"
+      type="number"
+      :label="t('settings.pages.modules.video.sheets-per-video')"
+      :description="t('settings.pages.modules.video.sheets-per-video-description')"
+    />
+
+    <FieldInput
+      v-model="sheetsPerHourInput"
+      type="number"
+      :label="t('settings.pages.modules.video.sheets-per-hour')"
+      :description="t('settings.pages.modules.video.sheets-per-hour-description')"
     />
 
     <FieldInput

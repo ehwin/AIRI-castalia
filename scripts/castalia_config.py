@@ -153,6 +153,9 @@ class Config:
         # LobeHub compose 栈随托盘启动(2026-10-01):把「开机即起 LobeHub」接进托盘启动流程。
         # autoStart=false 时只保留托盘菜单里的手动开关(旧行为)。
         self.LOBEHUB_BOOT = self._lobehub_boot(data.get("lobehub"))
+        # MTK 远程入口(手机端 8766)随托盘启动 + 掉线自愈(2026-11-01):把「要用的时候连不上」
+        # 交给托盘兜底 —— 只要托盘在,8766 就在。默认开(与 LobeHub 相反),因为它几乎不吃资源。
+        self.MTK_BOOT = self._mtk_boot(data.get("mtk"))
 
     # ── 内部工具 ──
     def _keep(self, inst):
@@ -385,6 +388,48 @@ class Config:
             "delaySeconds": max(0.0, delay),
             "idleShutdownMinutes": max(0.0, idle),
             "wslDistro": str(d.get("wslDistro") or "Ubuntu-24.04"),
+        }
+
+    def _mtk_boot(self, d):
+        """MTK 远程入口(手机端 8766)的随托盘启动 / 掉线自愈配置。
+
+        autoStart: 托盘启动后确保 MTK 在跑。**默认 true** —— 用户要的是「需要的时候一定连得上」,
+            而 MTK 一个 headless 常驻只占几十 MB,和 LobeHub(要 WSL+docker)不是一回事。
+        delaySeconds: 启动延迟(默认 10s),避开托盘自己起桥/星图的 IO 峰值。
+        exe / args: 启动哪个 exe、带什么参数;留空用内置默认(D:\\MTK\\MTK.exe --headless)。
+        port: 手机入口端口(默认 8766),只用于探活,不参与启动。
+        url: 手机入口地址;留空按「本机局域网 IP + port」拼。
+        keepAlive / keepAliveSeconds: 托盘运行期间每隔 N 秒探一次,掉线就重新拉起(默认 60s)。
+        """
+        d = d or {}
+
+        def _num(key, default):
+            try:
+                return max(0.0, float(d.get(key, default)))
+            except Exception:
+                return float(default)
+
+        exe = str(d.get("exe") or r"D:\MTK\MTK.exe").strip()
+        try:
+            exe = os.path.normpath(os.path.expandvars(self._resolve(exe)))
+        except Exception:
+            exe = os.path.normpath(exe)
+        args = d.get("args")
+        if not isinstance(args, list) or not args:
+            args = ["--headless"]
+        try:
+            port = int(d.get("port") or 8766)
+        except Exception:
+            port = 8766
+        return {
+            "autoStart": bool(d.get("autoStart", True)),
+            "delaySeconds": _num("delaySeconds", 10),
+            "exe": exe,
+            "args": [str(a) for a in args],
+            "port": port,
+            "url": str(d.get("url") or ""),
+            "keepAlive": bool(d.get("keepAlive", True)),
+            "keepAliveSeconds": max(15.0, _num("keepAliveSeconds", 60)),
         }
 
     def _webapp(self, w):

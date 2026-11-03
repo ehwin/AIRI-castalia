@@ -6,7 +6,6 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
 import { aggregateMood, currentEnergyFrom } from './agent-state'
-import { decayEmotion } from './emotion'
 
 interface PersistedAgentState {
   moodHistory: MoodEvent[]
@@ -14,6 +13,8 @@ interface PersistedAgentState {
   energy: number
   lastUpdated: number
   vad?: VADVector
+  moodVad?: VADVector
+  band?: string
   vadUpdatedAt?: number
   tsundereLevel?: number
 }
@@ -52,9 +53,6 @@ export const useCastaliaPluginStore = defineStore('castalia-plugin', () => {
   function snapshotFor(characterId = activeCharacterId.value): AgentStateSnapshot {
     const state = states.value[characterId] ?? createEmptyState()
     const now = Date.now()
-    const emotion = state.vad
-      ? decayEmotion(state.vad, (now - (state.vadUpdatedAt ?? now)) / 3_600_000, state.tsundereLevel ?? 0, new Date(now))
-      : undefined
     return {
       characterId,
       currentMood: aggregateMood(state.moodHistory, now),
@@ -63,8 +61,37 @@ export const useCastaliaPluginStore = defineStore('castalia-plugin', () => {
       tsundereLevel: state.tsundereLevel ?? 0,
       lastUpdated: new Date(state.lastUpdated).toISOString(),
       moodHistory: state.moodHistory.slice(-10),
-      ...(emotion ? { vad: emotion.vad } : {}),
+      // No second decay here: the engine already carries the clock for these
+      // values, and decaying them again in the UI made the same mood fade at
+      // two different speeds depending on which surface you looked at.
+      ...(state.vad ? { vad: state.vad } : {}),
+      ...(state.moodVad ? { mood: state.moodVad } : {}),
+      ...(state.band ? { band: state.band } : {}),
     }
+  }
+
+  /**
+   * Mirrors the engine's psyche into this character's self-state.
+   *
+   * The engine owns the affect math (appraisal, decay, bands). The UI only needs the current coordinates so the
+   * system prompt and the panel show what she actually feels — before this, a value moved only when the model
+   * called a tool, and it never did. The psyche-derived mood replaces the previous psyche event instead of
+   * appending, so a periodic sync cannot grow the history.
+   */
+  function syncPsyche(input: { vad: VADVector, mood?: VADVector, band?: string, at?: number }, characterId = activeCharacterId.value) {
+    const now = input.at ?? Date.now()
+    updateState((state) => {
+      const kept = state.moodHistory.filter(event => event.reason !== 'psyche')
+      const mood = Math.max(-10, Math.min(10, Math.round(input.vad.valence * 10)))
+      return {
+        ...state,
+        vad: input.vad,
+        ...(input.mood ? { moodVad: input.mood } : {}),
+        ...(input.band ? { band: input.band } : {}),
+        vadUpdatedAt: now,
+        moodHistory: [...kept, { value: mood, reason: 'psyche', timestamp: now }].slice(-50),
+      }
+    }, characterId)
   }
 
   function updateState(update: (state: PersistedAgentState) => PersistedAgentState, characterId = activeCharacterId.value) {
@@ -110,6 +137,21 @@ export const useCastaliaPluginStore = defineStore('castalia-plugin', () => {
     updateState(state => ({ ...state, energy: Math.max(0, Math.min(100, snapshotFor(characterId).energy + amount)), lastUpdated: Date.now() }), characterId)
   }
 
+  /**
+   * Writes the gauge from the mind's fatigue.
+   *
+   * The mind owns the sleep loop; this store only mirrors it for the prompt and
+   * the panel. Before this the two disagreed: the panel decayed on its own clock
+   * and `syncPsyche` reset that clock every five minutes without settling, so
+   * the mirror read 100 while the mind was exhausted. Mirroring the number that
+   * actually drives sleep removes the second source of truth instead of adding
+   * a third.
+   */
+  function setEnergy(value: number, characterId = activeCharacterId.value) {
+    const energy = Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0))
+    updateState(state => ({ ...state, energy, lastUpdated: Date.now() }), characterId)
+  }
+
   return {
     enabled,
     activeCharacterId,
@@ -121,8 +163,10 @@ export const useCastaliaPluginStore = defineStore('castalia-plugin', () => {
     snapshotFor,
     recordMood,
     recordEmotion,
+    syncPsyche,
     setTsundereLevel,
     setDesire,
     boostEnergy,
+    setEnergy,
   }
 })

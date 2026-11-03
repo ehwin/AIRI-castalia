@@ -11,6 +11,7 @@ import os
 import sys
 import time
 import json
+import re
 import socket
 import ctypes
 import logging
@@ -712,35 +713,74 @@ def open_in_shell(url="", view=""):
     return True
 
 
+def _port_of_url(url):
+    """从 http://127.0.0.1:3348/... 里取出端口；取不到返回 None。"""
+    try:
+        m = re.search(r"127\.0\.0\.1:(\d+)", str(url or ""))
+        return int(m.group(1)) if m else None
+    except Exception:
+        return None
+
+
+def _shell_url_for(port):
+    """控制台外壳要打开的地址。
+
+    汇总星图(Full)的本库是空的 —— 它的数据只在 federation 视图里；默认开 local 会得到
+    一张 0 节点的空星图(2026-10-17 实测 3348 local = 0)。真正的开关是 viz 条目的
+    "federation": true(castalia_config 生成进程环境时才注入 FEDERATION_DIRS，配置里没有
+    这个键；2026-10-28 修过这一点)。
+    """
+    v = next((x for x in VIZ if x["port"] == port), None)
+    _venv = (v.get("env") or {}) if v else {}
+    fed = bool(v and (v.get("federation")
+                      or str(_venv.get("FEDERATION_DIRS") or "[]") not in ("[]", "")
+                      or str(_venv.get("FEDERATION_MEMBERS") or "[]") not in ("[]", "")))
+    return f"http://127.0.0.1:{port}/?scope={'federation' if fed else 'local'}&embed=1"
+
+
+def _ensure_viz_port(port, reason, timeout=30.0):
+    """确保某个星图端口在跑。
+
+    onDemand 的星图没人声明过就不起(配置 viz[].onDemand=true)。控制台外壳是个 iframe
+    容器，里面装的就是这些页面 —— 外壳先加载、端口还没听上，窗口里就只有
+    「127.0.0.1 拒绝连接」(2026-11-01 实测：日志只有 start shell，没有 start viz)。
+    所以开窗之前先声明 + 等端口；返回 False 表示等超时。
+    """
+    target = next((x for x in VIZ if x["port"] == port), None)
+    if not target or listening(port):
+        return True
+    ensure_on_demand(target, reason)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if listening(port):
+            return True
+        time.sleep(0.25)
+    logger.warning("星图 :%s 在 %.0fs 内未就绪（%s）", port, timeout, target.get("id"))
+    return False
+
+
 def start_shell(url=None, view=""):
     if not SHELL:
         return "配置里没有外壳(shell 段)"
-    if shell_up():
-        # 已在跑：把窗口置前（否则从快捷方式再点一次毫无反应）
-        try:
-            _shell_send("", "", SHELL["port"], tries=2, delay=0.2)
-        except Exception:
-            pass
-        return "控制台已在运行"
-    if not url:
-        port = _viz_port()
-        v = next((x for x in VIZ if x["port"] == port), None)
-        # 汇总星图(Full)的本库是空的 —— 它的数据只在 federation 视图里;
-        # 默认打开 local 会得到一张 0 节点的空星图(2026-10-17 实测 3348 local = 0)。
-        # 2026-10-28 修复:原来只看 v["env"]["FEDERATION_DIRS"],而它是 castalia_config 在
-        # 生成进程环境时注入的、配置里根本没有这个键 → fed 恒为 False → 外壳打开的是空星图。
-        # 真正的开关是 viz 条目的 "federation": true(见 castalia_config._viz)。
-        _venv = v.get("env") or {}
-        fed = bool(v and (v.get("federation") or str(_venv.get("FEDERATION_DIRS") or "[]") not in ("[]", "")
-                          or str(_venv.get("FEDERATION_MEMBERS") or "[]") not in ("[]", "")))
-        url = f"http://127.0.0.1:{port}/?scope={'federation' if fed else 'local'}&embed=1"
     # 2026-10-29:进控制台第一眼要「记忆体」(记忆总成),不是星图。
-    # 星图没被删,仍在 v-viz 页签上,点一下即回;这里只改打开的落点。
     if not view:
         view = "agg"
-    if open_in_shell(url, view):
-        return "正在打开控制台"
-    return "没有能跑外壳的宿主(缺 pywebview)"
+    was_running = shell_up()
+
+    def work():
+        port = _port_of_url(url) if url else _viz_port()
+        if not _ensure_viz_port(port, "打开控制台"):
+            _notify(APP_NAME, "星图未就绪，请再点一次")
+            return
+        target_url = url or _shell_url_for(port)
+        if not open_in_shell(target_url, view):
+            _notify(APP_NAME, "没有能跑外壳的宿主(缺 pywebview)")
+
+    # 一律放后台：等端口最多 30s，不能卡住托盘菜单线程。
+    # 已在跑的情况下 open_in_shell 会走 _shell_send 把旧窗口导航过去 —— 这样停在
+    # 「拒绝连接」上的旧窗口点一次也能自己恢复。
+    _bg(work)
+    return "控制台已在运行" if was_running else "正在打开控制台"
 
 
 def stop_shell():
@@ -1461,6 +1501,11 @@ def toggle_bridge(icon=None, item=None):
 
 # ── LobeHub docker ──
 
+# compose 返回后等应用应答的上限。冷启动实测 3.6s(2026-11-01),给足 IO 慢时的余量;
+# 超过它才算真失败——别再用单次探测结论(那会把 success 报成 failure)。
+LOBEHUB_READY_TIMEOUT = float(os.environ.get("LOBEHUB_READY_TIMEOUT", "60"))
+
+
 def _dec_bytes(b):
     """解码子进程输出:wsl.exe 有时吐 UTF-16LE,用 UTF-8 解码会炸 UnicodeDecodeError
     (2026-09-19 实测:托盘菜单「启动 LobeHub」因此一直崩,表现为点了没反应)。"""
@@ -1615,6 +1660,26 @@ def lobehub_up():
     return up
 
 
+def _wait_lobehub_up(timeout=None, step=0.5):
+    """等 :3210 真的能应答,返回实际等待秒数;超时返回 None。
+
+    `docker compose up -d` 返回只代表容器被创建,应用本身还要几秒才 bind + 首字节
+    (2026-11-01 实测 3.6s)。旧代码单次探测把这段窗口当失败。
+    每轮都清 `_lh_cache` 和 `_http_probe` 的负缓存,否则 5s 缓存会把「还没好」
+    钉死成结论(2026-09-14 / 2026-10-30 都踩过同类)。
+    """
+    t0 = time.time()
+    limit = LOBEHUB_READY_TIMEOUT if timeout is None else float(timeout)
+    while True:
+        _lh_cache["t"] = 0.0
+        _HTTP_CACHE.pop((3210, "/"), None)
+        if lobehub_up():
+            return time.time() - t0
+        if time.time() - t0 >= limit:
+            return None
+        time.sleep(step)
+
+
 def _docker_ready(fresh=False):
     """docker 守护是否活着 —— 守护没起时 compose 会直接失败,必须先判。
 
@@ -1741,10 +1806,19 @@ def start_lobehub(icon=None, item=None):
         logger.info("lobehub up: %s", out[-400:])
         _lh_cache["t"] = 0
         # 2026-09-14 修:旧实现无论成败都弹"已启动" → 用户感觉"选项无效"。现在**复验**后再报。
-        if not lobehub_up():
-            _notify(APP_NAME, "LobeHub 启动失败: " + (_first_err(out) or "容器未就绪,见日志"))
+        # 2026-11-01 修:`compose up -d` 返回 ≠ 应用能应答 —— 实测冷启动 23:55:39.8 返回、
+        # 23:55:43.5 才有第一个 302(3.6s)。旧代码只探一次(_http_probe 0.5s 超时,失败还会
+        # 进 5s 负缓存),必然在这 3.6s 窗口里探空 → 弹"启动失败: 容器未就绪,见日志";
+        # 而 open_lobehub 自己另有 20s 轮询,2s 后照样把窗口打开 —— 用户看到的就是
+        # "说启动失败,但 LobeHub 明明开了"。这里改成等,并把结论写进日志。
+        waited = _wait_lobehub_up(LOBEHUB_READY_TIMEOUT)
+        if waited is None:
+            msg = _first_err(out) or "容器未就绪,见日志"
+            logger.error("lobehub: 等 %.0fs 仍无应答(:3210 未就绪) err=%s", LOBEHUB_READY_TIMEOUT, msg)
+            _notify(APP_NAME, "LobeHub 启动失败: " + msg)
             _refresh_title()
             return
+        logger.info("lobehub ready: compose 返回后 %.1fs 应答 :3210", waited)
         # 2026-09-26 加:容器起来 ≠ Windows 打得开。WSL 镜像网络挂掉时(端口范围被改宽的已知
         # 坑:WSL 报 CreateInstance/CreateVm/ConfigureNetworking/0x8007054f → 回退 networkingMode
         # None → 没网卡没路由),容器内部 3210 正常但 Windows 连不上,表现为"启动失败"。
@@ -1783,10 +1857,12 @@ def open_lobehub(icon=None, item=None):
     def work():
         if not lobehub_up():
             start_lobehub()
-            for _ in range(40):
-                if lobehub_up():
-                    break
-                time.sleep(0.5)
+            # 2026-11-01:旧实现只等 20s,而 WSL 冷启动(docker service + 5 容器)实测能到
+            # 30s+ —— 超时就把 Edge 窗口开在一个还没监听的端口上(用户看到错误页)。
+            # 统一用 LOBEHUB_READY_TIMEOUT,与 start_lobehub 的判据同一个。
+            if _wait_lobehub_up(LOBEHUB_READY_TIMEOUT) is None:
+                logger.warning("open lobehub: 等 %.0fs 仍未应答,窗口照开(可能显示错误页)",
+                               LOBEHUB_READY_TIMEOUT)
         url = "http://localhost:3210"
         # 2026-09-26:走网页壳(webApp.mode=edge → Edge 应用窗口),不再丢进原生外壳 GUI。
         if WEBAPP.get('mode') == 'browser':
@@ -1795,6 +1871,210 @@ def open_lobehub(icon=None, item=None):
         if not open_web(url, "LobeHub") and not open_in_shell(url):
             webbrowser.open(url)
     _bg(work)
+
+
+# ══ MTK 远程入口(手机端 :8766)═════════════════════════════════════════════
+# 为什么挂在托盘:手机在外面要连的是「本机 MTK 的远程页」,而 MTK 是**另一个进程** ——
+# 它没起,8766 就没人听,手机只能等回到电脑前手动点开。托盘是这台机器上唯一常驻的 GUI
+# 守护进程,所以把「保证在跑」交给它:开机随托盘拉起 + 每分钟探活,掉了就补。
+# 2026-11-01 用户的诉求原话:「避免需要的时候根本连不上」。
+_MTK_FLAG = {"id": "mtk-remote", "name": "MTK 远程入口", "port": 8766}
+_MTK_LOCK = threading.Lock()
+# 起不来时退避 120s,免得 exe 坏了 / 端口被别的副本占着时每分钟重启一次刷屏
+_MTK_BACKOFF = {"until": 0.0, "fails": 0}
+
+
+def mtk_cfg():
+    cfg = getattr(C, "MTK_BOOT", None)
+    return cfg if isinstance(cfg, dict) else {}
+
+
+def mtk_port():
+    try:
+        return int(mtk_cfg().get("port") or 8766)
+    except Exception:
+        return 8766
+
+
+def mtk_exe():
+    return mtk_cfg().get("exe") or r"D:\MTK\MTK.exe"
+
+
+def mtk_installed():
+    return os.path.isfile(mtk_exe())
+
+
+def _lan_ip():
+    """本机在局域网里的地址(只为拼手机入口 URL,不发包)。"""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("223.5.5.5", 80))
+            return s.getsockname()[0]
+        finally:
+            s.close()
+    except Exception:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except Exception:
+            return "127.0.0.1"
+
+
+def mtk_url():
+    """手机入口地址:配置里有 url 就用,否则「局域网 IP + 端口」。"""
+    return (mtk_cfg().get("url") or "").strip() or f"http://{_lan_ip()}:{mtk_port()}/"
+
+
+def mtk_up():
+    """活着 = 端口在听 **且** 主页能应答。
+
+    只判端口会把「别的进程恰好占着 8766」当成 MTK 在跑,那正是"显示是开、手机连不上"的来源。
+    """
+    port = mtk_port()
+    return bool(listening(port)) and bool(_http_probe(port, "/", timeout=0.6))
+
+
+def mtk_pids():
+    """所有镜像路径等于配置 exe 的进程 —— 用来停掉自己拉起的那些。"""
+    if _psutil is None:
+        return set()
+    target = os.path.normcase(os.path.abspath(mtk_exe()))
+    out = set()
+    for p in _psutil.process_iter(["name", "exe"]):
+        try:
+            if os.path.normcase(os.path.abspath(p.info.get("exe") or "")) == target:
+                out.add(p.info["pid"])
+        except Exception:
+            continue
+    return out
+
+
+def start_mtk(manual=True):
+    """把 MTK 拉起来,并等到 8766 真的应答再报成功。"""
+    if mtk_up():
+        return "MTK 远程已在运行"
+    if not mtk_installed():
+        return f"找不到 MTK:{mtk_exe()}"
+    with _MTK_LOCK:
+        if mtk_up():
+            return "MTK 远程已在运行"
+        exe = mtk_exe()
+        log = os.path.join(SCRIPTS, "mtk-tray.log")
+        _rotate_log(log)
+        try:
+            fh = open(log, "a", encoding="utf-8", errors="replace")
+            _open_logs.append(fh)
+            p = subprocess.Popen(
+                [exe] + list(mtk_cfg().get("args") or ["--headless"]),
+                cwd=os.path.dirname(exe) or None,
+                stdin=subprocess.DEVNULL, stdout=fh, stderr=subprocess.STDOUT,
+                creationflags=NOWIN | DETACHED, close_fds=True)
+        except Exception as e:
+            logger.error("mtk start failed: %r", e)
+            return f"MTK 启动失败: {e}"
+        logger.info("start mtk pid=%s (%s)", p.pid, exe)
+    for _ in range(60):          # 最多等 30s:MTK 要解包 _internal、起 8766/8765 和前置换
+        if mtk_up():
+            break
+        time.sleep(0.5)
+    ok = mtk_up()
+    _MTK_BACKOFF["fails"] = 0 if ok else _MTK_BACKOFF["fails"] + 1
+    _MTK_BACKOFF["until"] = 0.0 if ok else time.time() + 120
+    logger.info("mtk start -> up=%s url=%s", ok, mtk_url())
+    return f"MTK 远程已就绪:{mtk_url()}" if ok else "MTK 已启动但 8766 没应答(见 mtk-tray.log)"
+
+
+def stop_mtk(icon=None, item=None):
+    if not mtk_up() and not mtk_pids():
+        return "MTK 远程本来就没跑"
+    for pid in mtk_pids():
+        _kill_pid(pid)
+    _kill_port(mtk_port())       # 兜底:旧副本的 exe 路径和配置不一致时按端口收
+    for _ in range(20):
+        if not mtk_up():
+            break
+        time.sleep(0.3)
+    logger.info("mtk stopped up=%s", mtk_up())
+    return "MTK 远程已停止" if not mtk_up() else "8766 仍被占用(可能是另一个 MTK 副本)"
+
+
+def open_mtk(icon=None, item=None):
+    def work():
+        if not mtk_up():
+            start_mtk()
+            for _ in range(40):
+                if mtk_up():
+                    break
+                time.sleep(0.5)
+        url = mtk_url()
+        if WEBAPP.get("mode") == "browser":
+            webbrowser.open(url)
+            return
+        if not open_web(url, "MTK") and not open_in_shell(url):
+            webbrowser.open(url)
+    _bg(work)
+
+
+def mtk_auto_enabled():
+    """配置 autoStart 为真,且托盘菜单没手动关掉(与 LobeHub 空闲退栈同一套 state 口径)。"""
+    if not mtk_cfg().get("autoStart"):
+        return False
+    services = service_runtime.read(SERVICE_STATE_FILE).get("services")
+    if not isinstance(services, dict):
+        return True          # state 文件坏了/没写过 = 按配置来
+    return services.get(_MTK_FLAG["id"]) != "stopped"
+
+
+def set_mtk_auto(enabled):
+    set_service_desired(_MTK_FLAG, enabled)
+    logger.info("mtk autoStart = %s", "开" if enabled else "关")
+
+
+def toggle_mtk_auto(icon=None, item=None):
+    set_mtk_auto(not mtk_auto_enabled())
+    _refresh_title()
+
+
+def autostart_mtk():
+    """托盘启动后把 MTK 拉起来(延迟后执行;已在线则跳过)。"""
+    def work():
+        cfg = mtk_cfg()
+        if not cfg.get("autoStart"):
+            logger.info("mtk autostart: 配置关闭,跳过")
+            return
+        delay = float(cfg.get("delaySeconds") or 0)
+        if delay:
+            time.sleep(delay)
+        if mtk_up():
+            logger.info("mtk autostart: 已在线(%s),跳过", mtk_url())
+            return
+        if not mtk_installed():
+            logger.warning("mtk autostart: 找不到 exe %s", mtk_exe())
+            return
+        logger.info("mtk autostart: 未在线,拉起")
+        start_mtk(manual=False)
+        _refresh_title()
+    _bg(work)
+
+
+def _mtk_keepalive_loop():
+    """常驻探活:托盘在一天,MTK 就一天在。掉线补起,失败退避 120s。"""
+    cfg = mtk_cfg()
+    if not cfg.get("keepAlive"):
+        return
+    interval = float(cfg.get("keepAliveSeconds") or 60)
+    while not _stop.wait(interval):
+        try:
+            if not mtk_auto_enabled() or not mtk_installed():
+                continue
+            if mtk_up() or time.time() < _MTK_BACKOFF["until"]:
+                continue
+            logger.warning("mtk keepalive: 8766 掉线,重新拉起")
+            msg = start_mtk(manual=False)
+            _notify(APP_NAME, msg)
+            _refresh_title()
+        except Exception as e:
+            logger.error("mtk keepalive: %r", e)
 
 
 # ── status ──
@@ -2078,7 +2358,8 @@ def tooltip():
         f"星图 {_mark_n(group_up(VIZ), len(VIZ))} · "
         f"LobeHub {_mark(lobehub_up())} · WSL {_mark(wsl_running())} · "
         f"嵌入 {embed_mark()} · "
-        f"AIRI {_mark(airi_running())}"
+        f"AIRI {_mark(airi_running())} · "
+        f"MTK {_mark(mtk_up()) if mtk_installed() else '未装'}"
     )
 
 
@@ -2277,6 +2558,22 @@ def build_menu():
                 else '空闲自动退栈（配置里是 0 = 关）',
                 _toggle_lh_idle, checked=lambda item: lobehub_idle_enabled()),
             pystray.MenuItem('立即退栈并退出 WSL', lambda icon, item: stop_lobehub(reason='menu-now')))))
+    def _mtk_label(item=None):
+        if not mtk_installed():
+            return 'MTK 远程  未安装'
+        return 'MTK 远程  ' + ('运行中' if mtk_up() else '未运行') + f'  :{mtk_port()}'
+
+    services.append(pystray.MenuItem(_mtk_label,
+        pystray.Menu(
+            pystray.MenuItem('打开手机入口', open_mtk),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem('启动', lambda icon, item: _run_action(start_mtk)),
+            pystray.MenuItem('停止', lambda icon, item: _run_action(stop_mtk)),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem('随托盘自动启动 / 掉线自愈', toggle_mtk_auto,
+                             checked=lambda item: mtk_auto_enabled()),
+            pystray.MenuItem('显示入口地址', lambda icon, item: _run_action(
+                lambda: (_clipboard(mtk_url()), '入口地址已复制：' + mtk_url())[1])))))
     return pystray.Menu(
         pystray.MenuItem(f'{APP_NAME}  {APP_VERSION}', None, enabled=False),
         pystray.MenuItem('打开控制台', lambda icon, item: _run_action(start_shell), default=True, visible=bool(SHELL)),
@@ -2404,6 +2701,8 @@ def _on_ready(icon):
         start_bridge(manual=False)
         start_viz(manual=False)
         autostart_lobehub()          # 2026-10-01:托盘启动顺带把 LobeHub 拉起(lobehub.autoStart 可关)
+        autostart_mtk()              # 2026-11-01:同理拉起 MTK 远程入口(默认开,手机随时连得上)
+        threading.Thread(target=_mtk_keepalive_loop, daemon=True).start()  # 掉线自愈
         threading.Thread(target=_lobehub_idle_loop, daemon=True).start()   # 空闲退栈看门(含退 WSL)
         if embed_is_api():
             logger.info("embed = API, skip local yuan")

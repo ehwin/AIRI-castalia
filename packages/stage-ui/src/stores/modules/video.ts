@@ -30,7 +30,12 @@ export const useVideoStore = defineStore('video', () => {
    * the best quality, so the transcript path stops at "no text track".
    */
   const bilibiliCookie = useLocalStorageManualReset<string>('settings/video/bilibili-cookie', '')
-
+  /**
+   * Image budget. Counted per video and per rolling hour rather than per conversation: one clip
+   * redrawn over and over is the runaway worth stopping, and a conversation is not.
+   */
+  const sheetsPerSource = useLocalStorageManualReset<number>('settings/video/sheets-per-source', 4)
+  const sheetsPerHour = useLocalStorageManualReset<number>('settings/video/sheets-per-hour', 15)
   /**
    * Lets her pick a queued clip up on her own, when the moment is hers.
    *
@@ -94,6 +99,8 @@ export const useVideoStore = defineStore('video', () => {
     depth,
     attachImages,
     bilibiliCookie,
+    sheetsPerSource,
+    sheetsPerHour,
     autonomous,
     ffmpegPath,
     ffmpegAvailable,

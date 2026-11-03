@@ -12,13 +12,45 @@ export const CHAT_FORMAT_RULES = `${[
 ].join('\n')}\n`
 
 /**
- * Builds the system prompt of one run: format rules, then the identity of the run's persona.
+ * Local zone of this machine as `Area/City (UTC+08:00)`.
+ *
+ * Use when:
+ * - The clock rule names the zone a message prefix is written in. It only changes when
+ *   the machine's zone does, so it can sit in the cacheable prompt prefix.
+ */
+export function localZoneLabel(now: Date = new Date()): string {
+  const minutes = -now.getTimezoneOffset()
+  const sign = minutes < 0 ? '-' : '+'
+  const absolute = Math.abs(minutes)
+  const offset = `UTC${sign}${Math.floor(absolute / 60).toString().padStart(2, '0')}:${(absolute % 60).toString().padStart(2, '0')}`
+  try {
+    const zone = new Intl.DateTimeFormat().resolvedOptions().timeZone
+    return zone ? `${zone} (${offset})` : offset
+  }
+  catch {
+    return offset
+  }
+}
+
+/**
+ * Clock rule: what the per-message prefix means.
+ *
+ * Use when:
+ * - A chat run starts. It holds no runtime clock value, so the prefix keeps its bytes and
+ *   the prompt cache stays valid across turns and days.
+ */
+export function composeClockRule(zone: string) {
+  return `- Every owner message starts with [YYYY-MM-DD HH:MM], the local time it reached you in ${zone}. The newest prefix is the current time, so answer from it whenever the time or date matters. It is metadata: never repeat it back.\n`
+}
+
+/**
+ * Builds the system prompt of one run: format rules, the clock rule, then the identity of the run's persona.
  *
  * Use when:
  * - A chat run starts. Identity is read for its persona then, so history never stores it.
  */
-export function composeSystemPrompt(identity: string) {
-  return CHAT_FORMAT_RULES + identity
+export function composeSystemPrompt(identity: string, zone: string = localZoneLabel()) {
+  return CHAT_FORMAT_RULES + composeClockRule(zone) + identity
 }
 
 /**

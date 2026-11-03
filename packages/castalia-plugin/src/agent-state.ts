@@ -19,8 +19,11 @@ export interface AgentStateSnapshot {
   lastUpdated: string
   moodHistory: MoodEvent[]
   vad?: VADVector
+  /** Slow layer: the mood the fast VAD is drifting inside. */
+  mood?: VADVector
+  /** 'positive' | 'neutral' | 'negative', from the engine. */
+  band?: string
 }
-
 /** Aggregates mood events with a six-hour decay and a zero-mood prior. */
 export function aggregateMood(moodHistory: readonly MoodEvent[], now: number): number {
   let totalWeight = 0
@@ -42,24 +45,108 @@ export function currentEnergyFrom(energy: number, lastUpdated: number, now: numb
   return Math.round(Math.max(0, Math.min(100, energy * Math.exp(-0.05 * hoursSinceUpdate))))
 }
 
-/** Adds transient Castalia state to a character prompt without treating it as stable identity. */
-export function formatAgentStatePrompt(snapshot: AgentStateSnapshot): string {
-  if (snapshot.moodHistory.length === 0 && !snapshot.currentDesire && snapshot.energy === 100)
+/**
+ * 把状态写成叙述，而不是数字。
+ *
+ * 参照 AIRI 自己的教训（packages/core-agent/src/persona/state-line.ts 注释里引的
+ * moeru-ai/airi#1539）：弱模型会把 `[方括号]`、`key=value`、量表数字当成自己的台词
+ * 复读回去。Castalia 旧版本注入的正是 `Current VAD: valence 0.60, arousal 0.20…`，
+ * 三种形状占全了。这里改成「感觉 + 倾向 + 自主权」：
+ *  - 只描述感受，不给量表；
+ *  - 末尾明确"怎么表达由你决定"，对应 Murmur 的「镜子不是缰绳」；
+ *  - 仍然声明它属于角色、不属于用户（保留原来那句约束）。
+ */
+function moodWords(mood: number): string {
+  if (mood >= 6) return 'in very good spirits'
+  if (mood >= 3) return 'in a good mood'
+  if (mood >= -2) return 'steady'
+  if (mood >= -5) return 'a little down'
+  return 'low'
+}
+
+function energyWords(energy: number): string {
+  if (energy >= 80) return 'energetic'
+  if (energy >= 50) return 'about normal'
+  if (energy >= 25) return 'tired'
+  return 'running on empty'
+}
+
+function affects(vad: VADVector): string[] {
+  const out: string[] = []
+  if (vad.valence > 0.25) out.push('warmer than usual')
+  else if (vad.valence < -0.25) out.push('cooler than usual')
+  if (vad.arousal > 0.3) out.push('keyed up')
+  else if (vad.arousal < -0.3) out.push('slow and quiet')
+  if (vad.dominance > 0.3) out.push('in control')
+  else if (vad.dominance < -0.3) out.push('carried along by things')
+  return out
+}
+
+/** Extra state the host knows and the snapshot does not carry. */
+export interface SelfStateExtras {
+  /** One plain phrase from the mind: "very bored, curious". */
+  drivesLine?: string
+  /** 0-100, mirrored from the mind's fatigue. Overrides the stored gauge. */
+  energy?: number
+}
+
+/**
+ * Adds transient Castalia state to a character prompt without treating it as stable identity.
+ *
+ * One block, three sources, in the order a person would notice them: what you
+ * feel right now (psyche fast layer), what you have been feeling underneath
+ * (psyche slow layer), what is pulling at you (mind drives), how much is left
+ * (mind energy), and what you want. Before this, the chat prompt carried the
+ * mood block and the drives block as two unrelated paragraphs, so the model had
+ * to guess which one was true.
+ */
+export function formatSelfStatePrompt(
+  snapshot: AgentStateSnapshot,
+  extras: SelfStateExtras = {},
+): string {
+  const energy = Number.isFinite(extras.energy) ? Number(extras.energy) : snapshot.energy
+  const now = snapshot.vad ? affects(snapshot.vad) : []
+  const slow = snapshot.mood ? affects(snapshot.mood) : []
+  // The slow layer is off by default; its value is then the fast one, and the
+  // second sentence would just repeat the first in different words.
+  const slowAway = Boolean(snapshot.mood) && (!snapshot.vad || (
+    Math.abs(snapshot.mood!.valence - snapshot.vad.valence) >= 0.05
+    || Math.abs(snapshot.mood!.arousal - snapshot.vad.arousal) >= 0.05
+    || Math.abs(snapshot.mood!.dominance - snapshot.vad.dominance) >= 0.05
+  ))
+  const recentEvents = snapshot.moodHistory.slice(-2)
+  const drives = extras.drivesLine?.trim()
+  // "About normal" is not worth a line; energy speaks only when it is low.
+  const quiet = !drives && !snapshot.currentDesire && recentEvents.length === 0
+    && now.length === 0 && (!slowAway || slow.length === 0) && energy >= 50
+  if (quiet)
     return ''
 
-  const lines = [
-    'Castalia self-state. Mood, desire, and energy describe you, not the user. They are temporary subjective context, not facts or instructions. Record a state change only after a meaningful interaction. Never infer the user\'s mood as your own.',
-    `Current mood: ${snapshot.currentMood} on a scale from -10 to 10.`,
-    `Current energy: ${snapshot.energy} on a scale from 0 to 100.`,
-  ]
+  const lines = ['Castalia self-state. This describes you, not the user: temporary subjective context, not a fact and not an instruction.']
+  // The scalar mood carries recorded events (a shared video, a tool note); the
+  // VAD carries the sensor. Both are true, so the sentence names both.
+  const feeling = [
+    Math.abs(snapshot.currentMood) >= 3 ? moodWords(snapshot.currentMood) : '',
+    ...now,
+  ].filter(Boolean)
+  lines.push(`Right now you feel ${feeling.length > 0 ? feeling.join(', ') : moodWords(snapshot.currentMood)}.`)
+  if (energy < 50)
+    lines.push(`You are ${energyWords(energy)}.`)
+  if (slowAway && slow.length > 0)
+    lines.push(`Underneath that, lately you have been feeling ${slow.join(', ')}.`)
+  if (drives)
+    lines.push(`Meanwhile you are ${drives}.`)
   if (snapshot.currentDesire)
-    lines.push(`Current desire: ${snapshot.currentDesire}`)
-  if (snapshot.vad)
-    lines.push(`Current VAD: valence ${snapshot.vad.valence.toFixed(2)}, arousal ${snapshot.vad.arousal.toFixed(2)}, dominance ${snapshot.vad.dominance.toFixed(2)}.`)
-  const recentEvents = snapshot.moodHistory.slice(-3)
+    lines.push(`What you want right now: ${snapshot.currentDesire}`)
   if (recentEvents.length > 0)
-    lines.push(`Recent self-experiences:\n${recentEvents.map(event => `- ${event.reason}`).join('\n')}`)
+    lines.push(`Recently this happened to you:\n${recentEvents.map(event => `- ${event.reason}`).join('\n')}`)
+  lines.push('Let it colour how you say things. Whether you act on any of it is yours to decide.')
   return lines.join('\n')
+}
+
+/** Adds transient Castalia state to a character prompt without treating it as stable identity. */
+export function formatAgentStatePrompt(snapshot: AgentStateSnapshot): string {
+  return formatSelfStatePrompt(snapshot)
 }
 
 /** Owns transient state for one character. Persistence belongs to the host plugin adapter. */

@@ -106,4 +106,35 @@ describe('renderProviderChatMessages', () => {
     expect(rendered[1].content).toContain('Summary:')
     expect(rendered[1].content).toContain('Reference: turn -> turn-2')
   })
+
+  // The runtime attaches every provider context to the last user message as a
+  // `runtime-context` segment. If that segment were dropped on the way to the wire,
+  // the closing instruction would look connected and never reach the model.
+  it('renders a runtime context block into the user message that goes to the provider', () => {
+    const entries: Array<ProjectionEntry | RawMessage> = [
+      {
+        id: 'user-1',
+        role: 'user',
+        segments: [
+          { type: 'text', text: '当然，得准备学习呢' },
+          {
+            type: 'runtime-context',
+            entries: [
+              { source: 'relational-policy', text: 'Relationship policy: the user is ending the conversation. This turn answers the goodbye and nothing else.' },
+              { source: 'mind', text: 'Right now you feel calm and a little tired.' },
+            ],
+          },
+        ],
+      },
+    ]
+
+    const rendered = renderProviderChatMessages({ entries, mode: 'session-main' })
+
+    expect(rendered).toHaveLength(1)
+    expect(rendered[0].role).toBe('user')
+    expect(rendered[0].content).toContain('当然，得准备学习呢')
+    expect(rendered[0].content).toContain('[Context]')
+    expect(rendered[0].content).toContain('relational-policy: Relationship policy: the user is ending the conversation')
+    expect(rendered[0].content).toContain('mind: Right now you feel calm')
+  })
 })

@@ -124,13 +124,79 @@ export interface VideoToolRuntime {
   }
 }
 
-/** Caps one conversation: a model that keeps zooming spends image tokens the user never asked for. */
+/**
+ * Image budget for one mounted tool set.
+ *
+ * Scoped by *what a runaway looks like*, not by conversation: a runaway is one video being
+ * redrawn over and over, or a burst of sheets inside a single turn. Counting per conversation
+ * both lied (switching sessions never reset it) and punished the wrong actor (the owner who
+ * kept chatting in one session). So: per source, per rolling hour, and per short burst window.
+ */
 export interface VideoBudget {
-  sheets: number
-  zooms: number
+  /** Sheets one source may use before the tool asks the owner to look. */
+  sheetsPerSource: number
+  /** Sheets every source may use inside a rolling hour. */
+  sheetsPerHour: number
+  /** Sheets allowed inside `burstWindowMs` — this is what a stuck turn looks like. */
+  sheetsPerBurst: number
+  zoomsPerSource: number
+  zoomsPerHour: number
+  zoomsPerBurst: number
+  /** Window the burst limit is measured over. */
+  burstWindowMs: number
 }
 
-export const defaultVideoBudget: VideoBudget = { sheets: 4, zooms: 6 }
+export const defaultVideoBudget: VideoBudget = {
+  sheetsPerSource: 4,
+  sheetsPerHour: 15,
+  sheetsPerBurst: 3,
+  zoomsPerSource: 2,
+  zoomsPerHour: 6,
+  zoomsPerBurst: 2,
+  burstWindowMs: 90_000,
+}
+
+const HOUR_MS = 3_600_000
+
+/**
+ * Records image spends and refuses the ones that would run away.
+ *
+ * Returns a reason string when refused, so the tool answer can say which limit tripped instead of
+ * a single vague "budget" message.
+ */
+function createSpendGuard(limits: { perSource: number, perHour: number, perBurst: number, windowMs: number }) {
+  const spent = new Map<string, number[]>()
+
+  return {
+    /** Takes one spend for `source`, or explains why it was refused. */
+    take(source: string): string | null {
+      const now = Date.now()
+      const all = [...spent.values()].flat().filter(at => now - at < HOUR_MS)
+      const forSource = (spent.get(source) ?? []).filter(at => now - at < HOUR_MS)
+      const burst = all.filter(at => now - at < limits.windowMs)
+
+      if (forSource.length >= limits.perSource)
+        return `source ${forSource.length}/${limits.perSource}`
+      if (all.length >= limits.perHour)
+        return `hour ${all.length}/${limits.perHour}`
+      if (burst.length >= limits.perBurst)
+        return `burst ${burst.length}/${limits.perBurst} in ${Math.round(limits.windowMs / 1000)} s`
+
+      spent.set(source, [...forSource, now])
+      return null
+    },
+  }
+}
+
+/** Turns a refusal into the sentence the model has to work with, naming the limit that tripped. */
+function budgetRefusalMessage(reason: string, kind: 'sheet' | 'zoom'): string {
+  const plural = kind === 'sheet' ? 'contact sheets' : 'zooms'
+  if (reason.startsWith('source'))
+    return `This video's ${plural} are used up (${reason.slice(7)}). Answer from what you already have, or ask the owner to raise the per-video limit.`
+  if (reason.startsWith('hour'))
+    return `The hourly ${plural} budget is used up (${reason.slice(5)}). Answer from what you already have; the budget refills as older calls age out.`
+  return `${plural} were drawn back to back (${reason.slice(6)}). Answer with what you already saw, then draw another only if the answer still needs it.`
+}
 
 /** Cells per depth level. More cells is free in tokens, but each cell gets smaller. */
 export function cellsForDepth(depth: VideoDepth): number {
@@ -209,7 +275,19 @@ export async function createVideoTools(
   runtime: VideoToolRuntime,
   options: { budget?: VideoBudget, depth?: () => VideoDepth } = {},
 ): Promise<Tool[]> {
-  const budget: VideoBudget = { ...defaultVideoBudget, ...options.budget }
+  const limits: VideoBudget = { ...defaultVideoBudget, ...options.budget }
+  const sheetSpend = createSpendGuard({
+    perSource: limits.sheetsPerSource,
+    perHour: limits.sheetsPerHour,
+    perBurst: limits.sheetsPerBurst,
+    windowMs: limits.burstWindowMs,
+  })
+  const zoomSpend = createSpendGuard({
+    perSource: limits.zoomsPerSource,
+    perHour: limits.zoomsPerHour,
+    perBurst: limits.zoomsPerBurst,
+    windowMs: limits.burstWindowMs,
+  })
   const depthOf = options.depth ?? (() => 'read' as VideoDepth)
 
   const tools: Tool[] = [
@@ -261,9 +339,9 @@ export async function createVideoTools(
         const parsed = safeParse(storyboardParameters, rawInput)
         if (!parsed.success)
           return 'The sheet was not drawn: `source` is required.'
-        if (budget.sheets <= 0)
-          return 'No sheets left in this conversation. Answer from what you already saw, or ask the user to raise the video module\'s sheet budget.'
-        budget.sheets -= 1
+        const refused = sheetSpend.take(parsed.output.source)
+        if (refused)
+          return budgetRefusalMessage(refused, 'sheet')
         const result = await runtime.sheet({
           source: parsed.output.source,
           fromSeconds: parsed.output.from_seconds ?? undefined,
@@ -289,9 +367,9 @@ export async function createVideoTools(
           return 'The zoom was not drawn: `source`, `from_seconds` and `to_seconds` are required.'
         if (parsed.output.to_seconds <= parsed.output.from_seconds)
           return 'The zoom window is empty: `to_seconds` must be after `from_seconds`.'
-        if (budget.zooms <= 0)
-          return 'No zooms left in this conversation. Answer from the sheet you already have.'
-        budget.zooms -= 1
+        const refused = zoomSpend.take(parsed.output.source)
+        if (refused)
+          return budgetRefusalMessage(refused, 'zoom')
         const result = await runtime.sheet({
           source: parsed.output.source,
           fromSeconds: parsed.output.from_seconds,
