@@ -168,3 +168,25 @@ it('runs a recipe with every registered tool', async () => {
   const task = () => Object.values(sessions.sessionMetas).find(meta => meta.recipeId === tidy.id)
   await expect.poll(() => task() && sessions.getSessionMessages(task()!.sessionId).find(message => message.role === 'user')?.tools).toContainEqual({ name: 'computer_use' })
 })
+
+// ROOT CAUSE:
+// Settings had a schedule tab and a banner: a recipe could carry a schedule, and nothing ever asked whether it was due.
+// The loop only asks; the run itself goes through the same background path, so its session, steps, and notice stay one code path.
+it('starts a recipe whose schedule is due, and waits out the interval', async () => {
+  const { chat, sessions, recipes, prompts } = await setupChat(async () => 'nothing new')
+  recipes.add({ name: 'Digest', description: 'Reads the news.', instructions: 'List the headlines.', keywords: [], enabled: true })
+  const digest = recipes.recipes.find(recipe => recipe.name === 'Digest')!
+  const now = Date.now()
+  recipes.setSchedule(digest.id, 60, now)
+
+  // Saving the schedule waits one interval, so the editor never spends a model call at once.
+  await chat.runDueRecipes(now + 30 * 60_000)
+  expect(prompts.length).toBe(0)
+
+  await chat.runDueRecipes(now + 61 * 60_000)
+
+  await expect.poll(() => chat.backgroundTasks.find(task => task.recipeName === 'Digest')?.status).toBe('done')
+  expect(prompts.some(prompt => prompt.includes('Scheduled run of'))).toBe(true)
+  expect(recipes.recipes.find(recipe => recipe.id === digest.id)!.lastRunAt).toBe(now + 61 * 60_000)
+  expect(sessions.activeSessionId).not.toBe('')
+})

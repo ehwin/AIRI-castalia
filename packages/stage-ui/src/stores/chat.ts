@@ -12,8 +12,8 @@ import { errorMessageFrom } from '@moeru/std'
 import { decodeBase64 } from '@moeru/std/base64'
 import { SpanStatusCode } from '@opentelemetry/api'
 import { fileSource } from '@proj-airi/audio/encoding'
-import { formatAgentStatePrompt, useCastaliaPluginStore } from '@proj-airi/castalia-plugin'
-import { createChatOrchestratorRuntime, isBackgroundRecipe, matchKeywordRecipes, renderConversationPreview, scanRetention } from '@proj-airi/core-agent'
+import { formatSelfStatePrompt, useCastaliaPluginStore } from '@proj-airi/castalia-plugin'
+import { createChatOrchestratorRuntime, dueRecipes, isBackgroundRecipe, matchKeywordRecipes, renderConversationPreview, scanRetention } from '@proj-airi/core-agent'
 import { IOAttributes, IOEvents, IOSpanNames, IOSubsystems } from '@proj-airi/stage-shared'
 import { isEqual } from 'es-toolkit'
 import { nanoid } from 'nanoid'
@@ -51,7 +51,7 @@ import { composeRecipeSpacePrompt, composeSystemPrompt } from './chat/prompt-rec
 import { useChatSessionStore } from './chat/session-store'
 import { useChatStreamStore } from './chat/stream-store'
 import { useContextObservabilityStore } from './devtools/context-observability'
-import { useMemoryStore } from './memory'
+import { shouldSkipIngest, useMemoryStore } from './memory'
 import { useAiriCardStore } from './modules/airi-card'
 import { useAutonomousArtistryStore } from './modules/artistry-autonomous'
 import { useConsciousnessStore } from './modules/consciousness'
@@ -120,6 +120,19 @@ export function isOpenTask(status: ChatSessionTaskStatus) {
  * The result already reached the conversation as a stored notice, so nothing else reads these sessions.
  */
 const KEPT_FINISHED_TASKS = 3
+
+/** How often the schedule asks which auto-run recipe is due. Minutes are the unit of a schedule, so a minute is enough. */
+const AUTO_RUN_TICK_MS = 60_000
+
+/**
+ * The user turn a scheduled run starts with.
+ *
+ * The steps themselves come from the recipe prompt, so this line only says why the turn exists; a run that read its
+ * own purpose as a request from the owner would answer instead of working.
+ */
+function autoRunTask(recipe: Recipe) {
+  return `Scheduled run of "${recipe.name}".${recipe.description ? `\n${recipe.description}` : ''}`
+}
 
 /** The durable messages appended while one chat request executes. */
 export interface ChatSendResult {
@@ -273,6 +286,10 @@ export const useChatStore = defineStore('chat', () => {
   const chatStream = useChatStreamStore()
   const chatContext = useChatContextStore()
   const mindStore = useMindStore()
+  /** The schedule loop's timer, owned by the store so a window that closes stops asking. */
+  let autoRunTimer: ReturnType<typeof setInterval> | undefined
+  /** The window's synchronized runtime. Only the leader starts scheduled runs, so two windows never start one twice. */
+  let syncedRuntime: SyncedPiniaRuntime | undefined
   const cardStore = useAiriCardStore()
   const recipes = useRecipesStore()
   const memory = useMemoryStore()
@@ -316,10 +333,13 @@ export const useChatStore = defineStore('chat', () => {
    */
   function sessionSystemPrompt(sessionId: string) {
     const persona = personaOf(sessionId)
-    castalia.setCharacter(persona)
+    // A card id and the memory bank's character id are two names for one character, and they do not always match
+    // (the built-in card is `default`, its bank rows are `airi`). Everything that reads or writes the bank's own
+    // state keys off the resolved persona, so the index, the self-state block, and the state tools agree.
+    const memoryPersona = memory.enabled ? memory.resolvePersona(persona) : persona
+    castalia.setCharacter(memoryPersona)
     const identity = composeSystemPrompt(cardStore.getSystemPrompt(persona))
-      + (memory.enabled ? composeMemoryPrompt(memory.indexFor(persona)) : '')
-      + (castalia.enabled ? formatAgentStatePrompt(castalia.snapshotFor(persona)) : '')
+      + (memory.enabled ? composeMemoryPrompt(memory.indexFor(memoryPersona)) : '')
       + (drawsCards(sessionId) ? composeDrawCardPrompt() : '')
     const recipeId = chatSession.sessionMetas[sessionId]?.recipeId
     const recipe = recipeId ? recipes.recipes.find(entry => entry.id === recipeId) : undefined
@@ -380,6 +400,7 @@ export const useChatStore = defineStore('chat', () => {
    * Initializes chat state and binds local consumers to synchronized leadership.
    */
   async function initialize(syncedPinia: SyncedPiniaRuntime) {
+    syncedRuntime = syncedPinia
     stopLeadershipListener ??= syncedPinia.onLeadershipChange((isLeader) => {
       if (!isLeader) {
         return
@@ -656,15 +677,16 @@ export const useChatStore = defineStore('chat', () => {
       return tools
     const { conversationId: sessionId } = correlation
     // Each character card keeps its own memories and reads the general ones. A scene's card keeps its own as well.
-    const persona = personaOf(sessionId)
+    // The bank may store the same character under another id, so the tools write to the resolved persona and the
+    // state the prompt shows is the one they write to.
+    const persona = memory.enabled ? memory.resolvePersona(personaOf(sessionId)) : personaOf(sessionId)
     const sourceTools = async () => [
       ...(typeof tools === 'function' ? await tools() ?? [] : tools ?? []),
-      ...memory.enabled ? await createMemoryTools({ read: name => memory.read(name, persona), write: entry => memory.write(entry, persona), forget: name => memory.forget(name, persona) }) : [],
+      ...memory.enabled ? await createMemoryTools({ read: name => memory.read(name, persona), search: query => memory.search(query), write: entry => memory.write(entry, persona), forget: name => memory.forget(name, persona) }) : [],
       ...castalia.enabled
         ? await createCastaliaStateTools({
             recordEmotion: (vad, reason) => castalia.recordEmotion(vad, reason, persona),
             setDesire: desire => castalia.setDesire(desire, persona),
-            adjustEnergy: change => castalia.boostEnergy(change, persona),
           })
         : [],
     ]
@@ -1016,7 +1038,20 @@ export const useChatStore = defineStore('chat', () => {
       () => createRuntimePromptContext(runtimePrompt.value),
       // Her state changes every turn. It goes here, not in the system prompt,
       // so the cacheable prefix stays byte-stable.
-      () => createMindStateContext(mindStore.stateLineForSend()),
+      (sessionId) => {
+        // One self-state block: what she feels (psyche), what pulls at her
+        // (mind drives) and how much is left (mind energy) in one paragraph.
+        // The session comes from the runtime, not from `activeSessionId`: a
+        // scene or queued turn can be sent while another session is selected.
+        const persona = memory.enabled ? memory.resolvePersona(personaOf(sessionId)) : personaOf(sessionId)
+        const drivesLine = mindStore.stateLineForSend()
+        if (!castalia.enabled)
+          return createMindStateContext(drivesLine)
+        return createMindStateContext(formatSelfStatePrompt(castalia.snapshotFor(persona), {
+          drivesLine,
+          energy: 100 - mindStore.drives.fatigue,
+        }))
+      },
       // Relationship policy: tone, depth, and when disagreement is allowed.
       () => relationalPolicyContext(),
       // What this turn brings back from long-term memory. The engine abstains on
@@ -1076,11 +1111,14 @@ export const useChatStore = defineStore('chat', () => {
       // 自回归结束 → 写回记忆体。这一轮说过的话就是她日后"记得"的唯一来源；
       // 之前这条链在 app 侧没有任何调用点，airi 库的 conversation_log 自 2026-09-12 起就再没增长过。
       // 不 await、不抛错：写库慢或失败都不能影响已经显示出来的回复（失败只落 console）。
-      void memory.ingestTurn({
-        user: (pendingUserTurns.get(sessionId)?.text ?? lastUserTurn(sessionId)?.text ?? '').trim(),
-        assistant: stripAssistantMarkers(messageText).slice(0, 8_000),
-        sessionId,
-      })
+      const userText = (pendingUserTurns.get(sessionId)?.text ?? lastUserTurn(sessionId)?.text ?? '').trim()
+      const assistantText = stripAssistantMarkers(messageText).slice(0, 8_000)
+      // A one-line goodbye carries no fact: storing it only adds a transcript entry that
+      // `isTranscriptEntry()` then has to hide again on the way into the index.
+      if (shouldSkipIngest({ user: userText, assistant: assistantText }))
+        console.info('[memory] skipped ingest for a closing turn')
+      else
+        void memory.ingestTurn({ user: userText, assistant: assistantText, sessionId })
       const artistry = sessionCard(sessionId)?.extensions?.airi?.modules?.artistry
       if (artistry?.autonomousEnabled && artistry?.autonomousTarget === 'assistant')
         void artistryAutonomousStore.runArtistTask(messageText, toProviderHistory(sessionMessages))
@@ -1542,6 +1580,59 @@ export const useChatStore = defineStore('chat', () => {
     runtime.cancelPendingSends(sessionId)
   }
 
+  /**
+   * Starts the schedule loop for auto-run recipes.
+   *
+   * The loop only asks which recipe is due; every run goes through `startRecipe`, so a scheduled run opens the same
+   * task session, gets the same recipe prompt, and reports back to the conversation like any other background run.
+   */
+  function startAutoRun() {
+    if (autoRunTimer)
+      return
+    autoRunTimer = setInterval(() => void runDueRecipes(), AUTO_RUN_TICK_MS)
+  }
+
+  function stopAutoRun() {
+    if (!autoRunTimer)
+      return
+    clearInterval(autoRunTimer)
+    autoRunTimer = undefined
+  }
+
+  /**
+   * Starts every recipe whose schedule is due.
+   *
+   * Silence is the safe failure: a window with no owner conversation, a sleeping character, or a refused start
+   * skips the run instead of opening a task with nowhere to report.
+   */
+  async function runDueRecipes(now = Date.now()) {
+    // A follower window shares the recipe list, so both windows would otherwise start the same run.
+    if (syncedRuntime && !syncedRuntime.isLeader())
+      return
+    const parentSessionId = chatSession.activeSessionId
+    if (!parentSessionId)
+      return
+    // A scene or a bound session has its own character and no owner conversation to report a finished task to.
+    if (chatSession.sessionMetas[parentSessionId]?.bindings?.length)
+      return
+    if (mindStore.asleep || mindStore.napping)
+      return
+    for (const recipe of dueRecipes(recipes.recipes, now)) {
+      // Marked before the start so a slow start cannot be started a second time by the next tick.
+      recipes.markRun(recipe.id, now)
+      await startRecipe(recipe, { parentSessionId, task: autoRunTask(recipe) })
+    }
+  }
+
+  /** Starts one recipe now, from its settings row. The schedule's next run still counts from this start. */
+  async function runRecipeNow(recipe: Recipe) {
+    const parentSessionId = chatSession.activeSessionId
+    if (!parentSessionId)
+      return { status: 'refused' as const, reason: 'No conversation is open.' }
+    recipes.markRun(recipe.id)
+    return startRecipe(recipe, { parentSessionId, task: autoRunTask(recipe) })
+  }
+
   function getPendingQueuedSendSnapshot() {
     return runtime.getPendingQueuedSendSnapshot()
   }
@@ -1564,6 +1655,10 @@ export const useChatStore = defineStore('chat', () => {
     retry,
     send,
     startRecipe,
+    startAutoRun,
+    stopAutoRun,
+    runDueRecipes,
+    runRecipeNow,
     stopBackgroundTask,
     dismissBackgroundTask,
     notifyConversation,

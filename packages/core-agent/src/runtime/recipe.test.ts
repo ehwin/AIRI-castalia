@@ -2,7 +2,7 @@ import type { Recipe, RecipeDecision } from './recipe'
 
 import { describe, expect, it } from 'vitest'
 
-import { decisionOptions, isBackgroundRecipe, judgeDecision, matchKeywordRecipes, usableRecipes } from './recipe'
+import { decisionOptions, dueRecipes, isBackgroundRecipe, judgeDecision, matchKeywordRecipes, nextRunAt, usableRecipes } from './recipe'
 
 function recipe(overrides: Partial<Recipe>): Recipe {
   return {
@@ -66,6 +66,42 @@ describe('recipes', () => {
 
     it('names what an answer got wrong, so the character can fix its call', () => {
       expect(judgeDecision(annoyed, 'maybe')).toBe('The answer must be one of: yes, no.')
+    })
+  })
+
+  describe('schedule', () => {
+    const now = 1_800_000_000_000
+
+    // Saving a schedule must not spend a model call at once: the first run waits one full interval.
+    it('waits one interval after the schedule is saved', () => {
+      const scheduled = recipe({ schedule: { everyMinutes: 60 }, lastRunAt: now })
+
+      expect(dueRecipes([scheduled], now)).toEqual([])
+      expect(dueRecipes([scheduled], now + 59 * 60_000)).toEqual([])
+      expect(dueRecipes([scheduled], now + 60 * 60_000).map(entry => entry.id)).toEqual(['user:play'])
+    })
+
+    // A typo in the editor must not turn into a model call every few seconds.
+    it('never runs faster than the shortest interval', () => {
+      const tooFast = recipe({ schedule: { everyMinutes: 0 }, lastRunAt: now })
+
+      expect(nextRunAt(tooFast, now)).toBe(now + 15 * 60_000)
+      expect(dueRecipes([tooFast], now + 14 * 60_000)).toEqual([])
+    })
+
+    // Only recipes that can run anyway are due: a disabled one, or one waiting for approval, stays quiet.
+    it('ignores recipes that are off, unapproved, or not scheduled', () => {
+      const recipes = [
+        recipe({ id: 'user:off', enabled: false, schedule: { everyMinutes: 15 }, lastRunAt: 0 }),
+        recipe({ id: 'model:pending', source: 'model', approved: false, schedule: { everyMinutes: 15 }, lastRunAt: 0 }),
+        recipe({ id: 'user:manual', lastRunAt: 0 }),
+      ]
+
+      expect(dueRecipes(recipes, now).map(entry => entry.id)).toEqual([])
+    })
+
+    it('reports no next run for a recipe without a schedule', () => {
+      expect(nextRunAt(recipe({}), now)).toBeUndefined()
     })
   })
 })

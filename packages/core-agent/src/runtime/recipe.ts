@@ -58,10 +58,35 @@ export interface Recipe {
    */
   approved: boolean
   /**
+   * The recipe starts itself on this interval, without the owner's message.
+   * Only a background recipe can keep it: a run that started by itself has to own a task session.
+   */
+  schedule?: RecipeSchedule
+  /** The last start, by the owner, the model, or the schedule. A schedule never runs twice inside its interval. */
+  lastRunAt?: number
+  /**
    * The recipe runs as a task in its own session, and its result reaches the conversation later.
    * Without it, using the recipe gives its steps to the conversation, which follows them itself.
    */
   background?: boolean
+}
+
+/** How often a recipe starts itself. */
+export interface RecipeSchedule {
+  /** Minutes between two runs. Below `MIN_AUTO_RUN_MINUTES` is refused, so a typo cannot loop the model. */
+  everyMinutes: number
+}
+
+/** The shortest auto-run interval. One tick is already a model call, so minutes are the unit that makes sense. */
+export const MIN_AUTO_RUN_MINUTES = 15
+
+/** When the schedule next starts the recipe. Undefined when it has none. */
+export function nextRunAt(recipe: Recipe, now: number): number | undefined {
+  if (!recipe.schedule)
+    return undefined
+  const everyMinutes = Math.max(MIN_AUTO_RUN_MINUTES, Math.round(recipe.schedule.everyMinutes))
+  // A recipe that never ran waits one interval, so saving the schedule does not call the model at once.
+  return (recipe.lastRunAt ?? now) + everyMinutes * 60_000
 }
 
 /**
@@ -73,6 +98,14 @@ export const MODEL_DECIDES_STEPS = 'Decide what this run does from the recipe\'s
 /** Recipes that can run now: enabled and authorized. */
 export function usableRecipes(recipes: readonly Recipe[]) {
   return recipes.filter(recipe => recipe.enabled && recipe.approved)
+}
+
+/** Recipes a schedule starts now: authorized, switched on, scheduled, and past the interval. */
+export function dueRecipes(recipes: readonly Recipe[], now: number) {
+  return usableRecipes(recipes).filter((recipe) => {
+    const at = nextRunAt(recipe, now)
+    return at !== undefined && now >= at
+  })
 }
 
 /** Whether a recipe runs in its own session. */

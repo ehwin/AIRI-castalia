@@ -45,4 +45,25 @@ describe('recipes store', () => {
       approved: false,
     })
   })
+
+  // A scheduled run has no owner message behind it, so it must own a task session: the schedule turns the
+  // background flag on by itself, and saving waits a full interval before the first call.
+  it('schedules a recipe, marks a run, and takes it off the schedule', () => {
+    const recipes = useRecipesStore()
+    recipes.add({ name: 'Morning brief', description: 'Summarize the overnight news.', instructions: 'List the headlines.', keywords: [], enabled: true })
+    const id = recipes.recipes[0].id
+    const now = 1_800_000_000_000
+
+    recipes.setSchedule(id, 30, now)
+
+    expect(recipes.recipes[0]).toMatchObject({ background: true, schedule: { everyMinutes: 30 }, lastRunAt: now })
+
+    recipes.markRun(id, now + 60_000)
+
+    expect(recipes.recipes[0].lastRunAt).toBe(now + 60_000)
+
+    recipes.setSchedule(id, undefined)
+
+    expect(recipes.recipes[0].schedule).toBeUndefined()
+  })
 })

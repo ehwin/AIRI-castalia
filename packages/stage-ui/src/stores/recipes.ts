@@ -9,7 +9,7 @@ import { computed } from 'vue'
 export type { DecisionAction, Recipe } from '@proj-airi/core-agent'
 
 /** The fields that the owner writes in the recipe editor. */
-export type RecipeFields = Pick<Recipe, 'name' | 'description' | 'instructions' | 'decision' | 'keywords' | 'background'>
+export type RecipeFields = Pick<Recipe, 'name' | 'description' | 'instructions' | 'decision' | 'keywords' | 'background' | 'schedule'>
 
 /**
  * Recipes the owner keeps: the owner's own and model proposals.
@@ -62,6 +62,27 @@ export const useRecipesStore = defineStore('recipes', () => {
     recipes.value = recipes.value.filter(recipe => recipe.id !== id)
   }
 
+  /**
+   * Turns the schedule on, off, or to another interval.
+   *
+   * Saving waits one full interval before the first run, so opening the editor never spends a model call at once.
+   * A scheduled recipe always runs in the background: a run that starts without a message owns its own session.
+   */
+  function setSchedule(id: string, everyMinutes: number | undefined, now = Date.now()) {
+    recipes.value = recipes.value.map((recipe) => {
+      if (recipe.id !== id)
+        return recipe
+      if (!everyMinutes)
+        return { ...recipe, schedule: undefined }
+      return { ...recipe, background: true, schedule: { everyMinutes }, lastRunAt: recipe.lastRunAt ?? now }
+    })
+  }
+
+  /** Records that a run started, so the next one counts from it. */
+  function markRun(id: string, at = Date.now()) {
+    recipes.value = recipes.value.map(recipe => recipe.id === id ? { ...recipe, lastRunAt: at } : recipe)
+  }
+
   function resetState() {
     recipes.reset()
     proposalsEnabled.reset()
@@ -77,6 +98,8 @@ export const useRecipesStore = defineStore('recipes', () => {
     propose,
     update,
     remove,
+    setSchedule,
+    markRun,
     resetState,
   }
 })

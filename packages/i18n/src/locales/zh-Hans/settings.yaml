@@ -882,6 +882,19 @@ pages:
           auto_run: 自动运行
           conversation_description: 聊天时用的配方，你发消息时才会用上。
           auto_run_description: 契机一到就自己开始，不用你发消息。每次运行都会请求一次模型。
+        auto_run:
+          empty: 还没有定时任务。
+          add: 新建定时任务
+          name: 名称
+          description: 要它做什么
+          every: 每隔
+          minutes: 分钟
+          min_note: 最短 {min} 分钟。
+          create: 创建
+          last_run: '上次运行：{time}'
+          never_run: 还没运行过
+          run_now: 立即运行
+          stop: 取消计划
         background:
           label: 在后台运行
           description: 适合查资料这类要花时间的事。在后台做完，再把结果带回对话。
@@ -1385,6 +1398,10 @@ pages:
       unavailable: 这个构建里没有视频引擎（浏览器的网页版没有 ffmpeg）。用桌面版打开这个开关才会生效。
       ffmpeg-path: ffmpeg 路径
       ffmpeg-path-description: 留空就从 PATH 里找；填了就直接用这个可执行文件（改完下一次调用即生效，不用重启）。
+      sheets-per-video: 每支视频的分镜张数
+      sheets-per-video-description: 同一支视频最多画几张分镜图，超过就停下来说“这支看够了”。默认 4。
+      sheets-per-hour: 每小时分镜张数上限
+      sheets-per-hour-description: 所有视频合计的滚动一小时上限，防止她卡在循环里反复画图。默认 15。
       ffmpeg-missing: 本机没找到 ffmpeg：只能读字幕，分镜和精确取帧都用不了。填上面的路径，或把 ffmpeg 放进 PATH。
       ffmpeg-found: 解码器已就绪 · {path}
       cache-dir: 缓存 {path}

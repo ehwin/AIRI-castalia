@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import type { Recipe, RecipeFields } from '@proj-airi/stage-ui/stores/recipes'
 
-import { MODEL_DECIDES_STEPS } from '@proj-airi/core-agent'
-import { WIP } from '@proj-airi/stage-ui/components'
+import { MIN_AUTO_RUN_MINUTES, MODEL_DECIDES_STEPS } from '@proj-airi/core-agent'
+import { useChatStore } from '@proj-airi/stage-ui/stores/chat'
 import { useRecipesStore } from '@proj-airi/stage-ui/stores/recipes'
 import { SKILL_ICONS } from '@proj-airi/stage-ui/tools/icons'
-import { Button, Checkbox, FieldCheckbox, GhostButton, SelectTab } from '@proj-airi/ui'
+import { Button, Checkbox, FieldCheckbox, GhostButton, Input, SelectTab } from '@proj-airi/ui'
 import { storeToRefs } from 'pinia'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -16,11 +16,12 @@ import { recipeSearchKey } from './memory-long-term-recipes.search'
 
 /** Recipe types that the owner can write. */
 type RecipeType = 'instructions' | 'decision'
-/** Conversation recipes work inside a reply. Auto-run recipes are still in development, so their tab shows a banner. */
+/** Conversation recipes work inside a reply. Auto-run recipes start on their own schedule and report back. */
 type RecipeTab = 'conversation' | 'auto-run'
 
 const { t } = useI18n()
 const recipesStore = useRecipesStore()
+const chatStore = useChatStore()
 const { recipes, proposalsEnabled } = storeToRefs(recipesStore)
 
 const KEY = 'settings.pages.modules.memory-long-term.recipes'
@@ -30,6 +31,47 @@ const KEYWORDS_SHOWN = 3
 const TYPE_ICONS: Record<RecipeType, string> = SKILL_ICONS
 
 const tab = ref<RecipeTab>('conversation')
+const autoRunRecipes = computed(() => recipes.value.filter(recipe => recipe.schedule))
+/** Interval edits that are not saved yet, keyed by recipe. An empty field shows the saved interval as its placeholder. */
+const drafts = ref<Record<string, number | undefined>>({})
+const creating = ref(false)
+const draft = ref({ name: '', description: '', everyMinutes: 60 })
+
+function everyOf(recipe: Recipe) {
+  return Math.max(MIN_AUTO_RUN_MINUTES, Math.round(recipe.schedule?.everyMinutes ?? 60))
+}
+
+function saveEvery(recipe: Recipe) {
+  recipesStore.setSchedule(recipe.id, drafts.value[recipe.id] ?? everyOf(recipe))
+  drafts.value[recipe.id] = undefined
+}
+
+/** Takes a recipe off the schedule. Its runs already in flight keep going. */
+function stopSchedule(recipe: Recipe) {
+  recipesStore.setSchedule(recipe.id, undefined)
+}
+
+function runNow(recipe: Recipe) {
+  void chatStore.runRecipeNow(recipe)
+}
+
+function createAutoRun() {
+  const name = draft.value.name.trim()
+  if (!name)
+    return
+  recipesStore.add({
+    name,
+    description: draft.value.description.trim(),
+    instructions: MODEL_DECIDES_STEPS,
+    keywords: [],
+    enabled: true,
+    background: true,
+    schedule: { everyMinutes: Math.max(MIN_AUTO_RUN_MINUTES, Math.round(draft.value.everyMinutes)) },
+    lastRunAt: Date.now(),
+  })
+  draft.value = { name: '', description: '', everyMinutes: 60 }
+  creating.value = false
+}
 const isAutoRunTab = computed(() => tab.value === 'auto-run')
 /** Recipes that a decision answer can lead to: one with steps, or another decision. */
 const targets = computed(() => recipes.value.filter(recipe => recipe.instructions.trim() || recipe.decision))
@@ -112,10 +154,69 @@ function removeRecipe(id: string) {
     <SelectTab :model-value="tab" :options="tabOptions" size="sm" @update:model-value="selectTab" />
 
     <template v-if="isAutoRunTab">
-      <p :class="['text-sm', 'text-neutral-500 dark:text-neutral-400']">
-        {{ t(`${KEY}.tabs.auto_run_description`) }}
+      <div :class="['flex flex-wrap items-start justify-between', 'gap-3']">
+        <p :class="['min-w-0 flex-1', 'text-sm', 'text-neutral-500 dark:text-neutral-400']">
+          {{ t(`${KEY}.tabs.auto_run_description`) }}
+        </p>
+        <Button v-if="!creating" :class="['m-1']" size="sm" variant="primary" icon="i-solar:add-circle-linear" :label="t(`${KEY}.auto_run.add`)" @click="creating = true" />
+      </div>
+
+      <section v-if="creating" :class="['flex flex-col', 'gap-3', 'rounded-xl', 'bg-neutral-50 dark:bg-neutral-800/60', 'p-4']">
+        <label :class="['flex flex-col', 'gap-1', 'text-sm']">
+          <span>{{ t(`${KEY}.auto_run.name`) }}</span>
+          <Input v-model="draft.name" size="sm" />
+        </label>
+        <label :class="['flex flex-col', 'gap-1', 'text-sm']">
+          <span>{{ t(`${KEY}.auto_run.description`) }}</span>
+          <Input v-model="draft.description" size="sm" />
+        </label>
+        <label :class="['flex items-center', 'gap-2', 'text-sm']">
+          <span>{{ t(`${KEY}.auto_run.every`) }}</span>
+          <Input v-model="draft.everyMinutes" type="number" size="sm" :class="['w-24']" />
+          <span>{{ t(`${KEY}.auto_run.minutes`) }}</span>
+        </label>
+        <p :class="['text-xs', 'text-neutral-500 dark:text-neutral-400']">
+          {{ t(`${KEY}.auto_run.min_note`, { min: MIN_AUTO_RUN_MINUTES }) }}
+        </p>
+        <div :class="['flex justify-end', 'gap-2']">
+          <Button size="sm" :label="t(`${KEY}.cancel`)" @click="creating = false" />
+          <Button size="sm" variant="primary" :label="t(`${KEY}.auto_run.create`)" @click="createAutoRun" />
+        </div>
+      </section>
+
+      <p v-if="!autoRunRecipes.length && !creating" :class="['text-sm', 'text-neutral-500 dark:text-neutral-400']">
+        {{ t(`${KEY}.auto_run.empty`) }}
       </p>
-      <WIP />
+
+      <ul v-else :class="['flex flex-col', 'gap-2']">
+        <li
+          v-for="recipe in autoRunRecipes"
+          :key="recipe.id"
+          :class="['flex flex-col', 'gap-3', 'rounded-xl', 'px-4 py-3', 'bg-neutral-50 dark:bg-neutral-800/60']"
+        >
+          <div :class="['flex items-center', 'gap-2']">
+            <span :class="['i-solar:alarm-linear', 'text-primary-500 dark:text-primary-400']" aria-hidden="true" />
+            <span :class="['text-sm font-medium']">{{ recipe.name }}</span>
+            <span :class="['ml-auto', 'text-xs', 'text-neutral-500 dark:text-neutral-400']">
+              {{ recipe.lastRunAt
+                ? t(`${KEY}.auto_run.last_run`, { time: new Date(recipe.lastRunAt).toLocaleString() })
+                : t(`${KEY}.auto_run.never_run`) }}
+            </span>
+          </div>
+          <p v-if="recipe.description" :class="['text-sm', 'text-neutral-500 dark:text-neutral-400']">
+            {{ recipe.description }}
+          </p>
+          <div :class="['flex flex-wrap items-center', 'gap-2', 'text-sm']">
+            <span>{{ t(`${KEY}.auto_run.every`) }}</span>
+            <Input v-model="drafts[recipe.id]" type="number" size="sm" :class="['w-24']" :placeholder="String(everyOf(recipe))" />
+            <span>{{ t(`${KEY}.auto_run.minutes`) }}</span>
+            <Button size="sm" :label="t(`${KEY}.save`)" @click="saveEvery(recipe)" />
+            <Button size="sm" :label="t(`${KEY}.auto_run.run_now`)" @click="runNow(recipe)" />
+            <Button size="sm" :label="t(`${KEY}.auto_run.stop`)" @click="stopSchedule(recipe)" />
+            <Button size="sm" :label="t(`${KEY}.remove`)" @click="removeRecipe(recipe.id)" />
+          </div>
+        </li>
+      </ul>
     </template>
 
     <template v-else>

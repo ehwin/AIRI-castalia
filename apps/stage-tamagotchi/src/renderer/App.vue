@@ -47,7 +47,7 @@ import {
   i18nGetLocale,
   i18nSetLocale,
 } from '../shared/eventa'
-import { castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemorySave, castaliaMemorySelfCycle } from '../shared/eventa/castalia-memory'
+import { castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySelfCycle, castaliaMemorySetEnergy } from '../shared/eventa/castalia-memory'
 import { electronModelAssetCancel, electronModelAssetEnsure, electronModelAssetRemove, electronModelAssetsClear, electronModelAssetsList, electronModelAssetStatusChanged } from '../shared/eventa/model-assets'
 import {
   electronPluginUpdateCapability,
@@ -95,12 +95,15 @@ const listCastaliaMemory = useElectronEventaInvoke(castaliaMemoryList)
 const saveCastaliaMemory = useElectronEventaInvoke(castaliaMemorySave)
 const forgetCastaliaMemory = useElectronEventaInvoke(castaliaMemoryForget)
 const recallCastaliaMemory = useElectronEventaInvoke(castaliaMemoryRecall)
+const searchCastaliaMemory = useElectronEventaInvoke(castaliaMemorySearch)
 const ingestCastaliaMemory = useElectronEventaInvoke(castaliaMemoryIngest)
 memoryStore.attachRemote({
   list: listCastaliaMemory,
   save: saveCastaliaMemory,
   forget: async (entry) => { await forgetCastaliaMemory(entry) },
   recall: query => recallCastaliaMemory(query),
+  // 模型主动查记忆的检索通道：让她真的能"翻记忆体"，而不是只能按索引名逐条读。
+  search: (query, topK) => searchCastaliaMemory({ query, topK }),
   // 每轮对话的写回入口：没有它，她只说、不记。
   ingest: turn => ingestCastaliaMemory(turn),
 })
@@ -136,6 +139,8 @@ const mindStore = useMindStore()
 const castaliaStore = useCastaliaPluginStore()
 const invokePsyche = useElectronEventaInvoke(castaliaMemoryPsyche)
 const invokeSelfCycle = useElectronEventaInvoke(castaliaMemorySelfCycle)
+const invokeSetEnergy = useElectronEventaInvoke(castaliaMemorySetEnergy)
+const invokeMaintain = useElectronEventaInvoke(castaliaMemoryMaintain)
 /** The engine owns the affect state; the mirror refreshes on this cadence so the prompt is never stale. */
 const PSYCHE_SYNC_INTERVAL_MS = 5 * 60_000
 let psycheSyncTimer: ReturnType<typeof setInterval> | null = null
@@ -449,11 +454,15 @@ onMounted(async () => {
   // user is still inside the grace window. The web app starts the same ticker.
   selfInitiatedSpeechStore.start()
 
+  // Auto-run recipes: the loop asks which schedule is due once a minute and starts it through the same
+  // background-run path as a recipe the model picks, so nothing here decides what a run does.
+  chatStore.startAutoRun()
+
   // The mind reads what happened while the app was off, then keeps its own clock.
   // It only listens to finished turns; it never reads the chat store directly, so
   // the two stores stay independent.
   mindStore.attachTurnComplete(chatStore.onChatTurnComplete)
-  await mindStore.initialize()
+  await mindStore.initialize(useAiriCardStore().activeCardId)
 
   // Her eyes are attached only while perception allows them, and the idle mind glances at the screen on a slow
   // timer. Without both, `lookAround` has nothing to see and the drive of curiosity never moves.
@@ -461,7 +470,8 @@ onMounted(async () => {
     mindStore.attachSense(perceptionStore.screen && perceptionStore.screenReady ? screenSense : undefined)
   })
   lookAroundTimer = setInterval(() => {
-    if (mindStore.senseAttached)
+    // 睡着/打盹时别抓屏：既没有意义，也会把她弄醒。
+    if (mindStore.isOwner && mindStore.senseAttached && !mindStore.asleep && !mindStore.napping)
       void mindStore.lookAround()
   }, LOOK_AROUND_INTERVAL_MS)
 
@@ -471,7 +481,7 @@ onMounted(async () => {
     try {
       const psyche = await invokePsyche({})
       if (psyche?.hasEvidence)
-        castaliaStore.syncPsyche({ vad: psyche.vad, at: psyche.updatedAt }, psyche.characterId)
+        castaliaStore.syncPsyche({ vad: psyche.vad, mood: psyche.mood, band: psyche.band, at: psyche.updatedAt }, psyche.characterId)
     }
     catch { /* the mirror is best-effort; the engine keeps the truth */ }
   }
@@ -484,13 +494,51 @@ onMounted(async () => {
   // 「她正好无聊」的时刻被无故跳过，而定时自循环（6 小时）仍由引擎自己管。
   mindStore.attachThink(async () => {
     try {
-      const report = await invokeSelfCycle({ minIntervalHours: 0 })
+      const report = await invokeSelfCycle({ minIntervalHours: 0, energy: 100 - mindStore.drives.fatigue })
       if (!report?.ok || report.skipped)
         return undefined
       return report.diaryText
     }
     catch {
       // 引擎没起来就当这次没想成；下一次 tick 还会再来。
+      return undefined
+    }
+  })
+
+  // 累了就睡：mind 的疲劳走到阈值，这一觉接的是 Castalia 的维护（reflect → consolidate → digest）。
+  // 报告决定睡得多沉——三段都成按满速恢复；失败就睡得更久，而不是"躺够时长就满血"。
+  // 走同一个 maintain 入口，主进程那份落账会挡住 04:00 的第二次整理。
+  // 一个数：mind 的疲劳决定她的精力，面板和提示词只镜像这一份。
+  // 之前 castalia 自己按墙钟衰减、又被 syncPsyche 每 5 分钟抹平，才会出现「面板 100、心里累垮」。
+  watch(
+    () => mindStore.drives.fatigue,
+    (fatigue) => {
+      // A second window would push the same fatigue into the engine and fight
+      // the owner's numbers; only the lease holder mirrors energy.
+      if (!mindStore.isOwner)
+        return
+      castaliaStore.setEnergy(100 - fatigue)
+      // The engine builds the six-hour diary itself; give it the same number so
+      // its prompt cannot say 98/100 while the chat says she is running empty.
+      void invokeSetEnergy({ value: 100 - fatigue }).catch(() => {})
+    },
+    { immediate: true },
+  )
+
+  mindStore.attachSleep(async () => {
+    try {
+      const report = await invokeMaintain({ limit: 30 })
+      const reflect = report?.reflect as { ok?: boolean } | undefined
+      const consolidate = report?.consolidate as { ok?: boolean } | undefined
+      const digest = report?.digest as { success?: boolean } | undefined
+      return {
+        reflectOk: Boolean(reflect?.ok),
+        consolidateOk: Boolean(consolidate?.ok),
+        digestOk: Boolean(digest?.success),
+      }
+    }
+    catch {
+      // 维护失败不等于不能睡：返 undefined，mind 会按 0.5 的恢复率继续这一觉。
       return undefined
     }
   })
@@ -509,6 +557,7 @@ watch(themeColorsHueDynamic, () => {
 
 onUnmounted(() => {
   selfInitiatedSpeechStore.stop()
+  chatStore.stopAutoRun()
   if (lookAroundTimer)
     clearInterval(lookAroundTimer)
   lookAroundTimer = null

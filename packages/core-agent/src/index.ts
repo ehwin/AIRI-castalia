@@ -13,6 +13,12 @@ export type { ContextSnapshot } from './messages/context-prompt'
 export { formatTimePrefix } from './messages/datetime-prefix'
 export { renderConversationPreview } from './messages/preview'
 export type { AssistantTurn, Citation, ContentSegment, Conversation, GenerationRound, ProviderContinuation, SystemTurn, ToolExecution, ToolInvocation, Turn, UserTurn } from './messages/types'
+// NOTICE: the fork's stores import persona/mind helpers straight from the package root
+// (scanRetention, advanceDrives, blindSense, composeThought). Upstream's 0.13 entry never
+// re-exported these sub-entries, so the merged tree lost them and the app build failed with
+// MISSING_EXPORT. Re-export both sub-entries; drop these lines once upstream's entry does it.
+export * from './mind'
+export * from './persona'
 export { createChatHooks } from './runtime/agent-hooks'
 export type {
   ChatAttachment,
@@ -37,8 +43,8 @@ export {
   modelKey,
   streamFrom,
 } from './runtime/llm-service'
-export { decisionOptions, isBackgroundRecipe, judgeDecision, matchKeywordRecipes, MODEL_DECIDES_STEPS, usableRecipes } from './runtime/recipe'
-export type { DecisionAction, DecisionOption, DecisionQuestion, Recipe, RecipeDecision } from './runtime/recipe'
+export { decisionOptions, dueRecipes, isBackgroundRecipe, judgeDecision, matchKeywordRecipes, MIN_AUTO_RUN_MINUTES, MODEL_DECIDES_STEPS, nextRunAt, usableRecipes } from './runtime/recipe'
+export type { DecisionAction, DecisionOption, DecisionQuestion, Recipe, RecipeDecision, RecipeSchedule } from './runtime/recipe'
 export {
   categorizeResponse,
   createStreamingCategorizer,
@@ -48,6 +54,7 @@ export type {
   CategorizedSegment,
   ResponseCategory,
 } from './runtime/response-categoriser'
+
 export { mergeLoadedSessionMessages } from './session/merge-loaded-session-messages'
 export type {
   ChatAssistantMessage,
@@ -76,10 +83,3 @@ export type {
   StreamOptions,
 } from './types/llm'
 export * from './voice'
-
-// NOTICE: the fork's stores import persona/mind helpers straight from the package root
-// (scanRetention, advanceDrives, blindSense, composeThought). Upstream's 0.13 entry never
-// re-exported these sub-entries, so the merged tree lost them and the app build failed with
-// MISSING_EXPORT. Re-export both sub-entries; drop these lines once upstream's entry does it.
-export * from './mind'
-export * from './persona'

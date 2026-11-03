@@ -933,6 +933,19 @@ pages:
           auto_run: Auto-run
           conversation_description: Recipes for chatting. They act only when you send a message.
           auto_run_description: Recipes that start on their own when a cue comes. Each run costs a model call.
+        auto_run:
+          empty: No scheduled tasks yet.
+          add: New scheduled task
+          name: Name
+          description: What it should do
+          every: Every
+          minutes: minutes
+          min_note: At least {min} minutes.
+          create: Create
+          last_run: 'Last run: {time}'
+          never_run: Not run yet
+          run_now: Run now
+          stop: Take off the schedule
         background:
           label: Run in the background
           description: For tasks that take time, such as research. It works in the background and brings the result back.
@@ -1443,6 +1456,10 @@ pages:
       unavailable: This build has no video engine (the browser build has no ffmpeg). Open this switch in the desktop app for it to take effect.
       ffmpeg-path: ffmpeg path
       ffmpeg-path-description: 'Empty, it is found on PATH; set, that binary is used (the next call picks it up, no restart).'
+      sheets-per-video: Contact sheets per video
+      sheets-per-video-description: How many sheets one video may use before she has to answer with what she has. Defaults to 4.
+      sheets-per-hour: Contact sheets per hour
+      sheets-per-hour-description: Rolling hourly cap across every video, so a stuck turn cannot keep drawing. Defaults to 15.
       ffmpeg-missing: 'No ffmpeg on this machine: only captions work, sheets and exact frames do not. Set the path above, or put ffmpeg on PATH.'
       ffmpeg-found: 'Decoder ready · {path}'
       cache-dir: 'cache {path}'
