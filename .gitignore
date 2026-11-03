@@ -178,3 +178,9 @@ apps/*/src/renderer/public/sherpaw/
 
 # Bundled decoder binaries: fetched, not committed
 apps/stage-tamagotchi/resources/ffmpeg/*.exe
+
+# Local build/verification output dirs (each several hundred MB) + machine-local scratch
+apps/stage-tamagotchi/dist-*/
+/.auv/
+scripts/__pycache__/
+scripts/*.bak-*
