@@ -5,7 +5,7 @@ import { useMemoryStore } from '@proj-airi/stage-ui/stores/memory'
 import { useAiriCardStore } from '@proj-airi/stage-ui/stores/modules/airi-card'
 import { GhostButton } from '@proj-airi/ui'
 import { storeToRefs } from 'pinia'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { memorySearchKey } from './memory-long-term-memories.search'
@@ -31,8 +31,19 @@ const groups = computed(() => {
   ]
 })
 
+const failure = ref('')
+
 function remove(entry: MemoryEntry) {
-  memory.remove(entry)
+  const result = memory.remove(entry)
+  void result.persisted.then((persisted) => {
+    failure.value = persisted.ok ? '' : String(persisted.reason ?? '')
+  })
+}
+
+// The backend decides whether the move lands; the row only changes after both calls succeed (A08).
+async function makeGeneral(entry: MemoryEntry) {
+  const result = await memory.makeGeneral(entry)
+  failure.value = result.ok ? '' : (result.error ?? '')
 }
 </script>
 
@@ -72,13 +83,16 @@ function remove(entry: MemoryEntry) {
             icon="i-solar:global-linear"
             :aria-label="t(`${KEY}.make_general`, { name: entry.name })"
             :title="t(`${KEY}.make_general`, { name: entry.name })"
-            @click="memory.makeGeneral(entry)"
+            @click="makeGeneral(entry)"
           />
           <GhostButton size="sm" icon="i-solar:trash-bin-minimalistic-linear" :aria-label="t(`${KEY}.forget`, { name: entry.name })" :title="t(`${KEY}.forget`, { name: entry.name })" @click="remove(entry)" />
         </li>
       </ul>
       <p v-else :class="['text-xs', 'text-neutral-500 dark:text-neutral-400']">
         {{ t(`${KEY}.empty`) }}
+      </p>
+      <p v-if="failure" :class="['text-xs', 'text-amber-600']">
+        {{ failure }}
       </p>
     </section>
   </div>

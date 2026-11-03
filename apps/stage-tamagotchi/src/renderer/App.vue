@@ -47,7 +47,7 @@ import {
   i18nGetLocale,
   i18nSetLocale,
 } from '../shared/eventa'
-import { castaliaMemoryFacts, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySelfCycle, castaliaMemorySetEnergy, castaliaMemoryStatus } from '../shared/eventa/castalia-memory'
+import { castaliaMemoryFacts, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySelfCycle, castaliaMemorySetEnabled, castaliaMemorySetEnergy, castaliaMemoryStatus } from '../shared/eventa/castalia-memory'
 import { electronModelAssetCancel, electronModelAssetEnsure, electronModelAssetRemove, electronModelAssetsClear, electronModelAssetsList, electronModelAssetStatusChanged } from '../shared/eventa/model-assets'
 import {
   electronPluginUpdateCapability,
@@ -99,6 +99,8 @@ const searchCastaliaMemory = useElectronEventaInvoke(castaliaMemorySearch)
 const factsCastaliaMemory = useElectronEventaInvoke(castaliaMemoryFacts)
 const ingestCastaliaMemory = useElectronEventaInvoke(castaliaMemoryIngest)
 const statusCastaliaMemory = useElectronEventaInvoke(castaliaMemoryStatus)
+// 主进程自己排的定时器不认识面板开关，把状态推过去，关掉就真的停（审计 A06）。
+const setCastaliaEnabled = useElectronEventaInvoke(castaliaMemorySetEnabled)
 memoryStore.attachRemote({
   list: listCastaliaMemory,
   save: saveCastaliaMemory,
@@ -524,10 +526,19 @@ onMounted(async () => {
   void syncPsyche()
   // The backend report describes a running process, so it is re-read on the same slow clock: a
   // module switched on after start shows what it really got, without waiting for a restart.
+  const pushModuleSwitches = () => {
+    void setCastaliaEnabled({ memory: memoryStore.enabled, castalia: castaliaStore.enabled }).catch(() => {})
+  }
+  pushModuleSwitches()
+  watch([() => memoryStore.enabled, () => castaliaStore.enabled], pushModuleSwitches, { immediate: false })
+
   const refreshBackend = () => {
     void statusCastaliaMemory()
       .then(status => memoryStore.setBackend(status))
       .catch(() => {})
+    // 主进程的维护/自循环会自己往库里写行，渲染层不知道；跟着这个慢钟重读一次，
+    // 「维护完成但 read 看不到」就不会拖到重启（审计 A09）。
+    memoryStore.scheduleRefresh(0)
   }
   refreshBackend()
   psycheSyncTimer = setInterval(() => {

@@ -353,9 +353,11 @@ export const useChatStore = defineStore('chat', () => {
 
   // The recall is scoped to the turn's own card: the backend used to read the configured
   // character, so a second card got the first card's memories injected (audit F01).
-  const memoryRecallContext = createMemoryRecallContext((query) => {
-    const sessionId = activeSessionId.value
-    return memory.recallForInjection(query, memory.enabled ? memory.resolvePersona(personaOf(sessionId)) : personaOf(sessionId))
+  // The send that is happening, not the tab that is visible: a background send to session B used to
+  // recall with session A's text and A's card (audit A02).
+  const memoryRecallContext = createMemoryRecallContext((query, sessionId) => {
+    const id = sessionId || activeSessionId.value
+    return memory.recallForInjection(query, memory.enabled ? memory.resolvePersona(personaOf(id)) : personaOf(id))
   })
 
   /** The policy of the send that owns this request, not of the window's active chat. */
@@ -1019,8 +1021,19 @@ export const useChatStore = defineStore('chat', () => {
     },
     context: {
       ingest: envelope => chatContext.ingestContextMessage(envelope),
-      snapshot: () => {
-        return { ...chatContext.getContextsSnapshot() }
+      snapshot: (sessionId?: string) => {
+        const all = chatContext.getContextsSnapshot()
+        // A recall block belongs to the conversation that fetched it, and an empty block means this
+        // turn's recall found nothing. Neither may reach a request that is not its own (audit A03).
+        const kept: Record<string, typeof all[string]> = {}
+        for (const [key, messages] of Object.entries(all)) {
+          if (key.startsWith('recalled:') && key !== `recalled:${sessionId}`)
+            continue
+          const keptMessages = messages.filter(message => String(message.text ?? '').trim())
+          if (keptMessages.length)
+            kept[key] = keptMessages
+        }
+        return kept
       },
     },
     foregroundStream: {
@@ -1065,10 +1078,10 @@ export const useChatStore = defineStore('chat', () => {
       // provider destructures `{ text }`. Left as-is it threw "Cannot destructure property 'text'
       // of 'undefined'" inside performSend, so no message could be sent at all. Hand it the pending
       // user turn explicitly; `ingest()` records that turn before the runtime ingests contexts.
-      () => {
-        const sessionId = activeSessionId.value
-        const pending = pendingUserTurns.get(sessionId)?.text ?? lastUserTurn(sessionId)?.text ?? ''
-        return memoryRecallContext({ text: pending })
+      (sessionId: string) => {
+        const target = sessionId || activeSessionId.value
+        const pending = pendingUserTurns.get(target)?.text ?? lastUserTurn(target)?.text ?? ''
+        return memoryRecallContext({ text: pending, sessionId: target })
       },
       createMinecraftContext,
     ],

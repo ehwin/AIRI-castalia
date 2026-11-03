@@ -61,6 +61,9 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
   // 最近几轮注入过的记忆 id:连续同话题时不重复塞同一段(报告里"连续 3 轮不重复"那条)。
   let recentIds: string[] = []
 
+  /** 配置里的角色：没有任何卡被打开时，维护与自循环退回它。 */
+  const configuredCharacter = options.character
+
   /** The bank for one character, opened once and reused. A missing persona keeps the configured one. */
   function ensure(persona?: string) {
     const character = persona?.trim() || options.character
@@ -138,7 +141,12 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
       if (closing)
         return { text: '', count: 0, topSim: 0, chars: 0 }
       const bank = await ensure(persona)
-      const result = await bank.recallQuery(query, { recentIds })
+      // 召回也要带上提问的卡：不带时 store-tools 会退回引擎启动时捕获的 CHAR_ID，
+      // 于是第二张卡的自动召回拿到的是第一张卡的记忆（审计 A01）。
+      const result = await bank.recallQuery(query, {
+        recentIds,
+        characterId: persona?.trim() || options.character,
+      })
       const ids = (result.stats as { ids?: string[] } | undefined)?.ids ?? []
       recentIds = [...recentIds, ...ids].slice(-10) // 只记最近 10 条,不至于整库都被排掉
       return {
@@ -212,8 +220,19 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
     async maintain(options) {
       if (closing)
         return { ok: false, startedAt: new Date().toISOString(), ms: 0, reflectConfigured: false, error: 'closing' }
-      const bank = await ensure()
-      return bank.maintain(options)
+      // 每个已打开的角色各跑一遍：维护只做配置角色时，第二张卡的对话写进来了却没人整理
+      // （审计 A07）。没有任何角色被打开时，退回配置角色。
+      const characters = new Set([configuredCharacter, ...banks.keys()])
+      const startedAt = new Date().toISOString()
+      let report: Awaited<ReturnType<Awaited<ReturnType<typeof openBank>>['maintain']>> | undefined
+      for (const character of characters) {
+        const bank = await ensure(character)
+        const one = await bank.maintain(options)
+        report = report
+          ? { ...one, ok: report.ok && one.ok, ms: (report.ms ?? 0) + (one.ms ?? 0) }
+          : one
+      }
+      return report ?? { ok: true, startedAt, ms: 0, reflectConfigured: false }
     },
 
     async setSelfEnergy(value, persona) {
@@ -232,6 +251,23 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
     async selfCycle(input) {
       if (closing)
         return { ok: false, skipped: true, reason: 'closing', evidenceIds: [], project: input?.project ?? '' }
+      // 主进程排的自循环没有带角色时会落到配置角色上；第二张卡就永远轮不到（审计 A07）。
+      // 没有显式角色时，按已打开的角色各跑一次，返回第一条真正跑了的结果。
+      if (!input?.characterId && banks.size) {
+        let fallback: Awaited<ReturnType<Awaited<ReturnType<typeof openBank>>['selfCycle']>> | undefined
+        for (const character of banks.keys()) {
+          const bank = await ensure(character)
+          const result = await bank.selfCycle({ ...input, characterId: character })
+          if (result && !result.skipped) {
+            if (result.ok && result.diaryId)
+              return { ...result, diaryText: readDiaryText({ bankDir: options.bankDir, project: options.project }, result.diaryId) }
+            return result
+          }
+          fallback = fallback ?? result
+        }
+        if (fallback)
+          return fallback
+      }
       const bank = await ensure(input?.characterId)
       const result = await bank.selfCycle(input)
       // 日记正文只在 project 库里、且只有 id 能对上。这一读走只读连接（WAL 允许并发读），

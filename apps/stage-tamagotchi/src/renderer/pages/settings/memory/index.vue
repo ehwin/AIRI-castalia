@@ -2,6 +2,7 @@
 import type { CastaliaFullHit, CastaliaFullMember } from '../../../../shared/eventa/castalia-memory'
 
 import { useElectronEventaInvoke } from '@proj-airi/electron-vueuse'
+import { useMemoryStore } from '@proj-airi/stage-ui/stores/memory'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
@@ -26,6 +27,7 @@ const consoleNote = ref('')
 const invokeMaintain = useElectronEventaInvoke(castaliaMemoryMaintain)
 const maintaining = ref(false)
 const maintainNote = ref('')
+const memoryStore = useMemoryStore()
 
 async function maintainNow() {
   if (maintaining.value)
@@ -64,6 +66,8 @@ async function maintainNow() {
   }
   finally {
     maintaining.value = false
+    // The maintenance just wrote rows this window never saw (audit A09).
+    memoryStore.scheduleRefresh(0)
   }
 }
 
@@ -71,9 +75,11 @@ async function maintainNow() {
 async function openConsole(view: 'agg' | 'mng' | 'viz') {
   try {
     const result = await invokeOpenConsole({ view })
+    // Keep the reason: the common failure branch (`ok:false`) used to be dropped, so the button
+    // looked dead (audit A11).
     consoleNote.value = result.ok
       ? (result.via === 'shell' ? 'opened-shell' : 'opened-browser')
-      : 'failed'
+      : `打开失败：${result.error ?? '未知原因'}`
   }
   catch (error) {
     consoleNote.value = (error as Error).message
@@ -194,7 +200,7 @@ onMounted(refresh)
       </button>
       <span v-if="consoleNote === 'opened-shell'" :class="['text-xs', 'text-neutral-400']">{{ t(`${KEY}.opened_shell`) }}</span>
       <span v-else-if="consoleNote === 'opened-browser'" :class="['text-xs', 'text-neutral-400']">{{ t(`${KEY}.opened_browser`) }}</span>
-      <span v-else-if="consoleNote && consoleNote !== 'failed'" :class="['text-xs', 'text-amber-600']">{{ consoleNote }}</span>
+      <span v-else-if="consoleNote" :class="['text-xs', 'text-amber-600']">{{ consoleNote }}</span>
     </div>
 
     <p v-if="maintainNote" :class="['text-xs', 'text-neutral-500 dark:text-neutral-400']">

@@ -120,6 +120,16 @@ export function createCastaliaFullClient(options: { url: string, timeoutMs?: num
     })
     if (!result || result.error)
       throw new Error(`${name} failed: ${JSON.stringify(result?.error ?? result ?? null).slice(0, 120)}`)
+    // MCP reports a tool failure inside a successful JSON-RPC result (`isError: true`). Reading its
+    // text as data turned "member unavailable" into an empty member list (audit A10).
+    if (result.result?.isError) {
+      const reason = (result.result?.content ?? [])
+        .filter((item: any) => item?.type === 'text')
+        .map((item: any) => item.text)
+        .join('')
+        .slice(0, 200)
+      throw new Error(`${name} reported an error: ${reason || 'no reason given'}`)
+    }
     const text = (result.result?.content ?? [])
       .filter((item: any) => item?.type === 'text')
       .map((item: any) => item.text)

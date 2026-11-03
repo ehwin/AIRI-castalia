@@ -678,23 +678,44 @@ export const useMemoryStore = defineStore('memory', () => {
   }
 
   /** Makes a card's memory general, so every card reads it. A general memory with the same name gives way. */
-  function makeGeneral(entry: Pick<MemoryEntry, 'name' | 'persona'>) {
-    const source = entries.value.find(existing => existing.name === entry.name && existing.persona === entry.persona)
+  /**
+   * Moves one entry from a card to the shared set.
+   *
+   * The move is two backend calls. The page used to flip the local row first, so a refused delete
+   * or a failed save left something that looked shared until the next hydrate (audit A08). The
+   * backend goes first now, and the local list changes only after both steps land.
+   *
+   * The delete carries the row id: derived `mem-*` rows have no store name, so a name lookup cannot
+   * find them.
+   */
+  async function makeGeneral(entry: Pick<MemoryEntry, 'id' | 'name' | 'persona'>): Promise<{ ok: boolean, error?: string }> {
+    const source = entries.value.find(existing =>
+      existing.name === entry.name
+      && existing.persona === entry.persona
+      && (entry.id === undefined || existing.id === entry.id))
     if (!source?.persona)
-      return
+      return { ok: false, error: 'only a memory that belongs to a card can become general' }
     const { persona: _card, ...general } = source
     const moved: MemoryEntry = { ...general, updatedAt: Date.now() }
-    entries.value = [...entries.value.filter(existing => existing !== source && (existing.name !== source.name || existing.persona)), moved]
     if (remote) {
-      void remote.forget({ name: source.name, persona: source.persona }).catch((cause) => {
-        console.warn('[memory] remote forget failed:', cause)
+      try {
+        const gone = await remote.forget({ id: source.id, name: source.name, persona: source.persona })
+        if (!gone)
+          return { ok: false, error: 'the backend kept the original entry' }
+        await remote.save(moved)
+        markRemoteOk()
+      }
+      catch (cause) {
+        console.warn('[memory] make-general failed:', cause)
         markRemoteFailure(cause)
-      })
-      void remote.save(moved).catch((cause) => {
-        console.warn('[memory] remote save failed:', cause)
-        markRemoteFailure(cause)
-      })
+        return { ok: false, error: errorText(cause) }
+      }
     }
+    entries.value = [
+      ...entries.value.filter(existing => existing !== source && (existing.name !== source.name || existing.persona)),
+      moved,
+    ]
+    return { ok: true }
   }
 
   /** Removes one entry, from a tool or from Settings. The backend's answer decides whether it stays gone. */
@@ -776,6 +797,11 @@ export const useMemoryStore = defineStore('memory', () => {
       return { status: 'ok', hits: [], facts: [] }
     if (!remote?.search)
       return { status: 'unavailable', hits: [], facts: [], error: 'no search backend attached' }
+    // A backend that reports no search still answers `[]`, which reads as "nothing matched" and
+    // even counts as a healthy call. Ask the capability first (audit A04).
+    const caps = backend.value?.capabilities
+    if (caps && !caps.search)
+      return { status: 'unavailable', hits: [], facts: [], error: 'this backend cannot search: entry-only mode' }
     const [rows, facts] = await Promise.allSettled([
       remote.search(text, topK, persona),
       remote.facts ? remote.facts(text, FACT_TOP_K, persona) : Promise.resolve([] as MemoryFact[]),

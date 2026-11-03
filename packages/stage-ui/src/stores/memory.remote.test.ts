@@ -120,18 +120,32 @@ describe('memory store remote port', () => {
     expect(memory.read('nickname', 'airi')?.body).toBe('Yumeka')
   })
 
-  it('moves a memory to general on the remote too', async () => {
+  // A08: the move is two backend calls, and the local row now changes only after both land.
+  it('moves a memory to general only after the backend agrees', async () => {
     const memory = useMemoryStore()
     const { port, save, forget } = createRemote()
     memory.attachRemote(port)
     memory.write({ name: 'nickname', description: 'how to address', body: 'Yumeka' }, 'airi')
 
-    memory.makeGeneral({ name: 'nickname', persona: 'airi' })
+    const result = await memory.makeGeneral({ name: 'nickname', persona: 'airi' })
 
-    expect(forget).toHaveBeenCalledWith({ name: 'nickname', persona: 'airi' })
+    expect(result.ok).toBe(true)
+    expect(forget).toHaveBeenCalledWith(expect.objectContaining({ name: 'nickname', persona: 'airi' }))
     expect(save).toHaveBeenCalledTimes(2)
     expect(save.mock.calls[1][0]).toMatchObject({ name: 'nickname' })
     expect(save.mock.calls[1][0].persona).toBeUndefined()
+    expect(memory.entries.find(entry => entry.name === 'nickname')?.persona).toBeUndefined()
+  })
+
+  it('keeps the card row when the backend refuses the delete', async () => {
+    const memory = useMemoryStore()
+    memory.attachRemote({ list: async () => [], save: async () => {}, forget: async () => false })
+    memory.write({ name: 'nickname', description: 'how to address', body: 'Yumeka' }, 'airi')
+
+    const result = await memory.makeGeneral({ name: 'nickname', persona: 'airi' })
+
+    expect(result.ok).toBe(false)
+    expect(memory.entries.find(entry => entry.name === 'nickname')?.persona).toBe('airi')
   })
 
   // F03: a thrown save used to leave the local row in place, so the tool said "Saved" over a

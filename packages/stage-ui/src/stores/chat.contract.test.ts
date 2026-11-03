@@ -1820,9 +1820,15 @@ describe('chat store contract', () => {
 
     expect(createRuntimePromptContextMock).toHaveBeenCalledWith(expect.stringContaining('base.prompt.emotion'))
     expect(createRuntimePromptContextMock).toHaveBeenCalledWith(expect.stringContaining('base.prompt.emoji'))
-    expect(ingestContextMessageMock).toHaveBeenCalledTimes(3)
+    // Four envelopes now: the recall provider also ingests one per turn, empty when the bank has
+    // nothing to add, so the previous block cannot survive a turn that declined to recall (A03).
+    expect(ingestContextMessageMock).toHaveBeenCalledTimes(4)
     expect(ingestContextMessageMock).toHaveBeenNthCalledWith(1, runtimePromptContext)
-    expect(ingestContextMessageMock).toHaveBeenNthCalledWith(3, minecraftContext)
+    expect(ingestContextMessageMock).toHaveBeenNthCalledWith(4, minecraftContext)
+    const recallEnvelope = ingestContextMessageMock.mock.calls
+      .map(call => call[0] as { contextId?: string, text?: string })
+      .find(envelope => String(envelope.contextId ?? '').startsWith('recalled'))
+    expect(recallEnvelope?.text).toBe('')
     expect(ingestContextMessageMock.mock.invocationCallOrder[0]).toBeLessThan(
       getContextsSnapshotMock.mock.invocationCallOrder[0],
     )

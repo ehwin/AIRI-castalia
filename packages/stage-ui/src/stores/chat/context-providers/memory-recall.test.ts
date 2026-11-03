@@ -13,33 +13,35 @@ describe('createMemoryRecallContext', () => {
     const recall = vi.fn(async () => '<memory>她讨厌被叫小助手</memory>')
     const provider = createMemoryRecallContext(recall)
 
-    const message = await provider({ text: '我们今天聊什么' })
+    const message = await provider({ text: '我们今天聊什么', sessionId: 's1' })
 
-    expect(recall).toHaveBeenCalledWith('我们今天聊什么')
-    expect(message).toMatchObject({ contextId: 'recalled', text: '<memory>她讨厌被叫小助手</memory>' })
+    expect(recall).toHaveBeenCalledWith('我们今天聊什么', 's1')
+    expect(message).toMatchObject({ contextId: 'recalled:s1', text: '<memory>她讨厌被叫小助手</memory>' })
     expect((message as ContextMessage).strategy).toBe('replace-self')
   })
 
-  it('adds nothing when the backend finds no memory above its gate', async () => {
+  // A3 fix: the block is per conversation, and an empty block replaces the last one instead of
+  // leaving it in the request (audit A03). These four cases used to return undefined.
+  it('clears the previous block when the backend finds no memory above its gate', async () => {
     const provider = createMemoryRecallContext(async () => '')
 
-    expect(await provider({ text: '随便一句' })).toBeUndefined()
+    expect(await provider({ text: '随便一句', sessionId: 's1' })).toMatchObject({ contextId: 'recalled:s1', text: '' })
   })
 
-  it('adds nothing for a turn with no text, so an attachment-only turn recalls nothing', async () => {
+  it('clears the block for a turn with no text, so an attachment-only turn recalls nothing', async () => {
     const recall = vi.fn(async () => '<memory>never asked</memory>')
     const provider = createMemoryRecallContext(recall)
 
-    expect(await provider({ text: '   ' })).toBeUndefined()
+    expect(await provider({ text: '   ', sessionId: 's1' })).toMatchObject({ text: '' })
     expect(recall).not.toHaveBeenCalled()
   })
 
-  it('adds nothing when the recall fails', async () => {
+  it('clears the block when the recall fails, so a dead backend cannot keep old text alive', async () => {
     const provider = createMemoryRecallContext(async () => {
       throw new Error('engine is down')
     })
 
-    expect(await provider({ text: '你好' })).toBeUndefined()
+    expect(await provider({ text: '你好', sessionId: 's1' })).toMatchObject({ text: '' })
   })
 
   it('drops a recall that is slower than the deadline instead of holding the turn', async () => {
@@ -54,7 +56,7 @@ describe('createMemoryRecallContext', () => {
     // so this test ended up waiting on the never-resolving recall instead of the timeout.
     await vi.advanceTimersByTimeAsync(RECALL_TIMEOUT_MS + 100)
 
-    expect(await pending).toBeUndefined()
+    expect(await pending).toMatchObject({ text: '' })
   })
 
   it('keeps a recall that answers before the deadline', async () => {

@@ -52,23 +52,28 @@ async function withDeadline(recall: Promise<string>, ms: number): Promise<string
  * here rather than in the system prompt, so the cacheable prefix stays stable.
  */
 export function createMemoryRecallContext(
-  recall: (query: string) => Promise<string>,
-): (input: { text: string }) => Promise<ContextMessage | undefined> {
-  return async ({ text }) => {
-    if (!text.trim())
-      return undefined
-    const block = await withDeadline(recall(text), RECALL_TIMEOUT_MS)
-    if (!block)
-      return undefined
-    return {
+  recall: (query: string, sessionId: string) => Promise<string>,
+): (input: { text: string, sessionId?: string }) => Promise<ContextMessage | undefined> {
+  return async ({ text, sessionId }) => {
+    // One bucket per conversation. A shared bucket let one session's block ride along in the next
+    // one's request, which is how a stale recall survived a session switch (audit A03).
+    const contextId = sessionId ? `${MEMORY_RECALL_CONTEXT_ID}:${sessionId}` : MEMORY_RECALL_CONTEXT_ID
+    const envelope = (block: string): ContextMessage => ({
       id: nanoid(),
-      contextId: MEMORY_RECALL_CONTEXT_ID,
+      contextId,
       strategy: ContextUpdateStrategy.ReplaceSelf,
       metadata: {
-        source: { id: MEMORY_RECALL_CONTEXT_ID },
+        source: { id: contextId },
       },
       text: block,
       createdAt: Date.now(),
-    }
+    })
+
+    // An empty turn is not "add nothing": it replaces the previous block with nothing. Otherwise the
+    // last successful recall kept answering questions the bank had already declined (audit A03).
+    if (!text.trim())
+      return envelope('')
+    const block = await withDeadline(recall(text, sessionId ?? ''), RECALL_TIMEOUT_MS)
+    return envelope(block ?? '')
   }
 }

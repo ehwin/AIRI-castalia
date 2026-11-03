@@ -13,7 +13,7 @@ import { defineInvokeHandler } from '@moeru/eventa'
 import { createCastaliaMemoryRepository } from '@proj-airi/castalia-plugin/memory'
 import { app } from 'electron'
 
-import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryFacts, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySelfCycle, castaliaMemorySetEnergy, castaliaMemoryStatus, castaliaOpenConsole, castaliaTuningGet, castaliaTuningSave } from '../../../shared/eventa/castalia-memory'
+import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryFacts, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySelfCycle, castaliaMemorySetEnabled, castaliaMemorySetEnergy, castaliaMemoryStatus, castaliaOpenConsole, castaliaTuningGet, castaliaTuningSave } from '../../../shared/eventa/castalia-memory'
 import { openCastaliaConsole } from './castalia-console'
 import { createCastaliaEngineMemory, describeCastaliaEngineConfig, resolveCastaliaEngineOptions } from './castalia-engine'
 import { createCastaliaFullClient, resolveCastaliaFullUrl } from './castalia-full'
@@ -115,6 +115,13 @@ function writeMaintenanceLedger(ledger: MaintenanceLedger): void {
   catch { /* 状态写不进去不影响本次维护 */ }
 }
 
+/**
+ * 面板开关的镜像。默认全开，渲染层启动后立刻推一次真实值。
+ *
+ * 定时器是主进程排的，面板关掉模块不会自动通知它们；每个 tick 先问一次这里（审计 A06）。
+ */
+let moduleEnabled = { memory: true, castalia: true }
+
 let maintenanceInFlight: Promise<CastaliaMaintainReport> | undefined
 /**
  * Exported for the sleep path; both callers go through the same queue.
@@ -196,6 +203,8 @@ function scheduleVadAgeSweep(engine: CastaliaEngineMemory) {
     return
   }
   const timer = setInterval(() => {
+    if (!moduleEnabled.memory)
+      return
     void engine.flushStaleVadQueue?.()
       .then((result) => {
         if (result && result.updated > 0)
@@ -219,6 +228,8 @@ function scheduleMemoryMaintenance(engine: CastaliaEngineMemory) {
   }
 
   const run = async (reason: string) => {
+    if (!moduleEnabled.memory)
+      return
     try {
       await runMaintenance(engine, reason, 30)
     }
@@ -260,6 +271,8 @@ function scheduleSelfCycle(engine: CastaliaEngineMemory) {
   }
   let running = false
   const run = async (reason: string) => {
+    if (!moduleEnabled.castalia)
+      return
     if (running) {
       return
     }
@@ -340,7 +353,12 @@ export function setupCastaliaMemoryService(params: {
       : createCastaliaEngineMemory(engineOptions)
     console.info(`[castalia] memory backend: ${transport} bank=${engineOptions.bankDir} project=${engineOptions.project}`)
     // The switch only says "on"; this is the answer to "can it actually recall / search / ingest".
-    defineInvokeHandler(params.context, castaliaMemoryStatus, () => ({
+    defineInvokeHandler(params.context, castaliaMemorySetEnabled, (input) => {
+      moduleEnabled = { memory: Boolean(input?.memory), castalia: Boolean(input?.castalia) }
+      console.info(`[castalia] module switches: memory=${moduleEnabled.memory} castalia=${moduleEnabled.castalia}`)
+      return { ok: true }
+    })
+  defineInvokeHandler(params.context, castaliaMemoryStatus, () => ({
       transport,
       project: engineOptions.project,
       character: engineOptions.character,
@@ -365,11 +383,16 @@ export function setupCastaliaMemoryService(params: {
         return stats ? { ...stats } : undefined
       })(),
       emotion: (() => {
-        const flag = String(process.env.PSYCHE_FROM_VAD ?? '').toLowerCase()
-        const autoFromVad = flag === 'on' || flag === '1' || flag === 'true'
+        // The engine gates on `process.env.PSYCHE_FROM_VAD === 'on'` exactly. Reporting `1`/`true`/
+        // `ON` as enabled would show a switch the engine ignores (audit A12).
+        const raw = process.env.PSYCHE_FROM_VAD
+        const autoFromVad = raw === 'on'
+        const offByAlias = !autoFromVad && raw !== undefined && String(raw).toLowerCase() === 'on'
         const estimator: 'model' | 'lexicon' = process.env.OLLAMA_URL || process.env.VAD_MODEL ? 'model' : 'lexicon'
-        const note = !autoFromVad
-          ? '自动情感实验门槛未开启（PSYCHE_FROM_VAD）：只有模型主动调用 recordEmotion 才会改 psyche'
+        const note = offByAlias
+          ? `PSYCHE_FROM_VAD 的值是 "${raw}"，引擎只认小写 on，所以自动情感仍然关闭`
+          : !autoFromVad
+            ? '自动情感实验门槛未开启（PSYCHE_FROM_VAD）：引擎不会从对话推进 psyche；recordEmotion 工具只改界面与提示词状态，不写引擎 psyche'
           : estimator === 'lexicon'
             ? '自动情感已开启，但只有本地词表可用：它会对模糊句子主动放弃判断，psyche 多数时候不动'
             : '自动情感已开启，分析来自模型端点'
@@ -444,6 +467,10 @@ export function setupCastaliaMemoryService(params: {
   defineInvokeHandler(params.context, castaliaMemoryMaintain, () => ({ ok: false, startedAt: new Date().toISOString(), ms: 0, reflectConfigured: false, error: 'no castalia bank configured' }))
   defineInvokeHandler(params.context, castaliaMemorySelfCycle, () => ({ ok: false, skipped: true, reason: 'no castalia bank configured', evidenceIds: [], project: '' }))
   defineInvokeHandler(params.context, castaliaMemoryPsyche, () => null)
+  defineInvokeHandler(params.context, castaliaMemorySetEnabled, (input) => {
+    moduleEnabled = { memory: Boolean(input?.memory), castalia: Boolean(input?.castalia) }
+    return { ok: true }
+  })
   // 完整引擎没起来时，面板必须说清楚现在只是「条目读写」，而不是装作语义检索还在。
   const described = describeCastaliaEngineConfig(userDataDir)
   defineInvokeHandler(params.context, castaliaMemoryStatus, () => ({

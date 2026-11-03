@@ -1019,7 +1019,9 @@ export function createChatOrchestratorRuntime(deps: ChatOrchestratorRuntimeDeps)
           context.turns.unshift({ id: 'system-supplement', type: 'system', authority: 'system', content: [{ type: 'text', text: systemPromptSupplement }] })
       }
 
-      const contextsSnapshot = deps.context.snapshot()
+      // The snapshot is per send: a bucket that belongs to another conversation must not ride along
+      // (audit A03). The host decides what "belongs" means from the id it gets here.
+      const contextsSnapshot = deps.context.snapshot(sessionId)
       const entries = Object.entries(contextsSnapshot).flatMap(([source, messages]) => messages.map(message => ({ source, text: message.text })))
       if (entries.length) {
         const lastMessage = context.turns.at(-1)

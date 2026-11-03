@@ -182,6 +182,14 @@ export interface CastaliaMemoryStatus {
 
 export const castaliaMemoryStatus = defineInvokeEventa<CastaliaMemoryStatus>('eventa:invoke:castalia:memory:status')
 
+/**
+ * 把面板上的模块开关推给主进程。
+ *
+ * 渲染层的 guard 只挡得住工具和提示词；VAD 扫描、夜间维护、自循环是主进程自己排的定时器，
+ * 它们不知道面板上那个开关（审计 A06）。开关关闭时，这些 tick 什么都不做。
+ */
+export const castaliaMemorySetEnabled = defineInvokeEventa<{ ok: boolean }, { memory: boolean, castalia: boolean }>('eventa:invoke:castalia:memory:set-enabled')
+
 
 /**
  * 心智 / 检索参数（2026-10-31）。
