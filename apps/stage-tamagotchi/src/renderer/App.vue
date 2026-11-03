@@ -467,6 +467,12 @@ onMounted(async () => {
   mindStore.attachTurnComplete(chatStore.onChatTurnComplete)
   await mindStore.initialize(useAiriCardStore().activeCardId)
 
+  // Switching cards switches the mind: drives, sleep, and the diary stream belong to one character, so the
+  // outgoing character's state is saved under her own key and the new one resumes from her own.
+  watch(() => cardStore.activeCardId, (cardId) => {
+    void mindStore.switchCharacter(cardId)
+  })
+
   // Her eyes are attached only while perception allows them, and the idle mind glances at the screen on a slow
   // timer. Without both, `lookAround` has nothing to see and the drive of curiosity never moves.
   watchEffect(() => {

@@ -32,6 +32,18 @@ describe('memory store', () => {
     expect(memory.read('Favorite Game', 'airi')?.body).toBe('Minecraft.')
   })
 
+  // ROOT CAUSE: resolution fell back to "the bank holds one persona", so a second card read the first card's facts
+  // and wrote her moods into the same persona. Only a known alias may join two names now.
+  it('gives a second card her own persona instead of folding it into the only bank persona', () => {
+    const memory = useMemoryStore()
+    memory.write({ name: 'Birthday', description: 'Her birthday is June 27.', body: 'June 27.' }, 'airi')
+
+    expect(memory.resolvePersona('default')).toBe('airi')
+    expect(memory.resolvePersona('N_h4lzzOfl0AYehOR171-')).toBe('N_h4lzzOfl0AYehOR171-')
+    expect(memory.indexFor('N_h4lzzOfl0AYehOR171-')).toBe('')
+    expect(memory.indexFor('default')).toContain('June 27')
+  })
+
   // A card keeps its own memories. Only the owner makes one general, and then every card reads it.
   it('keeps memories on their card until the owner makes one general', () => {
     const memory = useMemoryStore()

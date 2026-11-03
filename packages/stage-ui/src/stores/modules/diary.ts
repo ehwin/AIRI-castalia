@@ -8,6 +8,7 @@ import { distillDay } from '@proj-airi/core-agent'
 
 import { innerThoughtsRepo } from '../../database/repos/inner-thoughts.repo'
 import { useMemoryStore } from '../memory'
+import { useMindStore } from './mind'
 
 /** One day of the diary. */
 export interface DiaryDay {
@@ -17,9 +18,6 @@ export interface DiaryDay {
   /** How many of them she never said out loud. */
   privateCount: number
 }
-
-/** The persona a distilled day starts under before it becomes general. */
-const DISTILL_PERSONA = '__diary__'
 
 /**
  * The diary, read from the same stream the mind writes.
@@ -42,12 +40,32 @@ export const useDiaryStore = defineStore('diary', () => {
    * Persisted: a day that is already remembered must not be offered again after a
    * restart, or the button says "记住这一天" for something the index already holds.
    */
-  const distilledDays = useLocalStorageManualReset<string[]>('diary/distilled', [])
+  // Keyed by character: one character's remembered days are not another's. A plain array is the pre-split value.
+  const distilledByPersona = useLocalStorageManualReset<Record<string, string[]>>('diary/distilled', {})
+  const mind = useMindStore()
+  const scope = computed(() => mind.scope)
+
+  /** This character's remembered days. The own slice of the per-character map. */
+  const distilledDays = computed<string[]>({
+    get: () => distilledByPersona.value[scope.value] ?? [],
+    set: (dates) => {
+      distilledByPersona.value = { ...distilledByPersona.value, [scope.value]: dates }
+    },
+  })
+
   /** The last day that became a memory, so the page can confirm it. */
   const lastDistilled = computed(() => distilledDays.value.at(-1))
 
   function hasDistilled(date: string) {
     return distilledDays.value.includes(date)
+  }
+
+  /** Moves the pre-split array to the character that opens the diary first. */
+  function adoptLegacyDays() {
+    const saved = distilledByPersona.value as unknown
+    if (!Array.isArray(saved))
+      return
+    distilledByPersona.value = { [scope.value]: saved as string[] }
   }
 
   const memory = useMemoryStore()
@@ -83,7 +101,10 @@ export const useDiaryStore = defineStore('diary', () => {
   async function load(limit = 200) {
     loading.value = true
     try {
-      thoughts.value = await innerThoughtsRepo.readAll(limit)
+      adoptLegacyDays()
+      // A thought without a persona predates the split; the character reading the diary claims it.
+      thoughts.value = (await innerThoughtsRepo.readAll(limit))
+        .filter(thought => !thought.persona || thought.persona === scope.value)
       loadedAt.value = Date.now()
     }
     finally {
@@ -106,11 +127,10 @@ export const useDiaryStore = defineStore('diary', () => {
     if (!entry)
       return undefined
 
-    const stored = memory.write(entry, DISTILL_PERSONA)
+    // Her day becomes her memory, under the persona that chats. It is never shared with another character.
+    const stored = memory.write(entry, memory.resolvePersona(scope.value))
     if (!stored)
       return undefined
-
-    memory.makeGeneral({ name: stored.name, persona: DISTILL_PERSONA })
     if (!hasDistilled(date))
       distilledDays.value = [...distilledDays.value, date]
     return entry
@@ -118,7 +138,7 @@ export const useDiaryStore = defineStore('diary', () => {
 
   function resetState() {
     reveal.reset()
-    distilledDays.reset()
+    distilledByPersona.reset()
   }
 
   return {

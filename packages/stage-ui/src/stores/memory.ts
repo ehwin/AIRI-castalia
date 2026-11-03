@@ -384,6 +384,9 @@ export function buildMemoryIndex(entries: readonly MemoryEntry[], now = Date.now
  * Returns:
  * - Whether memory is on, entries, the index for a card, and actions that change entries.
  */
+/** Card id to bank persona, only where the two names are known to be one character. */
+const PERSONA_ALIASES: Record<string, string> = { default: 'airi' }
+
 export const useMemoryStore = defineStore('memory', () => {
   const enabled = useLocalStorageManualReset<boolean>('memory/enabled', true)
   const entries = useLocalStorageManualReset<MemoryEntry[]>('memory/entries', [])
@@ -478,17 +481,18 @@ export const useMemoryStore = defineStore('memory', () => {
   /**
    * The persona whose memories this card should read.
    *
-   * A card id and the character id of the memory bank are two different names for the same character, and they
-   * do not always match: the built-in card is `default` while its bank rows are `airi`. When the requested id owns
-   * no entry and the bank holds exactly one persona, that persona is this character — reading it beats showing an
-   * empty index to the model while 17 KB of memories sit one name away.
+   * A card id and the bank's character id are two names for one character, and only a known alias may join them:
+   * the built-in card is `default` while its rows are `airi`. Every other card is a character of her own.
+   *
+   * This used to fall back to "the bank holds exactly one persona", which quietly merged every card into that one
+   * character: a second card read the first one's facts, and worse, wrote her moods into the same state. Sharing a
+   * bank is not sharing a self.
    */
   function resolvePersona(personaId: string) {
     if (sorted.value.some(entry => entry.persona === personaId))
       return personaId
 
-    const personas = new Set(sorted.value.map(entry => entry.persona).filter(Boolean) as string[])
-    return personas.size === 1 ? [...personas][0]! : personaId
+    return PERSONA_ALIASES[personaId] ?? personaId
   }
 
   /**
@@ -500,7 +504,7 @@ export const useMemoryStore = defineStore('memory', () => {
   function indexFor(personaId: string) {
     const ownId = resolvePersona(personaId)
     // The card's own entry shadows a general one with the same name, as `read` does.
-    const visible = visibleTo(personaId)
+    const visible = visibleTo(ownId)
     const ownNames = new Set(visible.filter(entry => entry.persona === ownId).map(entry => memoryName(entry.name)))
     const unique = visible.filter(entry => entry.persona === ownId || !ownNames.has(memoryName(entry.name)))
     return buildMemoryIndex(unique, Date.now())

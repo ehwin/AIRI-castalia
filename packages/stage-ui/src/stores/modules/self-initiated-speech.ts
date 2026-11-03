@@ -2,7 +2,7 @@ import { useCastaliaPluginStore } from '@proj-airi/castalia-plugin'
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
-import { scopedTopic, SELF_INITIATED_NOTICE, SELF_INITIATED_SOURCE, toAutonomyInput } from '../../libs/self-initiated-speech/adapter'
+import { conversationTopic, scopedTopic, SELF_INITIATED_NOTICE, SELF_INITIATED_SOURCE, toAutonomyInput } from '../../libs/self-initiated-speech/adapter'
 import {
   createOutboundState,
   decideOutbound,
@@ -17,6 +17,7 @@ import { useChatStore } from '../chat'
 import { useMindStore } from './mind'
 import { readStoredRelationship } from '../chat/context-providers/relational-policy'
 import { useChatSessionStore } from '../chat/session-store'
+import { readScoped, writeScoped } from '../../libs/persona-scope'
 import { useMemoryStore } from '../memory'
 
 /**
@@ -43,32 +44,40 @@ export const useSelfInitiatedSpeechStore = defineStore('self-initiated-speech', 
    * 一模一样的「还是安静的」就是重载把 2 小时间隔抹掉了。
    */
   const OUTBOUND_KEY = 'castalia/self-initiated-outbound'
-  function loadOutbound(): ReturnType<typeof createOutboundState> {
+  /**
+   * One pace per character.
+   *
+   * A shared pace meant the character that happened to speak last set the wait for every other card: her gap, her
+   * daily count, and her unanswered run all applied to someone else. Each persona keeps its own now.
+   */
+  const outboundByPersona = new Map<string, ReturnType<typeof createOutboundState>>()
+
+  function loadOutbound(personaId: string): ReturnType<typeof createOutboundState> {
     const fresh = createOutboundState(Date.now())
-    try {
-      const raw = localStorage.getItem(OUTBOUND_KEY)
-      if (!raw)
-        return fresh
-      const saved = JSON.parse(raw)
-      if (!saved || typeof saved !== 'object')
-        return fresh
-      return {
-        ...fresh,
-        ...saved,
-        recentTopics: saved.recentTopics && typeof saved.recentTopics === 'object' ? saved.recentTopics : {},
-      }
-    }
-    catch {
+    const saved = readScoped<Record<string, unknown> | null>(OUTBOUND_KEY, personaId, null)
+    if (!saved || typeof saved !== 'object')
       return fresh
+    return {
+      ...fresh,
+      ...saved,
+      recentTopics: saved.recentTopics && typeof saved.recentTopics === 'object' ? saved.recentTopics as ReturnType<typeof createOutboundState>['recentTopics'] : {},
     }
   }
-  function saveOutbound(state: ReturnType<typeof createOutboundState>) {
-    try {
-      localStorage.setItem(OUTBOUND_KEY, JSON.stringify(state))
-    }
-    catch { /* 存不下就算了，节流退化成内存态 */ }
+  function outboundFor(personaId: string) {
+    const cached = outboundByPersona.get(personaId)
+    if (cached)
+      return cached
+    const state = loadOutbound(personaId)
+    outboundByPersona.set(personaId, state)
+    return state
   }
-  let outbound = loadOutbound()
+  function saveOutbound(personaId: string, state: ReturnType<typeof createOutboundState>) {
+    outboundByPersona.set(personaId, state)
+    writeScoped(OUTBOUND_KEY, personaId, state)
+  }
+  /** The character the current tick reads. The gate and the send use her pace, never another's. */
+  let currentPersona = 'default'
+  let outbound = createOutboundState(Date.now())
   /** The owner message time seen at the last tick, so a new one ends the unanswered run. */
   let lastOwnerAt: number | null = null
   /** Topic of the message the current tick would send. It comes from the tick's own read. */
@@ -101,11 +110,15 @@ export const useSelfInitiatedSpeechStore = defineStore('self-initiated-speech', 
         // state for every card whose persona differs, so the drives never reached the decision.
         const personaId = memory.enabled ? memory.resolvePersona(cardId) : cardId
         const snapshot = castalia.snapshotFor(personaId)
-        currentTopic = scopedTopic(personaId, snapshot.currentDesire)
+        const messages = chatSession.getSessionMessagesIfLoaded(sessionId)
+        // The subject follows the conversation, so a new subject is a new topic and the same subject still waits.
+        currentPersona = personaId
+        outbound = outboundFor(personaId)
+        currentTopic = scopedTopic(personaId, conversationTopic(messages) ?? snapshot.currentDesire)
         const input = toAutonomyInput({
           now,
           lastSpokeAt,
-          messages: chatSession.getSessionMessagesIfLoaded(sessionId),
+          messages,
           snapshot: {
             energy: snapshot.energy,
             currentDesire: snapshot.currentDesire,
@@ -145,7 +158,7 @@ export const useSelfInitiatedSpeechStore = defineStore('self-initiated-speech', 
         }
         const now = Date.now()
         outbound = recordOutbound(outbound, { now, hour: new Date(now).getHours(), topic: currentTopic })
-        saveOutbound(outbound)
+        saveOutbound(currentPersona, outbound)
         lastGateReason.value = undefined
         // 状态机自己的上下文：把「刚才在心里想什么 / 此刻看到什么 / 现在的状态」一起带上。
         // 不带的话，她每次主动开口都像凭空冒一句，和自己那串自言自语接不上。
@@ -181,6 +194,7 @@ ${context}` : SELF_INITIATED_NOTICE
   /** Forgets the day, the gaps, and the topics. A test and a new session both use it. */
   function resetOutbound(now: number = Date.now()) {
     outbound = createOutboundState(now)
+    saveOutbound(currentPersona, outbound)
     lastOwnerAt = null
     gatedCount.value = 0
     lastGateReason.value = undefined

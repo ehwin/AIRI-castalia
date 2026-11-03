@@ -21,6 +21,13 @@ export interface Thought {
   visibility: ThoughtVisibility
   /** A short label, so a later recall can find related thoughts. */
   topic?: string
+  /**
+   * The character this thought belongs to.
+   *
+   * One stream serves every card, and a diary is the most private thing a character has. A thought without a
+   * persona predates the split and is claimed by the first character that reads the diary.
+   */
+  persona?: string
 }
 
 export interface InnerStream {

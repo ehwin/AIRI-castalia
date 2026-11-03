@@ -2,7 +2,7 @@ import type { ChatHistoryItem } from '@proj-airi/core-agent'
 
 import { describe, expect, it } from 'vitest'
 
-import { lastOwnerMessageAt, scopedTopic, toAutonomyInput } from './adapter'
+import { conversationTopic, lastOwnerMessageAt, scopedTopic, toAutonomyInput } from './adapter'
 
 function ownerMessage(createdAt: number): ChatHistoryItem {
   return { role: 'user', content: 'hello', id: `u-${createdAt}`, createdAt }
@@ -86,6 +86,33 @@ describe('autonomy input', () => {
       expect(scopedTopic('airi', '  Finish  the SONG ')).toBe('airi:finishthesong')
       expect(scopedTopic('airi', null)).toBe('airi:idle')
       expect(scopedTopic('airi', '   ')).toBe('airi:idle')
+    })
+  })
+
+  // ROOT CAUSE: the dedupe used one fixed key per stretch of silence, so a new subject still looked like the old
+  // one. The topic now follows the conversation.
+  describe('conversationTopic', () => {
+    it('reads the newest real message, not a notice', () => {
+      const messages = [
+        ownerMessage(1000),
+        noticeMessage(2000),
+        assistantMessage(3000),
+      ]
+
+      expect(conversationTopic(messages)).toBe('hithere')
+    })
+
+    it('ignores punctuation and case, and caps the key', () => {
+      const long = { role: 'user' as const, content: '  聊聊  明天的 天气，好吗？ 还有更长的内容要截断 ', id: 'u', createdAt: 1 }
+      const key = conversationTopic([long])!
+
+      expect(key.startsWith('聊聊明天的天气好吗')).toBe(true)
+      expect(key.length).toBeLessThanOrEqual(24)
+    })
+
+    it('returns null without a real message', () => {
+      expect(conversationTopic(undefined)).toBeNull()
+      expect(conversationTopic([noticeMessage(1000)])).toBeNull()
     })
   })
 })

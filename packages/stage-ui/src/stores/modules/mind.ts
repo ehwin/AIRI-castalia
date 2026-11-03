@@ -175,6 +175,8 @@ export const useMindStore = defineStore('mind', () => {
   // Scoped by character: two characters in the same profile must not share a
   // fatigue gauge. `initialize(characterId)` sets it before the first read.
   let mindScope = 'default'
+  /** The character this mind belongs to right now. The diary reads it, so a day never mixes two characters. */
+  const scope = ref(mindScope)
   function mindStateKey(): string {
     return `castalia/mind-state/${mindScope}`
   }
@@ -225,6 +227,56 @@ export const useMindStore = defineStore('mind', () => {
     asleep.value = Boolean(saved.asleep && saved.clock)
     napping.value = Boolean(saved.napping && saved.clock)
     lastTickAt = Number.isFinite(saved.at) ? Math.min(now, saved.at!) : now
+  }
+
+  /**
+   * Moves the mind to another character.
+   *
+   * Drives, the sleep clock, and the diary stream belong to one character. Switching cards must not carry the
+   * outgoing character's fatigue or thoughts into the new one, and switching back must resume where she left off,
+   * so the outgoing snapshot is persisted under its own key before the swap.
+   */
+  async function switchCharacter(characterId: string | undefined, now = Date.now()) {
+    const next = characterId || 'default'
+    if (next === mindScope)
+      return
+    persistMindState()
+    mindScope = next
+    scope.value = next
+
+    drives.value = { fatigue: 0, boredom: 0, curiosity: 0, focus: 0 }
+    sleepClock = null
+    asleep.value = false
+    napping.value = false
+    lastNapAt = 0
+    napsToday = 0
+    napDay = new Date(now).toDateString()
+    lastTickAt = now
+
+    const saved = await innerThoughtsRepo.readAll().catch(() => [])
+    stream.value = createStream()
+    for (const thought of saved) {
+      // A thought written before the split has no persona. The first character that reads the diary keeps it;
+      // leaving it unowned would show one character's day in the other's diary.
+      if (!thought.persona) {
+        thought.persona = mindScope
+        void innerThoughtsRepo.append(thought).catch(() => {})
+      }
+      if (thought.persona === mindScope)
+        stream.value = record(stream.value, thought)
+    }
+
+    const remembered = loadMindState()
+    if (remembered?.drives)
+      drives.value = remembered.drives
+    if (remembered?.clock)
+      sleepClock = remembered.clock
+    lastNapAt = remembered?.lastNapAt ?? 0
+    napsToday = remembered?.napsToday ?? 0
+    napDay = remembered?.napDay ?? new Date(now).toDateString()
+    asleep.value = Boolean(remembered?.asleep && sleepClock)
+    napping.value = Boolean(remembered?.napping && sleepClock)
+    persistMindState()
   }
 
   /** 可观测：host 有没有把「怎么想」交进来。没接上时 `thinkNow()` 直接返回 false。 */
@@ -490,6 +542,7 @@ export const useMindStore = defineStore('mind', () => {
         text,
         visibility: 'private',
         topic: 'self-cycle',
+        persona: mindScope,
       }
       stream.value = record(stream.value, thought)
       lastThinkText.value = text
@@ -592,6 +645,7 @@ export const useMindStore = defineStore('mind', () => {
         text,
         visibility: 'private',
         topic: 'held-back',
+        persona: mindScope,
       }
       stream.value = record(stream.value, thought)
       void innerThoughtsRepo.append(thought).catch(() => {})
@@ -711,6 +765,7 @@ export const useMindStore = defineStore('mind', () => {
       return
 
     observations = []
+    thought.persona ??= mindScope
     stream.value = record(stream.value, thought)
     void innerThoughtsRepo.append(thought).catch(() => {})
   }
@@ -894,6 +949,8 @@ export const useMindStore = defineStore('mind', () => {
     initialized,
     isOwner,
     initialize,
+    scope,
+    switchCharacter,
     observe,
     tick,
     poke,

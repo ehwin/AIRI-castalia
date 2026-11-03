@@ -64,6 +64,31 @@ export const SELF_INITIATED_NOTICE = 'A quiet moment passed. Act on your own onl
 export const SELF_INITIATED_SOURCE = 'self-initiated-speech'
 
 /**
+ * Topic key of the conversation as it stands now.
+ *
+ * The dedupe asks "did I already say this", and a fixed key made every silent stretch look like the same subject.
+ * Reading the last real message makes the key follow the subject: a new subject is a new key, so she may speak about
+ * it inside the dedupe window, while the same subject still waits its turn.
+ */
+export function conversationTopic(messages: ChatHistoryItem[] | undefined): string | null {
+  if (!messages) {
+    return null
+  }
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]!
+    if (message.notice || (message.role !== 'user' && message.role !== 'assistant')) {
+      continue
+    }
+    const text = typeof message.content === 'string' ? message.content : ''
+    const key = text.trim().toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '').slice(0, 24)
+    if (key) {
+      return key
+    }
+  }
+  return null
+}
+
+/**
  * Topic key of an utterance, scoped to one character.
  *
  * The outbound gate dedupes by topic. Without the scope, every character without a desire shares the single key
