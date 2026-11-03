@@ -393,6 +393,7 @@ pages:
       maintain_facts: 新增事实
       maintain_merged: 合并
       maintain_no_llm: 没配置反刍模型，只跑了 digest。
+      maintain_skipped: "这次没有执行：{reason}。上次结果：事实 +{facts}、合并 {merged}。"
       maintain_failed: 整理失败
   data:
     title: 数据
@@ -932,6 +933,10 @@ pages:
       tsundere-level: 傲娇浓度
       tsundere-level-description: 数值越高，已记录情绪衰减得越慢。此设置按角色分别保存。
       status-description: AIRI 对话接入情绪或愿望事件后才会更新状态。插件副本独立于 AIRI 核心更新。
+      backend-title: 后端实际能做什么
+      backend-tools-disabled: 工具已被服务商错误降级：{models}
+      backend-retry-tools: 重新探测工具
+      backend-truncated: 只读到 {listed} 条：列表撞到上限，这不是整个库。
       short-term-memory: 短期记忆
       short-term-memory-description: 下一轮对话会带入的最近心情事件。
       no-short-term-memory: 暂无记录。

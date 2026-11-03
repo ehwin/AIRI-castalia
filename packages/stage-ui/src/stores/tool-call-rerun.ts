@@ -169,11 +169,10 @@ export async function executeToolCallRerun<TToolset extends string = string>(
   const tools = await options.resolveTools()
   const tool = tools.find(candidate => toolNameFrom(candidate) === payload.toolName)
   if (tool == null) {
-    return replaceTargetMessage({
-      id: payload.toolCallId,
-      isError: true,
-      result: `Tool "${payload.toolName}" is not available for rerun in this runtime.`,
-    })
+    // A rerun that cannot find its tool must not rewrite history: the previous result was a real
+    // answer, and replacing it with "not available" destroyed the only record of it (audit F12).
+    // The caller surfaces this message and keeps the transcript as it was.
+    throw new Error(`Tool "${payload.toolName}" is not available for rerun in this runtime.`)
   }
 
   const parsedArgs = parseToolCallArgs(payload.args)

@@ -8,6 +8,7 @@ import { useI18n } from 'vue-i18n'
 import factorioIcon from '../assets/factorio-simple.png'
 
 import { useLive2DMotionMagicSettings } from '../features/motions/live2d'
+import { useLLM } from '../stores/ai/chat-llm/llm'
 import { useMemoryStore } from '../stores/memory'
 import { useArtistryStore } from '../stores/modules/artistry'
 import { useConsciousnessStore } from '../stores/modules/consciousness'
@@ -36,6 +37,10 @@ export interface Module {
   to: string
   configured: boolean
   category: string
+  /** What the running backend can do, when the module depends on one. Shown under the description. */
+  detail?: string
+  /** Switch is on but the backend cannot do the thing the module is named after. */
+  degraded?: boolean
 }
 
 export function useModulesList() {
@@ -57,6 +62,7 @@ export function useModulesList() {
   const artistryStore = useArtistryStore()
   const memoryStore = useMemoryStore()
   const castaliaStore = useCastaliaPluginStore()
+  const llmStore = useLLM()
   const autoregressiveSettings = useLive2DMotionMagicSettings()
   const perceptionStore = usePerceptionStore()
   const diaryStore = useDiaryStore()
@@ -75,6 +81,11 @@ export function useModulesList() {
       to: '/settings/modules/consciousness',
       configured: consciousnessStore.configured,
       category: 'essential',
+      // A model whose tools a provider error switched off still shows as configured; say it here
+      // instead of letting the module claim a capability the request no longer carries (F13).
+      ...llmStore.toolsDisabledFor.length
+        ? { detail: `工具已被服务商错误降级：${llmStore.toolsDisabledFor.join(', ')}（重启后重新探测）`, degraded: true }
+        : {},
     },
     {
       id: 'speech',
@@ -192,6 +203,13 @@ export function useModulesList() {
       to: '/settings/modules/memory-long-term',
       configured: memoryStore.enabled,
       category: 'essential',
+      // A module that says "on" while its backend can only read rows is the bug this line answers.
+      ...(memoryStore.backend
+        ? {
+            detail: memoryStore.backendNote(),
+            degraded: memoryStore.enabled && !memoryStore.backend.capabilities.search && !memoryStore.backend.capabilities.recall,
+          }
+        : {}),
     },
     {
       id: 'castalia',
@@ -201,6 +219,12 @@ export function useModulesList() {
       to: '/settings/modules/castalia',
       configured: castaliaStore.enabled,
       category: 'essential',
+      ...(memoryStore.backend
+        ? {
+            detail: memoryStore.backendNote(),
+            degraded: castaliaStore.enabled && !memoryStore.backend.capabilities.psyche && !memoryStore.backend.capabilities.selfCycle,
+          }
+        : {}),
     },
     {
       id: 'tool-cards',

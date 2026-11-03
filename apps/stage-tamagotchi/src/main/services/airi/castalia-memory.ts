@@ -1,5 +1,10 @@
 import type { createContext } from '@moeru/eventa/adapters/electron/main'
 
+import type { CastaliaMaintainReport } from '../../../shared/eventa/castalia-memory'
+import type { CastaliaEngineMemory } from './castalia-engine'
+
+import process from 'node:process'
+
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -8,12 +13,9 @@ import { defineInvokeHandler } from '@moeru/eventa'
 import { createCastaliaMemoryRepository } from '@proj-airi/castalia-plugin/memory'
 import { app } from 'electron'
 
-import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryFacts, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySelfCycle, castaliaMemorySetEnergy, castaliaOpenConsole, castaliaTuningGet, castaliaTuningSave } from '../../../shared/eventa/castalia-memory'
-import type { CastaliaMaintainReport } from '../../../shared/eventa/castalia-memory'
+import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryFacts, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySelfCycle, castaliaMemorySetEnergy, castaliaMemoryStatus, castaliaOpenConsole, castaliaTuningGet, castaliaTuningSave } from '../../../shared/eventa/castalia-memory'
 import { openCastaliaConsole } from './castalia-console'
-import type { CastaliaEngineMemory } from './castalia-engine'
-
-import { createCastaliaEngineMemory, resolveCastaliaEngineOptions } from './castalia-engine'
+import { createCastaliaEngineMemory, describeCastaliaEngineConfig, resolveCastaliaEngineOptions } from './castalia-engine'
 import { createCastaliaFullClient, resolveCastaliaFullUrl } from './castalia-full'
 import { createInProcessBankMemory } from './castalia-inprocess'
 import { applyStoredTuning, getTuningSnapshot, saveTuning } from './castalia-tuning'
@@ -114,7 +116,11 @@ function writeMaintenanceLedger(ledger: MaintenanceLedger): void {
 }
 
 let maintenanceInFlight: Promise<CastaliaMaintainReport> | undefined
-/** @internal exported for the sleep path; both callers go through the same queue. */
+/**
+ * Exported for the sleep path; both callers go through the same queue.
+ *
+ * @internal
+ */
 export async function runMaintenance(
   engine: CastaliaEngineMemory,
   reason: string,
@@ -175,6 +181,31 @@ export async function runMaintenance(
   }
 }
 
+/**
+ * 每两分钟看一眼 VAD 队列有没有超龄批次（审计 F07）。
+ *
+ * 队列原本只在「下一条消息」或维护时被检查，所以一段安静下来的对话永远等不到情感更新。
+ * 没有超龄批次时这里什么都不做。
+ */
+function scheduleVadAgeSweep(engine: CastaliaEngineMemory) {
+  const minutes = Number(process.env.VAD_SWEEP_MINUTES ?? 2)
+  if (!Number.isFinite(minutes) || minutes <= 0)
+    return
+  if (typeof engine.flushStaleVadQueue !== 'function') {
+    console.info('[castalia] vad sweep unavailable on this backend (no flushStaleVadQueue)')
+    return
+  }
+  const timer = setInterval(() => {
+    void engine.flushStaleVadQueue?.()
+      .then((result) => {
+        if (result && result.updated > 0)
+          console.info(`[castalia] vad sweep flushed ${result.updated} (pending ${result.pending})`)
+      })
+      .catch(() => {})
+  }, minutes * 60_000)
+  timer.unref?.()
+}
+
 function scheduleMemoryMaintenance(engine: CastaliaEngineMemory) {
   if (maintenanceScheduled)
     return
@@ -186,8 +217,6 @@ function scheduleMemoryMaintenance(engine: CastaliaEngineMemory) {
     console.info('[castalia] memory maintenance unavailable on this backend')
     return
   }
-
-  let timer: ReturnType<typeof setInterval> | undefined
 
   const run = async (reason: string) => {
     try {
@@ -202,9 +231,11 @@ function scheduleMemoryMaintenance(engine: CastaliaEngineMemory) {
   console.info('[castalia] memory maintenance scheduled (daily 04:00-06:00, catch-up 3 min after start)')
 
   // 启动后先让界面稳定 3 分钟，再决定要不要补跑（错过夜间时段的情况）。
-  const startupDelay = setTimeout(() => { void run('startup-catchup') }, 3 * 60_000)
+  const startupDelay = setTimeout(() => {
+    void run('startup-catchup')
+  }, 3 * 60_000)
   // 之后每 30 分钟看一眼：是否已跨过本地 04:00 且当天没跑过（由 MIN_GAP 兜底）。
-  timer = setInterval(() => {
+  const timer = setInterval(() => {
     const hour = new Date().getHours()
     if (hour >= 4 && hour < 6)
       void run('nightly')
@@ -229,7 +260,9 @@ function scheduleSelfCycle(engine: CastaliaEngineMemory) {
   }
   let running = false
   const run = async (reason: string) => {
-    if (running) return
+    if (running) {
+      return
+    }
     running = true
     try {
       const report = await engine.selfCycle!({ limit: 6, hoursBack: 48, minIntervalHours: Math.max(0, intervalMinutes / 60) })
@@ -240,9 +273,16 @@ function scheduleSelfCycle(engine: CastaliaEngineMemory) {
     }
     finally { running = false }
   }
-  const startupDelay = setTimeout(() => { void run('startup') }, 3 * 60_000)
-  const timer = setInterval(() => { void run('interval') }, intervalMinutes * 60_000)
-  app.once('before-quit', () => { clearTimeout(startupDelay); clearInterval(timer) })
+  const startupDelay = setTimeout(() => {
+    void run('startup')
+  }, 3 * 60_000)
+  const timer = setInterval(() => {
+    void run('interval')
+  }, intervalMinutes * 60_000)
+  app.once('before-quit', () => {
+    clearTimeout(startupDelay)
+    clearInterval(timer)
+  })
   console.info(`[castalia] self-cycle scheduled every ${intervalMinutes} minutes`)
 }
 function getRepository(databasePath: string) {
@@ -294,21 +334,59 @@ export function setupCastaliaMemoryService(params: {
   if (engineOptions) {
     // 默认在主进程内直连记忆库（不再 spawn 子进程、不走 MCP/HTTP）；
     // CASTALIA_MEMORY_TRANSPORT=stdio 可切回旧的子进程路径做对照/兜底。
-    const transport = process.env.CASTALIA_MEMORY_TRANSPORT === 'stdio' ? 'stdio' : 'in-process'
+    const transport: 'stdio' | 'in-process' = process.env.CASTALIA_MEMORY_TRANSPORT === 'stdio' ? 'stdio' : 'in-process'
     const engine = transport === 'in-process'
       ? createInProcessBankMemory(engineOptions)
       : createCastaliaEngineMemory(engineOptions)
     console.info(`[castalia] memory backend: ${transport} bank=${engineOptions.bankDir} project=${engineOptions.project}`)
+    // The switch only says "on"; this is the answer to "can it actually recall / search / ingest".
+    defineInvokeHandler(params.context, castaliaMemoryStatus, () => ({
+      transport,
+      project: engineOptions.project,
+      character: engineOptions.character,
+      engineEntry: engineOptions.engineEntry,
+      capabilities: {
+        // stdio 后端没有队列工具，这里如实说"扫不了"，而不是让扫描器每年安静空转。
+        vadSweep: typeof engine.flushStaleVadQueue === 'function',
+        recall: typeof engine.recall === 'function',
+        search: typeof engine.search === 'function',
+        facts: typeof engine.facts === 'function',
+        ingest: typeof engine.ingest === 'function',
+        maintain: typeof engine.maintain === 'function',
+        selfCycle: typeof engine.selfCycle === 'function',
+        psyche: typeof engine.psycheState === 'function',
+      },
+      ...(transport === 'stdio' && typeof engine.search !== 'function'
+        ? { error: 'stdio 后端没有暴露 search/facts，检索会一直是空' }
+        : {}),
+      // 自动情感还有一道独立实验门槛（审计 F06）：模块开着也可能一步都不推进 psyche。
+      entries: (() => {
+        const stats = engine.listStats?.()
+        return stats ? { ...stats } : undefined
+      })(),
+      emotion: (() => {
+        const flag = String(process.env.PSYCHE_FROM_VAD ?? '').toLowerCase()
+        const autoFromVad = flag === 'on' || flag === '1' || flag === 'true'
+        const estimator: 'model' | 'lexicon' = process.env.OLLAMA_URL || process.env.VAD_MODEL ? 'model' : 'lexicon'
+        const note = !autoFromVad
+          ? '自动情感实验门槛未开启（PSYCHE_FROM_VAD）：只有模型主动调用 recordEmotion 才会改 psyche'
+          : estimator === 'lexicon'
+            ? '自动情感已开启，但只有本地词表可用：它会对模糊句子主动放弃判断，psyche 多数时候不动'
+            : '自动情感已开启，分析来自模型端点'
+        return { autoFromVad, estimator, note }
+      })(),
+      checkedAt: Date.now(),
+    }))
     defineInvokeHandler(params.context, castaliaMemoryList, () => engine.list())
     defineInvokeHandler(params.context, castaliaMemorySave, entry => engine.save(entry))
     defineInvokeHandler(params.context, castaliaMemoryForget, entry => engine.forget(entry))
-    defineInvokeHandler(params.context, castaliaMemoryRecall, query => engine.recall(query))
+    defineInvokeHandler(params.context, castaliaMemoryRecall, input => engine.recall(String(input?.query ?? ''), input?.persona))
     // 显式检索（模型主动查记忆）：与 recall 不同，不过相似度门槛、不渲染注入块。
     defineInvokeHandler(params.context, castaliaMemorySearch, input => engine.search
-      ? engine.search(String(input?.query ?? ''), input?.topK)
+      ? engine.search(String(input?.query ?? ''), input?.topK, input?.persona)
       : Promise.resolve([]))
     defineInvokeHandler(params.context, castaliaMemoryFacts, input => engine.facts
-      ? engine.facts(String(input?.query ?? ''), input?.topK)
+      ? engine.facts(String(input?.query ?? ''), input?.topK, input?.persona)
       : Promise.resolve([]))
     // 自回归结束后把这一轮写回库：这是"她记得刚才说过什么"的唯一入口。
     // 没有 ingest 的实现（stdio 旧路径）时返回 ok:false，不抛错、不影响回复。
@@ -331,7 +409,7 @@ export function setupCastaliaMemoryService(params: {
     })
     defineInvokeHandler(params.context, castaliaMemorySetEnergy, async (input) => {
       if (engine.setSelfEnergy)
-        await engine.setSelfEnergy(Number(input?.value) || 0)
+        await engine.setSelfEnergy(Number(input?.value) || 0, input?.persona)
       return { ok: Boolean(engine.setSelfEnergy) }
     })
     defineInvokeHandler(params.context, castaliaMemorySelfCycle, async (input) => {
@@ -340,6 +418,7 @@ export function setupCastaliaMemoryService(params: {
       return engine.selfCycle(input)
     })
     scheduleMemoryMaintenance(engine)
+    scheduleVadAgeSweep(engine)
     if (transport === 'in-process')
       scheduleSelfCycle(engine)
     app.once('before-quit', () => {
@@ -365,4 +444,12 @@ export function setupCastaliaMemoryService(params: {
   defineInvokeHandler(params.context, castaliaMemoryMaintain, () => ({ ok: false, startedAt: new Date().toISOString(), ms: 0, reflectConfigured: false, error: 'no castalia bank configured' }))
   defineInvokeHandler(params.context, castaliaMemorySelfCycle, () => ({ ok: false, skipped: true, reason: 'no castalia bank configured', evidenceIds: [], project: '' }))
   defineInvokeHandler(params.context, castaliaMemoryPsyche, () => null)
+  // 完整引擎没起来时，面板必须说清楚现在只是「条目读写」，而不是装作语义检索还在。
+  const described = describeCastaliaEngineConfig(userDataDir)
+  defineInvokeHandler(params.context, castaliaMemoryStatus, () => ({
+    transport: 'entry-only' as const,
+    capabilities: { vadSweep: false, recall: false, search: false, facts: false, ingest: false, maintain: false, selfCycle: false, psyche: false },
+    error: `完整引擎没有启用，只有条目读写：${described.reason ?? '配置不可用'}`,
+    checkedAt: Date.now(),
+  }))
 }

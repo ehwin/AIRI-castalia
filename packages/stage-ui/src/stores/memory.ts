@@ -36,6 +36,9 @@ export const INDEX_MAX_CHARS = 1900
  */
 export const INDEX_PER_DAY = 1
 
+/** Facts printed beside a lookup: three short rows, never the whole fact table. */
+export const FACT_TOP_K = 3
+
 const DAY_PREFIX = /^(\d{4}-\d{2}-\d{2})/
 
 const TRANSCRIPT_NAME = /^mem-[0-9a-z]{4,12}$/
@@ -155,17 +158,71 @@ export interface MemoryFact {
   similarity?: number
 }
 
+/**
+ * What a write or a forget actually achieved on the durable side.
+ *
+ * A tool answer is a promise to the owner, so "saved" may only be said after this resolves `ok`.
+ * `refused` is the backend saying no (a shared or derived entry), `failed` is it throwing, and
+ * `invalid` is the entry never being well formed enough to send.
+ */
+export interface MemoryPersistResult {
+  ok: boolean
+  reason?: 'refused' | 'failed' | 'invalid'
+  error?: string
+}
+
+export interface MemoryWriteResult {
+  entry?: MemoryEntry
+  /** Resolves once the backend holds the entry, or once it refused and the local cache was rolled back. */
+  persisted: Promise<MemoryPersistResult>
+}
+
+export interface MemoryForgetResult {
+  /** True when the entry was in the local cache and is now tentatively gone. */
+  found: boolean
+  persisted: Promise<MemoryPersistResult>
+}
+
+/**
+ * What the running backend can actually do.
+ *
+ * The module switch says "on"; this says whether the thing behind it can recall, search or ingest.
+ * `entry-only` is the reduced local SQLite path: entries read and write, nothing else works.
+ */
+export interface MemoryBackend {
+  transport: 'in-process' | 'stdio' | 'entry-only' | 'none'
+  project?: string
+  character?: string
+  capabilities: { vadSweep: boolean, recall: boolean, search: boolean, facts: boolean, ingest: boolean, maintain: boolean, selfCycle: boolean, psyche: boolean }
+  /** 自动情感的实验门槛：模块开着也可能一步都不推进 psyche。 */
+  emotion?: { autoFromVad: boolean, estimator: 'model' | 'lexicon', note: string }
+  entries?: { listed: number, truncated: boolean }
+  error?: string
+  checkedAt: number
+}
+
+/** Why a lookup ended: the tool must not read an unreachable backend as "this fact is absent". */
+export type MemoryLookupStatus = 'ok' | 'partial' | 'unavailable' | 'failed'
+
+export interface MemoryLookup {
+  status: MemoryLookupStatus
+  hits: MemorySearchHit[]
+  facts: MemoryFact[]
+  error?: string
+}
+
 export interface MemoryRemotePort { /** Every entry the remote holds. Replaces the local cache on start. */
   list: () => Promise<MemoryEntry[]>
   save: (entry: MemoryEntry) => Promise<void>
-  forget: (entry: Pick<MemoryEntry, 'id' | 'name' | 'persona'>) => Promise<void>
+  /** Deletes one entry. `false` means the backend refused and kept it (shared, derived, other persona). */
+  forget: (entry: Pick<MemoryEntry, 'id' | 'name' | 'persona'>) => Promise<boolean>
   /**
    * Renders a context block for one query, from the entries the backend ranks.
    *
    * A port without it leaves the recall provider with nothing to inject. The
    * recall reads ranked text, so it never serves the synchronous prompt index.
    */
-  recall?: (query: string) => Promise<MemoryRecall>
+  recall?: (query: string, persona?: string) => Promise<MemoryRecall>
   /**
    * Ranked lookup over the whole bank for one query.
    *
@@ -173,14 +230,14 @@ export interface MemoryRemotePort { /** Every entry the remote holds. Replaces t
    * budget — it answers "what does memory hold about this" for a tool call, so an
    * empty array means "nothing matched", not "nothing worth injecting".
    */
-  search?: (query: string, topK?: number) => Promise<MemorySearchHit[]>
+  search?: (query: string, topK?: number, persona?: string) => Promise<MemorySearchHit[]>
   /**
    * Structured facts for the same query.
    *
    * A fact is one line ("user · name · 小托"), so the search tool prints the close ones beside
    * the rows instead of spending a second call. Far-off facts are the caller's to drop.
    */
-  facts?: (query: string, topK?: number) => Promise<MemoryFact[]>
+  facts?: (query: string, topK?: number, persona?: string) => Promise<MemoryFact[]>
   /**
    * Writes one finished turn into the durable store.
    *
@@ -196,6 +253,8 @@ export interface MemoryIngestTurn {
   user: string
   assistant: string
   sessionId?: string
+  /** The card this turn belongs to; the backend falls back to its configured character. */
+  persona?: string
 }
 
 export interface MemoryIngestResult {
@@ -415,6 +474,48 @@ export const useMemoryStore = defineStore('memory', () => {
     lastError: '',
   })
 
+  /** What the app reported about the backend on start; `undefined` until it answers. */
+  const backend = ref<MemoryBackend | undefined>(undefined)
+
+  let refreshTimer: ReturnType<typeof setTimeout> | undefined
+
+  /**
+   * Re-reads the backend list soon, once.
+   *
+   * The cache is filled at start and by local writes only, so rows the backend creates on its own
+   * (ingest, maintenance, self-cycle) stayed invisible to `read` and to the prompt index. Callers
+   * that just caused such a row call this; the debounce keeps a burst of turns to one read.
+   */
+  function scheduleRefresh(delayMs = 2_000) {
+    if (!remote || refreshTimer)
+      return
+    refreshTimer = setTimeout(() => {
+      refreshTimer = undefined
+      void hydrate()
+    }, delayMs)
+  }
+
+  /** Stores the backend report. The panel and the module list read this instead of guessing. */
+  function setBackend(next: MemoryBackend | undefined) {
+    backend.value = next
+  }
+
+  /** One plain sentence about the backend, for a settings row. */
+  function backendNote(): string | undefined {
+    const current = backend.value
+    if (!current)
+      return undefined
+    const missing = Object.entries(current.capabilities).filter(([, ok]) => !ok).map(([name]) => name)
+    if (current.error)
+      return current.error
+    const truncation = current.entries?.truncated ? ` · 只读到 ${current.entries.listed} 条（撞上限，列表不是全部）` : ''
+    if (!missing.length) {
+      const gate = current.emotion && !current.emotion.autoFromVad ? ` · ${current.emotion.note}` : ''
+      return `${current.transport} · ${current.project ?? '?'}/${current.character ?? '?'} · 全部能力在线${gate}${truncation}`
+    }
+    return `${current.transport} · ${current.project ?? '?'}/${current.character ?? '?'} · 缺 ${missing.join('/')}`
+  }
+
   function markRemoteOk() {
     remoteHealth.value = {
       ...remoteHealth.value,
@@ -432,6 +533,13 @@ export const useMemoryStore = defineStore('memory', () => {
       lastErrorAt: Date.now(),
       lastError: String((cause as { message?: string } | undefined)?.message ?? cause),
     }
+  }
+
+  /** One readable line for a tool answer: the backend's own message when it has one. */
+  function errorText(cause: unknown) {
+    const message = (cause as { message?: string } | undefined)?.message
+    const text = String(message ?? cause ?? 'unknown error').trim()
+    return text.length > 160 ? `${text.slice(0, 160)}…` : text
   }
 
   function attachRemote(port: MemoryRemotePort | undefined) {
@@ -488,11 +596,24 @@ export const useMemoryStore = defineStore('memory', () => {
    * character: a second card read the first one's facts, and worse, wrote her moods into the same state. Sharing a
    * bank is not sharing a self.
    */
+  /**
+   * 卡 → 记忆里的角色 id。
+   *
+   * 键就是卡的 id：卡 id 是 `N_h4lzz…`（尤诺那张卡），行就写在这个 id 下。`airi` 是卡内容里的
+   * 角色自我介绍，不是分区键——别按角色名猜分区。
+   *
+   * 别名只在两种情况下生效：本地缓存里已经有这个别名下的行（历史数据），否则一律用卡自己的 id。
+   * 不能退到"后端上报的 character"：那是**当前**写入方的 id，切到别的卡时会让两张卡共用一份记忆。
+   */
   function resolvePersona(personaId: string) {
     if (sorted.value.some(entry => entry.persona === personaId))
       return personaId
 
-    return PERSONA_ALIASES[personaId] ?? personaId
+    const alias = PERSONA_ALIASES[personaId]
+    if (alias && sorted.value.some(entry => entry.persona === alias))
+      return alias
+
+    return personaId
   }
 
   /**
@@ -524,18 +645,36 @@ export const useMemoryStore = defineStore('memory', () => {
     return matches.find(entry => entry.persona === personaId) ?? matches[0]
   }
 
-  /** Creates or replaces an entry of the card by name. Returns the stored entry, or undefined for an empty name or body. */
-  function write(entry: Pick<MemoryEntry, 'name' | 'description' | 'body'>, personaId: string) {
+  /**
+   * Creates or replaces an entry of the card by name.
+   *
+   * The local cache updates at once (a UI edit must not wait on a slow backend), and `persisted`
+   * reports what the backend did. A refusal rolls the cache back, so the list never shows a
+   * deletion or an edit the durable store did not accept.
+   */
+  function write(entry: Pick<MemoryEntry, 'name' | 'description' | 'body'>, personaId: string): MemoryWriteResult {
     const name = memoryName(entry.name)
     if (!name || !entry.body.trim())
-      return undefined
+      return { persisted: Promise.resolve({ ok: false, reason: 'invalid' }) }
     const next: MemoryEntry = { name, description: entry.description.trim(), body: entry.body.trim(), persona: personaId, updatedAt: Date.now() }
+    const shadowed = entries.value.filter(existing => memoryName(existing.name) === name && existing.persona === personaId)
     entries.value = [...entries.value.filter(existing => memoryName(existing.name) !== name || existing.persona !== personaId), next]
-    void remote?.save(next).catch((cause) => {
-      console.warn('[memory] remote save failed:', cause)
-      markRemoteFailure(cause)
-    })
-    return next
+    const persisted = (async (): Promise<MemoryPersistResult> => {
+      if (!remote)
+        return { ok: true }
+      try {
+        await remote.save(next)
+        markRemoteOk()
+        return { ok: true }
+      }
+      catch (cause) {
+        console.warn('[memory] remote save failed:', cause)
+        markRemoteFailure(cause)
+        entries.value = [...entries.value.filter(existing => existing !== next), ...shadowed]
+        return { ok: false, reason: 'failed', error: errorText(cause) }
+      }
+    })()
+    return { entry: next, persisted }
   }
 
   /** Makes a card's memory general, so every card reads it. A general memory with the same name gives way. */
@@ -558,23 +697,43 @@ export const useMemoryStore = defineStore('memory', () => {
     }
   }
 
-  /** Removes one entry, from a tool or from Settings. */
-  function remove(entry: Pick<MemoryEntry, 'id' | 'name' | 'persona'>) {
+  /** Removes one entry, from a tool or from Settings. The backend's answer decides whether it stays gone. */
+  function remove(entry: Pick<MemoryEntry, 'id' | 'name' | 'persona'>): MemoryForgetResult {
+    const removed = entries.value.filter(existing => existing.name === entry.name && existing.persona === entry.persona)
+    if (!removed.length)
+      return { found: false, persisted: Promise.resolve({ ok: false, reason: 'refused', error: 'no such entry' }) }
     entries.value = entries.value.filter(existing => existing.name !== entry.name || existing.persona !== entry.persona)
-    void remote?.forget({ id: entry.id, name: entry.name, persona: entry.persona }).catch((cause) => {
-      console.warn('[memory] remote forget failed:', cause)
-      markRemoteFailure(cause)
-    })
+    const persisted = (async (): Promise<MemoryPersistResult> => {
+      if (!remote)
+        return { ok: true }
+      try {
+        const gone = await remote.forget({ id: entry.id, name: entry.name, persona: entry.persona })
+        // A `false` is a refusal, not a no-op: the backend keeps the row (shared entry, derived
+        // diary, other persona). Restoring the rows keeps the list honest about that.
+        if (gone === false) {
+          entries.value = [...entries.value, ...removed]
+          return { ok: false, reason: 'refused', error: 'the backend kept the entry' }
+        }
+        markRemoteOk()
+        return { ok: true }
+      }
+      catch (cause) {
+        console.warn('[memory] remote forget failed:', cause)
+        markRemoteFailure(cause)
+        entries.value = [...entries.value, ...removed]
+        return { ok: false, reason: 'failed', error: errorText(cause) }
+      }
+    })()
+    return { found: true, persisted }
   }
 
   /** Forgets an entry of the card by name. General memories belong to the owner, so a run cannot forget them. */
-  function forget(name: string, personaId: string) {
+  function forget(name: string, personaId: string): MemoryForgetResult {
     const key = memoryName(name)
     const target = entries.value.find(entry => memoryName(entry.name) === key && entry.persona === personaId)
     if (!target)
-      return false
-    remove(target)
-    return true
+      return { found: false, persisted: Promise.resolve({ ok: false, reason: 'refused', error: 'no such entry' }) }
+    return remove(target)
   }
 
   /**
@@ -584,14 +743,14 @@ export const useMemoryStore = defineStore('memory', () => {
    * backend's gate. A failed recall never reaches the caller: a turn without the
    * block reads better than a turn that reports a backend error.
    */
-  async function recallForInjection(query: string): Promise<string> {
+  async function recallForInjection(query: string, persona?: string): Promise<string> {
     if (!enabled.value || !remote?.recall)
       return ''
     const text = query.trim()
     if (!text)
       return ''
     try {
-      const recalled = (await remote.recall(text)).text
+      const recalled = (await remote.recall(text, persona)).text
       markRemoteOk()
       return recalled
     }
@@ -603,52 +762,46 @@ export const useMemoryStore = defineStore('memory', () => {
   }
 
   /**
-   * Ranked lookup for a tool call.
+   * Ranked lookup for a tool call: the rows plus the near facts, and how the lookup itself ended.
    *
-   * Answers `[]` when memory is off, the backend has no search, the call fails, or
-   * nothing matched. The tool reports an empty list to the model as "nothing found",
-   * which is why a failure is logged and counted but never thrown.
+   * `unavailable` (no search port) and `failed` (the port threw) stay distinguishable from `ok`
+   * with no hits. The tool says "nothing matched" only in the last case, because an unreachable
+   * backend is not evidence that a fact is absent — that sentence was the bug the audit found.
    */
-  async function search(query: string, topK = 5): Promise<MemorySearchHit[]> {
-    if (!enabled.value || !remote?.search)
-      return []
+  async function lookup(query: string, topK = 5, persona?: string): Promise<MemoryLookup> {
     const text = query.trim()
+    if (!enabled.value)
+      return { status: 'unavailable', hits: [], facts: [], error: 'memory is off' }
     if (!text)
-      return []
-    try {
-      const hits = await remote.search(text, topK)
-      markRemoteOk()
-      return Array.isArray(hits) ? hits.filter(hit => typeof hit?.text === 'string' && hit.text.trim()) : []
+      return { status: 'ok', hits: [], facts: [] }
+    if (!remote?.search)
+      return { status: 'unavailable', hits: [], facts: [], error: 'no search backend attached' }
+    const [rows, facts] = await Promise.allSettled([
+      remote.search(text, topK, persona),
+      remote.facts ? remote.facts(text, FACT_TOP_K, persona) : Promise.resolve([] as MemoryFact[]),
+    ])
+    if (rows.status === 'rejected') {
+      console.warn('[memory] remote search failed:', rows.reason)
+      markRemoteFailure(rows.reason)
+      // Two ports that both failed are two unhealthy endpoints, not one: counting both is what
+      // moves the store to `remoteDegraded` (two consecutive failures) instead of hiding it.
+      if (facts.status === 'rejected')
+        markRemoteFailure(facts.reason)
+      return { status: 'failed', hits: [], facts: [], error: errorText(rows.reason) }
     }
-    catch (cause) {
-      console.warn('[memory] remote search failed:', cause)
-      markRemoteFailure(cause)
-      return []
+    const hits = (Array.isArray(rows.value) ? rows.value : []).filter(hit => typeof hit?.text === 'string' && hit.text.trim())
+    if (facts.status === 'rejected') {
+      console.warn('[memory] remote fact search failed:', facts.reason)
+      markRemoteFailure(facts.reason)
+      return { status: 'partial', hits, facts: [], error: `fact lookup failed: ${errorText(facts.reason)}` }
     }
-  }
-
-  /**
-   * Facts close enough to the query to be worth printing (cosine 0.6, measured on the real bank:
-   * "小托" reaches 0.73 while an unrelated query like "生日" tops out at 0.51 and stays out).
-   */
-  async function searchFacts(query: string, topK = 3): Promise<MemoryFact[]> {
-    if (!enabled.value || !remote?.facts)
-      return []
-    const text = query.trim()
-    if (!text)
-      return []
-    try {
-      const facts = await remote.facts(text, topK)
-      markRemoteOk()
-      return (Array.isArray(facts) ? facts : [])
-        .filter(fact => fact?.object && (fact.similarity ?? 1) >= 0.6)
-        .slice(0, topK)
-    }
-    catch (cause) {
-      console.warn('[memory] remote fact search failed:', cause)
-      markRemoteFailure(cause)
-      return []
-    }
+    markRemoteOk()
+    // Facts close enough to be worth printing (cosine 0.6, measured on the real bank: "小托"
+    // reaches 0.73 while an unrelated query like "生日" tops out at 0.51 and stays out).
+    const near = (Array.isArray(facts.value) ? facts.value : [])
+      .filter(fact => fact?.object && (fact.similarity ?? 1) >= 0.6)
+      .slice(0, FACT_TOP_K)
+    return { status: 'ok', hits, facts: near }
   }
 
   /**
@@ -666,11 +819,16 @@ export const useMemoryStore = defineStore('memory', () => {
     if (!user || !assistant)
       return { ok: false, error: 'empty turn' }
     try {
-      const result = await remote.ingest({ user, assistant, ...(turn.sessionId ? { sessionId: turn.sessionId } : {}) })
-      if (result.ok)
+      const result = await remote.ingest({ user, assistant, ...(turn.sessionId ? { sessionId: turn.sessionId } : {}), ...(turn.persona ? { persona: turn.persona } : {}) })
+      if (result.ok) {
         markRemoteOk()
-      else
+        // The turn the backend just wrote is not in the local cache, so `read` and the prompt
+        // index stayed blind to it until a restart (audit F09). One debounced re-read fixes that.
+        scheduleRefresh()
+      }
+      else {
         markRemoteFailure(result.error ?? 'ingest rejected')
+      }
       return result
     }
     catch (cause) {
@@ -695,6 +853,10 @@ export const useMemoryStore = defineStore('memory', () => {
   return {
     enabled,
     entries: sorted,
+    backend,
+    setBackend,
+    scheduleRefresh,
+    backendNote,
     remoteAttached,
     remoteHealth,
     remoteDegraded,
@@ -704,8 +866,7 @@ export const useMemoryStore = defineStore('memory', () => {
     resolvePersona,
     indexFor,
     read,
-    search,
-    searchFacts,
+    lookup,
     write,
     makeGeneral,
     forget,

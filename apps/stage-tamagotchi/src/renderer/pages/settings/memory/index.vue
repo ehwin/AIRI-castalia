@@ -36,7 +36,15 @@ async function maintainNow() {
     const report = await invokeMaintain({ limit: 30 })
     const reflect = report.reflect as Record<string, any> | undefined
     const merged = report.consolidate as Record<string, any> | undefined
-    if (!report.reflectConfigured) {
+    // 冷却期内主进程返回上一次的 report：先说「这次没跑」，别让旧计数冒充本次产出（审计 F15）。
+    if (report.skipped) {
+      maintainNote.value = t(`${KEY}.maintain_skipped`, {
+        reason: report.skippedReason ?? '-',
+        facts: reflect?.factsInserted ?? 0,
+        merged: merged?.merged ?? 0,
+      })
+    }
+    else if (!report.reflectConfigured) {
       maintainNote.value = `${t(`${KEY}.maintain_no_llm`)}`
     }
     else if (!report.ok) {

@@ -44,6 +44,26 @@ describe('memory store', () => {
     expect(memory.indexFor('default')).toContain('June 27')
   })
 
+  // The real bank has two cards: `default` (ReLU) and `N_h4lzzOfl0AYehOR171-` (尤诺). Every memory row
+  // belongs to 尤诺's card id, and `airi` is only the character name written *inside* the card — not a
+  // partition key. Two cards must never share one partition, so no fallback to "whatever the backend
+  // currently writes" is allowed: switching to ReLU would have read 尤诺's memories.
+  it('keys memories by card id and only follows an alias that has its own rows', () => {
+    const memory = useMemoryStore()
+    memory.write({ name: 'Birthday', description: 'Hers is June 27.', body: 'June 27.' }, 'N_h4lzzOfl0AYehOR171-')
+
+    expect(memory.resolvePersona('N_h4lzzOfl0AYehOR171-')).toBe('N_h4lzzOfl0AYehOR171-')
+    expect(memory.indexFor(memory.resolvePersona('N_h4lzzOfl0AYehOR171-'))).toContain('June 27')
+
+    // The other card has no rows, so it keeps its own empty partition instead of borrowing hers.
+    expect(memory.resolvePersona('default')).toBe('default')
+    expect(memory.indexFor('default')).toBe('')
+
+    // An alias is followed only when the alias itself owns rows (the old `default` → `airi` layout).
+    memory.write({ name: 'Tone', description: 'Quiet.', body: 'Quiet.' }, 'airi')
+    expect(memory.resolvePersona('default')).toBe('airi')
+  })
+
   // A card keeps its own memories. Only the owner makes one general, and then every card reads it.
   it('keeps memories on their card until the owner makes one general', () => {
     const memory = useMemoryStore()
@@ -72,12 +92,12 @@ describe('memory store', () => {
     memory.write({ name: 'tone', description: '', body: 'Short sentences.' }, 'focus')
 
     expect(memory.read('tone', 'focus')?.body).toBe('Short sentences.')
-    expect(memory.forget('tone', 'focus')).toBe(true)
+    expect(memory.forget('tone', 'focus').found).toBe(true)
     expect(memory.read('tone', 'focus')?.body).toBe('Calm.')
     // A general memory belongs to the owner, so a run cannot forget it.
-    expect(memory.forget('tone', 'focus')).toBe(false)
-    expect(memory.write({ name: '!!', description: '', body: 'x' }, 'airi')).toBeUndefined()
-    expect(memory.write({ name: 'x', description: '', body: ' ' }, 'airi')).toBeUndefined()
+    expect(memory.forget('tone', 'focus').found).toBe(false)
+    expect(memory.write({ name: '!!', description: '', body: 'x' }, 'airi').entry).toBeUndefined()
+    expect(memory.write({ name: 'x', description: '', body: ' ' }, 'airi').entry).toBeUndefined()
     expect(memoryName('  我的 猫咪！ ')).toBe('我的-猫咪')
   })
 

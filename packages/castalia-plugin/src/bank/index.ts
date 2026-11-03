@@ -93,6 +93,13 @@ export interface BankHandle {
    * 不自己累积情绪，避免两套状态各说各话。
    */
   psycheState: (options?: { characterId?: string, project?: string }) => Promise<PsycheSnapshot>
+  /**
+   * 队列到期检查（审计 F07）。
+   *
+   * 十分钟是时限，不是「下一次有人说话再说」：最老的一条超过 `maxAgeSec` 就强制处理，
+   * 否则一段安静下来的对话永远等不到情感更新。
+   */
+  flushStaleVadQueue: (maxAgeSec?: number) => Promise<{ updated: number, pending: number }>
   /** Mirrors the mind's energy into the engine so its own prompts stop inventing one. */
   setSelfEnergy: (value: number) => Promise<void>
   close: () => void
@@ -474,6 +481,27 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
     setSelfEnergy: async (value) => {
       const { getAgentState } = await import('../vendor/engine/agentState')
       getAgentState(charId, project).setEnergy(value)
+    },
+    /**
+     * 队列到期检查（审计 F07）。
+     *
+     * 只在最老一条超过 `maxAgeSec` 时强制 flush：十分钟是时限，不是"下一次有人说话再说"。
+     * 队列不可用（没开 VAD）时安静返回，不算错误。
+     */
+    flushStaleVadQueue: async (maxAgeSec = 600) => {
+      try {
+        const emotion = await import('../vendor/engine/emotion')
+        const before = emotion.vadQueueStatus(project, charId) as { size?: number, oldestAgeSec?: number } | undefined
+        const pending = before?.size ?? 0
+        if (!pending || (before?.oldestAgeSec ?? 0) < maxAgeSec)
+          return { updated: 0, pending }
+        const flushed = await emotion.flushVadQueueDetailed(project, { force: true }) as { updated?: number } | undefined
+        const after = emotion.vadQueueStatus(project, charId) as { size?: number } | undefined
+        return { updated: flushed?.updated ?? 0, pending: after?.size ?? 0 }
+      }
+      catch {
+        return { updated: 0, pending: 0 }
+      }
     },
     psycheState: async (options = {}) => {
       const { getPsycheState } = await import('../vendor/engine/psycheState')

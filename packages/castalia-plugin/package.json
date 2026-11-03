@@ -22,6 +22,10 @@
       "types": "./src/bank/store-tools.ts",
       "default": "./src/bank/store-tools.ts"
     },
+    "./bank/time": {
+      "types": "./src/bank/time.ts",
+      "default": "./src/bank/time.ts"
+    },
     "./tuning": {
       "types": "./src/tuning.ts",
       "default": "./src/tuning.ts"

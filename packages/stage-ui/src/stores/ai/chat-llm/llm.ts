@@ -7,7 +7,7 @@ import type { DescribeToolImage } from './tool-images'
 import { streamFrom as coreStreamFrom, isContentArrayRelatedError, isToolRelatedError, modelKey } from '@proj-airi/core-agent'
 import { listModels } from '@xsai/model'
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
 import { resolveLlmTools } from './tool-resolver'
 
@@ -148,8 +148,29 @@ export const useLLM = defineStore('llm', () => {
     }
   }
 
+  /**
+   * Models whose tools a provider error switched off (audit F13).
+   *
+   * The downgrade itself is deliberate — a provider that rejects tool schemas should keep working —
+   * but it used to be a private Map, so the panel still showed the module as fully wired while the
+   * request carried no tools at all.
+   */
+  const toolsDisabledFor = computed(() => [...toolsCompatibility.value.entries()]
+    .filter(([, supported]) => supported === false)
+    .map(([key]) => key))
+
+  /** Puts every model back on trial: the next request carries tools again and re-learns the answer. */
+  function retryToolSupport(key?: string) {
+    if (key)
+      toolsCompatibility.value.delete(key)
+    else
+      toolsCompatibility.value.clear()
+  }
+
   return {
     models,
     stream,
+    toolsDisabledFor,
+    retryToolSupport,
   }
 })

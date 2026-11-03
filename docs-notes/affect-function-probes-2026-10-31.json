@@ -1,0 +1,219 @@
+{
+  "lexical": [
+    {
+      "text": "害怕",
+      "valence": -0.57,
+      "arousal": 0.73,
+      "dominance": -0.6,
+      "confidence": 0.55,
+      "matched": [
+        "害怕",
+        "怕"
+      ]
+    },
+    {
+      "text": "不害怕",
+      "valence": 0.02,
+      "arousal": 0.73,
+      "dominance": 0,
+      "confidence": 0.55,
+      "matched": [
+        "害怕(否定)",
+        "怕"
+      ]
+    },
+    {
+      "text": "不开心",
+      "valence": -0.7,
+      "arousal": 0.6,
+      "dominance": -0.4,
+      "confidence": 0.4,
+      "matched": [
+        "开心(否定)"
+      ]
+    },
+    {
+      "text": "不生气",
+      "valence": 0.6,
+      "arousal": 0.8,
+      "dominance": -0.3,
+      "confidence": 0.4,
+      "matched": [
+        "生气(否定)"
+      ]
+    },
+    {
+      "text": "不安心",
+      "valence": -0.52,
+      "arousal": 0.4,
+      "dominance": -0.5,
+      "confidence": 0.55,
+      "matched": [
+        "安心(否定)",
+        "不安"
+      ]
+    },
+    {
+      "text": "她说“我很开心”，但我并不开心",
+      "valence": 0.12,
+      "arousal": 0.71,
+      "dominance": 0.07,
+      "confidence": 0.55,
+      "matched": [
+        "开心(×1.35)",
+        "开心(否定)"
+      ]
+    },
+    {
+      "text": "谢谢你的道歉",
+      "valence": 0.45,
+      "arousal": 0.25,
+      "dominance": 0.4,
+      "confidence": 0.4,
+      "matched": [
+        "谢谢"
+      ]
+    },
+    {
+      "text": "对不起",
+      "valence": -0.35,
+      "arousal": 0.35,
+      "dominance": -0.2,
+      "confidence": 0.4,
+      "matched": [
+        "对不起"
+      ]
+    },
+    {
+      "text": "今天吃了面",
+      "valence": 0,
+      "arousal": 0,
+      "dominance": 0,
+      "confidence": 0,
+      "matched": []
+    },
+    {
+      "text": "！！！",
+      "valence": 0,
+      "arousal": 0.6,
+      "dominance": 0,
+      "confidence": 0.2,
+      "matched": []
+    }
+  ],
+  "neutralStep": {
+    "sad": {
+      "version": 2,
+      "hasEvidence": true,
+      "lastEvidenceAt": 0,
+      "baseline": {
+        "valence": 0.4,
+        "arousal": 0.3,
+        "dominance": 0.6
+      },
+      "vad": {
+        "valence": -0.37,
+        "arousal": 0.52,
+        "dominance": 0.04999999999999993
+      },
+      "band": "negative",
+      "updatedAt": 0,
+      "processedEventIds": [
+        "external:1"
+      ]
+    },
+    "neutral": {
+      "version": 3,
+      "hasEvidence": true,
+      "lastEvidenceAt": 0,
+      "baseline": {
+        "valence": 0.4,
+        "arousal": 0.3,
+        "dominance": 0.6
+      },
+      "vad": {
+        "valence": -0.37,
+        "arousal": 0.52,
+        "dominance": 0.04999999999999993
+      },
+      "band": "neutral",
+      "updatedAt": 0,
+      "processedEventIds": [
+        "external:1",
+        "external:2"
+      ]
+    },
+    "read": {
+      "version": 3,
+      "hasEvidence": true,
+      "lastEvidenceAt": 0,
+      "baseline": {
+        "valence": 0.4,
+        "arousal": 0.3,
+        "dominance": 0.6
+      },
+      "vad": {
+        "valence": -0.37,
+        "arousal": 0.52,
+        "dominance": 0.04999999999999993
+      },
+      "band": "neutral",
+      "updatedAt": 0,
+      "processedEventIds": [
+        "external:1",
+        "external:2"
+      ]
+    }
+  },
+  "clocks": {
+    "old24h": 0.36787944117144233,
+    "properHalfLife24h": 0.5
+  },
+  "nightSwitch24h": {
+    "dayA": 0.0024787521766663585,
+    "nightA": 1.522997974471263e-8,
+    "dayD": 0.513417119032592,
+    "nightD": 0.7165313105737893
+  },
+  "bipolarArousal": [
+    {
+      "vad": {
+        "valence": 0,
+        "arousal": -1,
+        "dominance": 0
+      },
+      "intensity": 0.3333333333333333
+    },
+    {
+      "vad": {
+        "valence": 0,
+        "arousal": 1,
+        "dominance": 0
+      },
+      "intensity": 0.3333333333333333
+    }
+  ],
+  "zeroPlutchik": {
+    "joy": 0.3112296656009273,
+    "trust": 0.15561483280046365,
+    "fear": 0.125,
+    "surprise": 0.1606798683172233,
+    "sadness": 0.3112296656009273,
+    "disgust": 0.2127787415941705,
+    "anger": 0.125,
+    "anticipation": 0.14361062920291476
+  },
+  "bjorkFloor": 0.615,
+  "activation1h": 0.7858349830425586,
+  "activation30d": 0.06614012966446076,
+  "energyClockReset": {
+    "idle24h": 30.1194211912202,
+    "afterDesireTimestampReset": 100
+  },
+  "relativeAbsolute": {
+    "baseline": 0.4,
+    "valence": 0.1,
+    "relative": -0.3,
+    "legacyScalar": 1
+  }
+}

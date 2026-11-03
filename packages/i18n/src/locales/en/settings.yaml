@@ -427,6 +427,7 @@ pages:
       maintain_facts: new facts
       maintain_merged: merged
       maintain_no_llm: No reflection model configured, so only the digest step ran.
+      maintain_skipped: "Nothing ran this time: {reason}. Last run: +{facts} facts, {merged} merged."
       maintain_failed: Consolidation failed
   data:
     title: Data
@@ -983,6 +984,10 @@ pages:
       tsundere-level: Tsundere level
       tsundere-level-description: A higher value makes a recorded emotion decay slower. The setting is saved for each character.
       status-description: The state updates after an AIRI conversation feeds an emotion or desire event. The plugin copy updates independently from the AIRI core.
+      backend-title: What the backend can actually do
+      backend-tools-disabled: "Tools were switched off after a provider error: {models}"
+      backend-retry-tools: Re-check tools
+      backend-truncated: "Only {listed} entries were read: the list hit its limit, so this is not the whole bank." 
       short-term-memory: Short-term memory
       short-term-memory-description: The recent mood events that the next turn carries.
       no-short-term-memory: No record yet.

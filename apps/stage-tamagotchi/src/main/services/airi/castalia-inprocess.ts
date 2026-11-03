@@ -16,15 +16,7 @@ import { DatabaseSync } from 'node:sqlite'
 
 import { openBank } from '@proj-airi/castalia-plugin/bank'
 import { parseStoreText } from '@proj-airi/castalia-plugin/bank/store-tools'
-
-/** SQLite `YYYY-MM-DD HH:MM:SS` (UTC) 和 ISO 都转 epoch ms（与 stdio 版行为一致）。 */
-function parseTime(value: string | undefined): number {
-  if (!value)
-    return Date.now()
-  const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`
-  const parsed = Date.parse(normalized)
-  return Number.isFinite(parsed) ? parsed : Date.now()
-}
+import { parseBankTime } from '@proj-airi/castalia-plugin/bank/time'
 
 /**
  * 按 id 读一条日记的正文。
@@ -57,30 +49,48 @@ function readDiaryText(options: { bankDir: string, project: string } | undefined
   }
 }
 
+/** 列表上限。撞到它会显式报 truncated，而不是安静地少给。 */
+const LIST_LIMIT = 2000
+
 export function createInProcessBankMemory(options: CastaliaEngineOptions): CastaliaEngineMemory {
-  let opened: Promise<Awaited<ReturnType<typeof openBank>>> | undefined
+  // One bank per character: the handle binds `charId` when it opens, so a second card needs its
+  // own handle. Sharing one made search read the configured character while the write went to the
+  // card on screen (audit F01).
+  const banks = new Map<string, Promise<Awaited<ReturnType<typeof openBank>>>>()
   let closing = false
   // 最近几轮注入过的记忆 id:连续同话题时不重复塞同一段(报告里"连续 3 轮不重复"那条)。
   let recentIds: string[] = []
 
-  function ensure() {
-    if (!opened) {
-      opened = openBank({
-        bankDir: options.bankDir,
-        project: options.project,
-        charId: options.character,
-      })
-    }
+  /** The bank for one character, opened once and reused. A missing persona keeps the configured one. */
+  function ensure(persona?: string) {
+    const character = persona?.trim() || options.character
+    const existing = banks.get(character)
+    if (existing)
+      return existing
+    const opened = openBank({
+      bankDir: options.bankDir,
+      project: options.project,
+      charId: character,
+    })
+    banks.set(character, opened)
     return opened
   }
 
+  let listState: { listed: number, truncated: boolean } | undefined
+
   return {
+    listStats: () => listState,
     async list() {
       if (closing)
         return []
       const bank = await ensure()
       // 长期记忆页要看到"库里的全部记忆"，不是 app 自己写的那几条 store 条目
-      return bank.listMemories(2000)
+      const rows = bank.listMemories(LIST_LIMIT)
+      // 撞到上限就说明"看到的不是全部"：静默截断会让面板和模型都以为库就这么大。
+      listState = { listed: rows.length, truncated: rows.length >= LIST_LIMIT }
+      if (listState.truncated)
+        console.warn(`[castalia] memory list hit the ${LIST_LIMIT}-row cap; the panel and the index see a subset`)
+      return rows
         .map((row) => {
           const raw = String(row.text ?? '')
           const parsed = parseStoreText(raw)
@@ -91,7 +101,7 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
             description: parsed.name ? parsed.description : raw.replace(/\s+/g, ' ').slice(0, 80),
             body: parsed.name ? parsed.body : raw,
             ...(row.characterId ? { persona: row.characterId } : {}),
-            updatedAt: parseTime(row.updatedAt),
+            updatedAt: parseBankTime(row.updatedAt),
           } as CastaliaMemoryEntry
         })
     },
@@ -99,7 +109,7 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
     async save(entry) {
       if (closing)
         return
-      const bank = await ensure()
+      const bank = await ensure(entry.persona)
       await bank.saveStore({
         name: entry.name,
         description: entry.description,
@@ -111,7 +121,7 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
     async forget(entry) {
       if (closing)
         return false
-      const bank = await ensure()
+      const bank = await ensure(entry.persona)
       // 有 id 直接按行删（覆盖库里所有记忆）；否则回退到按 store 名删
       if (entry.id)
         return Boolean(bank.forget(entry.id))
@@ -124,13 +134,13 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
       return deleted
     },
 
-    async recall(query): Promise<CastaliaRecalledMemory> {
+    async recall(query, persona): Promise<CastaliaRecalledMemory> {
       if (closing)
         return { text: '', count: 0, topSim: 0, chars: 0 }
-      const bank = await ensure()
+      const bank = await ensure(persona)
       const result = await bank.recallQuery(query, { recentIds })
       const ids = (result.stats as { ids?: string[] } | undefined)?.ids ?? []
-      recentIds = [...recentIds, ...ids].slice(-10)   // 只记最近 10 条,不至于整库都被排掉
+      recentIds = [...recentIds, ...ids].slice(-10) // 只记最近 10 条,不至于整库都被排掉
       return {
         text: result.text ?? '',
         count: result.stats?.count ?? 0,
@@ -139,15 +149,20 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
       }
     },
 
-    async search(query, topK = 5) {
+    async search(query, topK = 5, persona) {
       if (closing)
         return []
-      const bank = await ensure()
+      const bank = await ensure(persona)
       const rows = await bank.search({
         query,
         topK,
         project: options.project,
-        characterId: options.character,
+        // The asking card wins over the configured one: the handle is opened per persona already,
+        // and an explicit override keeps the two in step (audit F01).
+        characterId: persona?.trim() || options.character,
+        // The index, `read`, and the settings list all show the general entries, so a lookup that
+        // hid them answered "nothing matched" about a row the owner could see (audit F08).
+        includeGeneral: true,
       }) as Array<{ id?: string, text?: string, score?: number, memType?: string, category?: string, createdAt?: string }>
       return (Array.isArray(rows) ? rows : [])
         .filter(row => typeof row.text === 'string' && row.text.trim().length > 0)
@@ -161,10 +176,10 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
         }))
     },
 
-    async facts(query, topK = 3) {
+    async facts(query, topK = 3, persona) {
       if (closing)
         return []
-      const bank = await ensure()
+      const bank = await ensure(persona)
       const rows = await bank.facts(query, { topK }) as Array<{ subject?: string, predicate?: string, object?: string, confidence?: number, similarity?: number }>
       return (Array.isArray(rows) ? rows : [])
         .filter(row => typeof row.object === 'string' && row.object.trim().length > 0)
@@ -180,7 +195,7 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
     async ingest(turn) {
       if (closing)
         return { ok: false, error: 'closing' }
-      const bank = await ensure()
+      const bank = await ensure(turn.persona)
       try {
         const result = await bank.ingestTurn(turn)
         if (!result.ok)
@@ -201,23 +216,23 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
       return bank.maintain(options)
     },
 
-    async setSelfEnergy(value) {
+    async setSelfEnergy(value, persona) {
       if (closing)
         return
-      const bank = await ensure()
+      const bank = await ensure(persona)
       return bank.setSelfEnergy(value)
     },
     async psycheState(options) {
       if (closing)
         return null
-      const bank = await ensure()
+      const bank = await ensure(options?.characterId)
       return bank.psycheState(options ?? {})
     },
 
     async selfCycle(input) {
       if (closing)
         return { ok: false, skipped: true, reason: 'closing', evidenceIds: [], project: input?.project ?? '' }
-      const bank = await ensure()
+      const bank = await ensure(input?.characterId)
       const result = await bank.selfCycle(input)
       // 日记正文只在 project 库里、且只有 id 能对上。这一读走只读连接（WAL 允许并发读），
       // 用来回答「她刚才到底想了什么」—— mind 把它变成一条内部念头。
@@ -226,11 +241,27 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
       return result
     },
 
+    async flushStaleVadQueue(maxAgeSec = 600) {
+      if (closing)
+        return { updated: 0, pending: 0 }
+      const characters = new Set([options.character, ...banks.keys()])
+      let updated = 0
+      let pending = 0
+      for (const character of characters) {
+        const bank = await ensure(character)
+        const result = await bank.flushStaleVadQueue(maxAgeSec)
+        updated += result.updated
+        pending += result.pending
+      }
+      return { updated, pending }
+    },
+
     async close() {
       closing = true
-      const bank = await opened?.catch(() => undefined)
-      opened = undefined
-      bank?.close()
+      const opened = [...banks.values()]
+      banks.clear()
+      for (const pending of opened)
+        (await pending.catch(() => undefined))?.close()
     },
   }
 }

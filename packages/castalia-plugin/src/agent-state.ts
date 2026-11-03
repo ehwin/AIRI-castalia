@@ -116,8 +116,11 @@ export function formatSelfStatePrompt(
   ))
   const recentEvents = snapshot.moodHistory.slice(-2)
   const drives = extras.drivesLine?.trim()
+  // The slider used to save a number nobody read (audit F10). From 3 up it now shapes the voice:
+  // a prickly surface with the caring left in the action, which is what the label promises.
+  const tsundere = Math.max(0, Math.min(10, snapshot.tsundereLevel ?? 0))
   // "About normal" is not worth a line; energy speaks only when it is low.
-  const quiet = !drives && !snapshot.currentDesire && recentEvents.length === 0
+  const quiet = tsundere < 3 && !drives && !snapshot.currentDesire && recentEvents.length === 0
     && now.length === 0 && (!slowAway || slow.length === 0) && energy >= 50
   if (quiet)
     return ''
@@ -140,6 +143,8 @@ export function formatSelfStatePrompt(
     lines.push(`What you want right now: ${snapshot.currentDesire}`)
   if (recentEvents.length > 0)
     lines.push(`Recently this happened to you:\n${recentEvents.map(event => `- ${event.reason}`).join('\n')}`)
+  if (tsundere >= 3)
+    lines.push(`Your tone is prickly at level ${tsundere}/10: you push back in words, keep the care in what you do, and never turn cruel.`)
   lines.push('Let it colour how you say things. Whether you act on any of it is yours to decide.')
   return lines.join('\n')
 }

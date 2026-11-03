@@ -27,7 +27,12 @@ export interface CastaliaMemoryForgetInput {
   persona?: string
 }
 export const castaliaMemoryForget = defineInvokeEventa<boolean, CastaliaMemoryForgetInput>('eventa:invoke:castalia:memory:forget')
-export const castaliaMemoryRecall = defineInvokeEventa<CastaliaRecalledMemory, string>('eventa:invoke:castalia:memory:recall')
+/** 一次召回：`persona` 是发问那张卡的 id，缺省时后端用配置里的角色。 */
+export interface CastaliaMemoryRecallInput {
+  query: string
+  persona?: string
+}
+export const castaliaMemoryRecall = defineInvokeEventa<CastaliaRecalledMemory, CastaliaMemoryRecallInput>('eventa:invoke:castalia:memory:recall')
 
 /**
  * One ranked hit of an explicit lookup (the model's search tool, not the injection block).
@@ -46,6 +51,8 @@ export interface CastaliaSearchedMemory {
 export interface CastaliaMemorySearchInput {
   query: string
   topK?: number
+  /** 发起检索的那张卡；缺省时后端用配置里的角色（两段式调用会因此读到别人的分区）。 */
+  persona?: string
 }
 
 export const castaliaMemorySearch = defineInvokeEventa<CastaliaSearchedMemory[], CastaliaMemorySearchInput>('eventa:invoke:castalia:memory:search')
@@ -71,6 +78,8 @@ export interface CastaliaIngestTurnInput {
   user: string
   assistant: string
   sessionId?: string
+  /** 这一轮对话属于哪张卡；缺省时后端用配置里的角色。 */
+  persona?: string
 }
 export interface CastaliaIngestTurnResult {
   ok: boolean
@@ -91,7 +100,7 @@ export interface CastaliaSelfCycleReport {
   project: string
 }
 
-export const castaliaMemorySelfCycle = defineInvokeEventa<CastaliaSelfCycleReport, { limit?: number, hoursBack?: number, minIntervalHours?: number, energy?: number } | undefined>('eventa:invoke:castalia:memory:self-cycle')
+export const castaliaMemorySelfCycle = defineInvokeEventa<CastaliaSelfCycleReport, { limit?: number, hoursBack?: number, minIntervalHours?: number, energy?: number, characterId?: string } | undefined>('eventa:invoke:castalia:memory:self-cycle')
 
 /**
  * 引擎当前的 psyche（情绪坐标 + 慢层心境 + band）。
@@ -108,7 +117,7 @@ export interface CastaliaPsycheSnapshot {
   version: number
   updatedAt: number
 }
-export const castaliaMemorySetEnergy = defineInvokeEventa<{ ok: boolean }, { value: number }>('eventa:invoke:castalia:memory:set-energy')
+export const castaliaMemorySetEnergy = defineInvokeEventa<{ ok: boolean }, { value: number, persona?: string }>('eventa:invoke:castalia:memory:set-energy')
 export const castaliaMemoryPsyche = defineInvokeEventa<CastaliaPsycheSnapshot | null, { characterId?: string } | undefined>('eventa:invoke:castalia:memory:psyche')
 
 /** 记忆维护（抽取 + 整合 + digest），全部在主进程内跑；失败不抛错，报告里带 error。 */
@@ -128,6 +137,51 @@ export interface CastaliaMaintainReport {
   skippedReason?: string
 }
 export const castaliaMemoryMaintain = defineInvokeEventa<CastaliaMaintainReport, { limit?: number } | undefined>('eventa:invoke:castalia:memory:maintain')
+
+/**
+ * What the memory module is actually wired to right now.
+ *
+ * The switch in Settings says the module is on; this says whether the running backend can recall,
+ * search, ingest or run the loop. Without it "已配置" was read as "可用" (audit F05).
+ */
+export interface CastaliaMemoryCapabilities {
+  /** 后端能否处理超龄的 VAD 队列批次（stdio 后端没有这个工具）。 */
+  vadSweep: boolean
+  recall: boolean
+  search: boolean
+  facts: boolean
+  ingest: boolean
+  maintain: boolean
+  selfCycle: boolean
+  psyche: boolean
+}
+
+/** 自动情感那套实验门槛的实际状态：开关开着不等于它就在推动 psyche。 */
+export interface CastaliaEmotionGate {
+  /** PSYCHE_FROM_VAD 是否开启。关了就只有工具写入能改 psyche。 */
+  autoFromVad: boolean
+  /** 谁在分析：模型端点，还是本地词表（词表会主动放弃判断，不产生证据）。 */
+  estimator: 'model' | 'lexicon'
+  /** 一句人话，直接显示在面板上。 */
+  note: string
+}
+
+export interface CastaliaMemoryStatus {
+  transport: 'in-process' | 'stdio' | 'entry-only' | 'none'
+  project?: string
+  character?: string
+  engineEntry?: string
+  capabilities: CastaliaMemoryCapabilities
+  emotion?: CastaliaEmotionGate
+  /** 上一次读取的条目规模，`truncated` 表示面板与索引只看到一部分。 */
+  entries?: { listed: number, truncated: boolean }
+  /** One sentence for the panel: which check failed, or what this backend cannot do. */
+  error?: string
+  checkedAt: number
+}
+
+export const castaliaMemoryStatus = defineInvokeEventa<CastaliaMemoryStatus>('eventa:invoke:castalia:memory:status')
+
 
 /**
  * 心智 / 检索参数（2026-10-31）。

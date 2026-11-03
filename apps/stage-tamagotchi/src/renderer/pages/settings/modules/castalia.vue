@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ACTIVE_TUNING_GROUPS, ACTIVE_TUNING_PRESETS, ACTIVE_TUNING_SPECS } from '@proj-airi/castalia-plugin/tuning'
 import { useCastaliaPluginStore } from '@proj-airi/castalia-plugin'
+import { ACTIVE_TUNING_GROUPS, ACTIVE_TUNING_PRESETS, ACTIVE_TUNING_SPECS } from '@proj-airi/castalia-plugin/tuning'
 import { useElectronEventaInvoke } from '@proj-airi/electron-vueuse'
+import { useLLM } from '@proj-airi/stage-ui/stores/ai/chat-llm/llm'
+import { useMemoryStore } from '@proj-airi/stage-ui/stores/memory'
 import { useAiriCardStore } from '@proj-airi/stage-ui/stores/modules/airi-card'
 import { FieldCheckbox, FieldRange, SettingsCard } from '@proj-airi/ui'
 import { storeToRefs } from 'pinia'
@@ -16,11 +18,19 @@ import { castaliaTuningGet, castaliaTuningSave } from '../../../../shared/eventa
 
 const castalia = useCastaliaPluginStore()
 const cards = useAiriCardStore()
+const memory = useMemoryStore()
+// 模型工具被服务商错误降级时，面板过去仍显示"已配置"（F13）。
+const llm = useLLM()
+const capabilities = computed(() => Object.entries(memory.backend?.capabilities ?? {}))
 const { enabled, currentMood, currentDesire, currentEnergy, activeCharacterId, moodHistory } = storeToRefs(castalia)
 const { locale, t } = useI18n()
 // The newest five events are the short-term memory the next prompt carries.
 const recentMoodEvents = computed(() => moodHistory.value.slice(-5).reverse())
-watch(() => cards.activeCardId, characterId => castalia.setCharacter(characterId), { immediate: true })
+// The chat maps `default` to `airi` before it touches Castalia, so the panel has to ask the same
+// question: reading the raw card id showed an empty `default` partition next to a real `airi` one (F11).
+watch(() => cards.activeCardId, characterId => castalia.setCharacter(
+  memory.enabled ? memory.resolvePersona(characterId) : characterId,
+), { immediate: true })
 
 const KEY = 'settings.pages.modules.castalia'
 
@@ -190,6 +200,43 @@ onMounted(() => {
       <p class="text-sm text-neutral-500">
         {{ t('settings.pages.modules.castalia.status-description') }}
       </p>
+      <!-- 后端实况（F05/F13）：开关只说"开没开"，这里说"能不能用"。 -->
+      <div class="rounded-lg bg-neutral-50 p-3 text-sm dark:bg-neutral-800">
+        <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <span class="font-medium">{{ t('settings.pages.modules.castalia.backend-title') }}</span>
+          <span class="text-xs text-neutral-500">
+            {{ memory.backend?.transport ?? '—' }} · {{ memory.backend?.project ?? '?' }}/{{ memory.backend?.character ?? '?' }}
+          </span>
+        </div>
+        <div class="flex flex-wrap gap-1.5">
+          <span
+            v-for="[name, ok] in capabilities"
+            :key="name"
+            class="rounded px-1.5 py-0.5 text-xs"
+            :class="ok
+              ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
+              : 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'"
+          >{{ ok ? '✓' : '✗' }} {{ name }}</span>
+        </div>
+        <p v-if="memory.backend?.emotion" class="mt-2 text-xs text-neutral-500">
+          {{ memory.backend.emotion.note }}
+        </p>
+        <p v-if="memory.backend?.entries?.truncated" class="mt-1 text-xs text-amber-600">
+          {{ t('settings.pages.modules.castalia.backend-truncated', { listed: memory.backend.entries.listed }) }}
+        </p>
+        <p v-if="memory.backend?.error" class="mt-1 text-xs text-red-600">
+          {{ memory.backend.error }}
+        </p>
+        <div v-if="llm.toolsDisabledFor.length" class="mt-2 flex flex-wrap items-center gap-2 text-xs text-amber-600">
+          <span>{{ t('settings.pages.modules.castalia.backend-tools-disabled', { models: llm.toolsDisabledFor.join(', ') }) }}</span>
+          <button
+            class="rounded bg-neutral-200 px-2 py-0.5 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200"
+            @click="llm.retryToolSupport()"
+          >
+            {{ t('settings.pages.modules.castalia.backend-retry-tools') }}
+          </button>
+        </div>
+      </div>
       <div class="flex flex-col gap-2">
         <div class="text-sm font-medium">
           {{ t('settings.pages.modules.castalia.short-term-memory') }}

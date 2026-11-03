@@ -7,6 +7,7 @@ import process from 'node:process'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { parseBankTime } from '@proj-airi/castalia-plugin/bank/time'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
@@ -64,23 +65,59 @@ export function readCastaliaEngineConfig(userDataDir: string): CastaliaEngineCon
  * Resolves the engine backend, or `undefined` when AIRI should keep the local SQLite file.
  * Disabled by `{"enabled": false}`, or when the engine/bank paths do not exist.
  */
-export function resolveCastaliaEngineOptions(userDataDir: string): CastaliaEngineOptions | undefined {
+/**
+ * The same checks as `resolveCastaliaEngineOptions`, but it also says which one failed.
+ *
+ * The settings panel has to answer "why is search empty" with a reason, not with a boolean: the
+ * resolver collapsing five different failures into `undefined` is what made a broken config look
+ * like a working one (audit F05).
+ */
+export function describeCastaliaEngineConfig(userDataDir: string): {
+  ok: boolean
+  reason?: string
+  engineEntry?: string
+  bankDir?: string
+  project?: string
+  character?: string
+  nodeBinary?: string
+} {
   const config = readCastaliaEngineConfig(userDataDir)
+  const inProcess = process.env.CASTALIA_MEMORY_TRANSPORT !== 'stdio'
   if (config.enabled === false)
-    return undefined
+    return { ok: false, reason: 'castalia-engine.json 写了 enabled=false' }
   const engineEntry = process.env.CASTALIA_ENGINE_ENTRY || config.engineEntry
   const bankDir = process.env.CASTALIA_BANK_DIR || config.bankDir
-  if (!engineEntry || !bankDir)
-    return undefined
-  if (!existsSync(engineEntry) || !existsSync(bankDir))
-    return undefined
-  const nodeBinary = process.env.CASTALIA_NODE || config.nodeBinary || 'node'
+  if (!bankDir)
+    return { ok: false, reason: 'castalia-engine.json 缺少 bankDir' }
+  if (!existsSync(bankDir))
+    return { ok: false, reason: `bankDir 不存在：${bankDir}` }
+  // In-process mode never starts the entry file, so demanding it only hid a working bank.
+  if (!inProcess) {
+    if (!engineEntry)
+      return { ok: false, reason: 'stdio 模式需要 engineEntry，但配置里没有' }
+    if (!existsSync(engineEntry))
+      return { ok: false, reason: `engineEntry 不存在：${engineEntry}` }
+  }
   return {
-    engineEntry,
+    ok: true,
+    ...(engineEntry ? { engineEntry } : {}),
     bankDir,
     project: process.env.CASTALIA_PROJECT || config.project || 'airi',
     character: config.character || 'airi',
-    nodeBinary,
+    nodeBinary: process.env.CASTALIA_NODE || config.nodeBinary || 'node',
+  }
+}
+
+export function resolveCastaliaEngineOptions(userDataDir: string): CastaliaEngineOptions | undefined {
+  const described = describeCastaliaEngineConfig(userDataDir)
+  if (!described.ok || !described.bankDir)
+    return undefined
+  return {
+    engineEntry: described.engineEntry ?? described.bankDir,
+    bankDir: described.bankDir,
+    project: described.project ?? 'airi',
+    character: described.character ?? 'airi',
+    nodeBinary: described.nodeBinary ?? 'node',
   }
 }
 
@@ -115,15 +152,6 @@ interface EngineFactRow {
   similarity?: number
 }
 
-/** SQLite `YYYY-MM-DD HH:MM:SS` (UTC) and ISO strings both become epoch ms. */
-function parseEngineTime(value: string | undefined): number {
-  if (!value)
-    return Date.now()
-  const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`
-  const parsed = Date.parse(normalized)
-  return Number.isFinite(parsed) ? parsed : Date.now()
-}
-
 /** The store tools answer with a JSON envelope inside the text content. */
 function unwrapContent(result: unknown): Record<string, unknown> {
   const content = (result as { content?: { type?: string, text?: string }[] } | undefined)?.content
@@ -146,7 +174,7 @@ export interface CastaliaEngineMemory {
    * Renders a context block for one query. The engine abstains with empty text,
    * so the caller appends the block without a relevance check of its own.
    */
-  recall: (query: string) => Promise<CastaliaRecalledMemory>
+  recall: (query: string, persona?: string) => Promise<CastaliaRecalledMemory>
   /**
    * Ranked lookup over the bank for one query (the engine's `memory_search`).
    *
@@ -154,9 +182,9 @@ export interface CastaliaEngineMemory {
    * a ranked list, and an empty list means nothing matched. Optional so a host whose
    * backend cannot search simply exposes no search tool result.
    */
-  search?: (query: string, topK?: number) => Promise<CastaliaSearchedMemory[]>
+  search?: (query: string, topK?: number, persona?: string) => Promise<CastaliaSearchedMemory[]>
   /** Structured facts for the same query; `[]` when the backend has none or they are far off. */
-  facts?: (query: string, topK?: number) => Promise<CastaliaSearchedFact[]>
+  facts?: (query: string, topK?: number, persona?: string) => Promise<CastaliaSearchedFact[]>
   /**
    * Writes one finished turn back into the bank (conversation_log). Optional: the
    * stdio transport predates it, so a host without it simply does not ingest.
@@ -167,7 +195,15 @@ export interface CastaliaEngineMemory {
   /** 引擎当前的 psyche 状态（情绪坐标 + 慢层心境 + band）。没有实现的后端返回 null。 */
   psycheState?: (options?: { characterId?: string }) => Promise<import('../../../shared/eventa/castalia-memory').CastaliaPsycheSnapshot | null>
   /** Mirrors the mind's energy into the engine's own prompt state. */
-  setSelfEnergy?: (value: number) => Promise<void>
+  setSelfEnergy?: (value: number, persona?: string) => Promise<void>
+  /** 上一次读取的条目规模：撞到上限时面板要知道「看到的不是全部」。 */
+  listStats?: () => { listed: number, truncated: boolean } | undefined
+  /**
+   * 处理已经超龄的 VAD 队列批次（审计 F07）。
+   *
+   * 十分钟是时限：没有新的对话时也要有人把它冲掉，否则情感更新只在"下一条消息"出现时才发生。
+   */
+  flushStaleVadQueue?: (maxAgeSec?: number) => Promise<{ updated: number, pending: number }>
   /** Run one bounded self-cycle on the same engine/bank. */
   selfCycle?: (options?: { project?: string, characterId?: string, limit?: number, hoursBack?: number, minIntervalHours?: number }) => Promise<CastaliaSelfCycleReport>
   close: () => Promise<void>
@@ -178,6 +214,8 @@ export interface CastaliaIngestTurn {
   user: string
   assistant: string
   sessionId?: string
+  /** The card this turn belongs to; without it the backend writes to its configured character. */
+  persona?: string
 }
 
 export interface CastaliaIngestResult {
@@ -265,7 +303,7 @@ export function createCastaliaEngineMemory(options: CastaliaEngineOptions): Cast
           description: row.description ?? '',
           body: row.body ?? '',
           ...(row.general ? {} : { persona: row.characterId || undefined }),
-          updatedAt: parseEngineTime(row.updatedAt ?? row.createdAt),
+          updatedAt: parseBankTime(row.updatedAt ?? row.createdAt),
         } as CastaliaMemoryEntry))
     },
 
@@ -294,10 +332,10 @@ export function createCastaliaEngineMemory(options: CastaliaEngineOptions): Cast
       return envelope.ok === true && envelope.deleted === true
     },
 
-    async recall(query) {
+    async recall(query, persona) {
       if (closing)
         return { text: '', count: 0, topSim: 0, chars: 0 }
-      const envelope = await call('memory_recall', { project: options.project, query })
+      const envelope = await call('memory_recall', { project: options.project, query, characterId: persona || options.character })
       if (envelope.ok !== true)
         throw new Error(`castalia engine recall failed: ${JSON.stringify(envelope.error ?? envelope)}`)
       return {
@@ -308,10 +346,10 @@ export function createCastaliaEngineMemory(options: CastaliaEngineOptions): Cast
       }
     },
 
-    async search(query, topK = 5) {
+    async search(query, topK = 5, persona) {
       if (closing)
         return []
-      const envelope = await call('memory_search', { project: options.project, query, topK })
+      const envelope = await call('memory_search', { project: options.project, query, topK, characterId: persona || options.character })
       if (envelope.ok !== true)
         throw new Error(`castalia engine search failed: ${JSON.stringify(envelope.error ?? envelope)}`)
       return ((envelope.results ?? []) as EngineSearchRow[])
@@ -326,10 +364,10 @@ export function createCastaliaEngineMemory(options: CastaliaEngineOptions): Cast
         }))
     },
 
-    async facts(query, topK = 3) {
+    async facts(query, topK = 3, persona) {
       if (closing)
         return []
-      const envelope = await call('fact_search', { project: options.project, query, topK })
+      const envelope = await call('fact_search', { project: options.project, query, topK, characterId: persona || options.character })
       if (envelope.ok !== true)
         throw new Error(`castalia engine fact search failed: ${JSON.stringify(envelope.error ?? envelope)}`)
       return ((envelope.results ?? []) as EngineFactRow[])

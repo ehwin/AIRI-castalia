@@ -1,10 +1,9 @@
 import type { Thought } from '@proj-airi/core-agent'
 
+import { distillDay } from '@proj-airi/core-agent'
 import { useLocalStorageManualReset } from '@proj-airi/stage-shared/composables'
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-
-import { distillDay } from '@proj-airi/core-agent'
 
 import { innerThoughtsRepo } from '../../database/repos/inner-thoughts.repo'
 import { useMemoryStore } from '../memory'
@@ -128,7 +127,7 @@ export const useDiaryStore = defineStore('diary', () => {
       return undefined
 
     // Her day becomes her memory, under the persona that chats. It is never shared with another character.
-    const stored = memory.write(entry, memory.resolvePersona(scope.value))
+    const { entry: stored } = memory.write(entry, memory.resolvePersona(scope.value))
     if (!stored)
       return undefined
     if (!hasDistilled(date))

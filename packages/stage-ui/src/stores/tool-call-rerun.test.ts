@@ -265,7 +265,9 @@ describe('executeToolCallRerun', () => {
     })
   })
 
-  it('writes an error result when the tool is unavailable', async () => {
+  // F12: a missing tool now refuses the rerun and leaves the transcript alone. The old behaviour
+  // replaced a real answer with "not available", so the only record of it was lost.
+  it('refuses the rerun and keeps history when the tool is unavailable', async () => {
     const messages: ChatHistoryItem[] = [
       {
         ...assistantMessage(),
@@ -273,7 +275,10 @@ describe('executeToolCallRerun', () => {
       },
     ]
 
-    const next = await executeToolCallRerun({
+    const original = JSON.stringify(messages)
+    const assistant = messages[0] as ChatAssistantMessage
+    const before = assistant.tool_results?.length ?? 0
+    await expect(executeToolCallRerun({
       messages,
       payload: {
         messageId: 'assistant-1',
@@ -282,17 +287,11 @@ describe('executeToolCallRerun', () => {
         args: '{}',
       },
       resolveTools: async () => [],
-    })
+    })).rejects.toThrow('is not available for rerun')
 
-    expect(next[0]).toMatchObject({
-      tool_results: [
-        {
-          id: 'call-weather',
-          isError: true,
-          result: 'Tool "weather" is not available for rerun in this runtime.',
-        },
-      ],
-    })
+    // Nothing was rewritten: the caller still holds the same history it passed in.
+    expect(JSON.stringify(messages)).toBe(original)
+    expect(assistant.tool_results?.length ?? 0).toBe(before)
   })
 
   it('writes an error result for invalid JSON args', async () => {

@@ -7,7 +7,7 @@ import { useMemoryStore } from './memory'
 
 function createRemote(seed: MemoryEntry[] = []) {
   const save = vi.fn(async (_entry: MemoryEntry) => {})
-  const forget = vi.fn(async (_entry: Pick<MemoryEntry, 'name' | 'persona'>) => {})
+  const forget = vi.fn(async (_entry: Pick<MemoryEntry, 'name' | 'persona'>) => true)
   const list = vi.fn(async () => seed)
   const port: MemoryRemotePort = { list, save, forget }
   return { port, list, save, forget }
@@ -75,7 +75,7 @@ describe('memory store remote port', () => {
     memory.attachRemote({
       list: async () => { throw new Error('offline') },
       save: async () => {},
-      forget: async () => {},
+      forget: async () => true,
     })
 
     await expect(memory.hydrate()).resolves.toBe(false)
@@ -100,8 +100,24 @@ describe('memory store remote port', () => {
     memory.attachRemote(port)
     memory.write({ name: 'nickname', description: 'how to address', body: 'Yumeka' }, 'airi')
 
-    expect(memory.forget('nickname', 'airi')).toBe(true)
+    const result = memory.forget('nickname', 'airi')
+    expect(result.found).toBe(true)
+    await expect(result.persisted).resolves.toEqual({ ok: true })
     expect(forget).toHaveBeenCalledWith({ name: 'nickname', persona: 'airi' })
+  })
+
+  // The audit's F02: the bank answered `false` and kept the row, while the list had already
+  // dropped it — the entry came back on the next hydrate. A refusal must restore the row.
+  it('puts the entry back when the backend refuses to forget it', async () => {
+    const memory = useMemoryStore()
+    const { port } = createRemote()
+    memory.attachRemote({ ...port, forget: async () => false })
+    memory.write({ name: 'nickname', description: 'how to address', body: 'Yumeka' }, 'airi')
+
+    const result = memory.forget('nickname', 'airi')
+    expect(result.found).toBe(true)
+    await expect(result.persisted).resolves.toMatchObject({ ok: false, reason: 'refused' })
+    expect(memory.read('nickname', 'airi')?.body).toBe('Yumeka')
   })
 
   it('moves a memory to general on the remote too', async () => {
@@ -118,18 +134,113 @@ describe('memory store remote port', () => {
     expect(save.mock.calls[1][0].persona).toBeUndefined()
   })
 
-  it('keeps the local write when the remote save fails', async () => {
+  // F03: a thrown save used to leave the local row in place, so the tool said "Saved" over a
+  // write that never landed. The cache now rolls back and the caller learns why.
+  it('rolls the local write back when the remote save fails', async () => {
     const memory = useMemoryStore()
     memory.attachRemote({
       list: async () => [],
       save: async () => { throw new Error('disk full') },
-      forget: async () => {},
+      forget: async () => true,
     })
 
-    memory.write({ name: 'nickname', description: 'how to address', body: 'Yumeka' }, 'airi')
-    await Promise.resolve()
+    const written = memory.write({ name: 'nickname', description: 'how to address', body: 'Yumeka' }, 'airi')
+    expect(written.entry?.name).toBe('nickname')
+    await expect(written.persisted).resolves.toMatchObject({ ok: false, reason: 'failed', error: 'disk full' })
+    expect(memory.read('nickname', 'airi')).toBeUndefined()
+  })
 
-    expect(memory.read('nickname', 'airi')?.body).toBe('Yumeka')
+  /**
+   * F04: a lookup that could not run must not read as "no such memory".
+   *
+   * The four endings are asserted separately because the tool prints a different sentence for
+   * each, and the model repeats that sentence to the owner.
+   */
+  describe('lookup endings', () => {
+    it('reports an attached backend with nothing matched as ok', async () => {
+      const memory = useMemoryStore()
+      const { port } = createRemote()
+      memory.attachRemote({ ...port, search: async () => [] })
+      await expect(memory.lookup('birthday')).resolves.toMatchObject({ status: 'ok', hits: [], facts: [] })
+    })
+
+    it('reports the absence of a search port as unavailable', async () => {
+      const memory = useMemoryStore()
+      memory.attachRemote({ list: async () => [], save: async () => {}, forget: async () => true })
+      await expect(memory.lookup('birthday')).resolves.toMatchObject({ status: 'unavailable' })
+    })
+
+    it('reports a thrown lookup as failed, not as an empty memory', async () => {
+      const memory = useMemoryStore()
+      memory.attachRemote({
+        list: async () => [],
+        save: async () => {},
+        forget: async () => true,
+        search: async () => { throw new Error('engine down') },
+      })
+      await expect(memory.lookup('birthday')).resolves.toMatchObject({ status: 'failed', error: 'engine down' })
+    })
+
+    it('keeps the rows when only the fact lookup fails', async () => {
+      const memory = useMemoryStore()
+      memory.attachRemote({
+        list: async () => [],
+        save: async () => {},
+        forget: async () => true,
+        search: async () => [{ text: 'kite flying', score: 1.2 }],
+        facts: async () => { throw new Error('facts offline') },
+      })
+      const result = await memory.lookup('birthday')
+      expect(result.status).toBe('partial')
+      expect(result.hits.map(hit => hit.text)).toEqual(['kite flying'])
+      expect(result.error).toContain('facts offline')
+    })
+  })
+
+  // F01: the persona has to survive the port, or the backend answers for the configured character
+  // while the turn belongs to another card.
+  it('passes the asking card to the lookup and the ingest', async () => {
+    const memory = useMemoryStore()
+    const search = vi.fn(async () => [])
+    const facts = vi.fn(async () => [])
+    const ingest = vi.fn(async () => ({ ok: true }))
+    memory.attachRemote({ list: async () => [], save: async () => {}, forget: async () => true, search, facts, ingest })
+
+    await memory.lookup('birthday', 5, 'second-card')
+    expect(search).toHaveBeenCalledWith('birthday', 5, 'second-card')
+    expect(facts).toHaveBeenCalledWith('birthday', 3, 'second-card')
+
+    await memory.ingestTurn({ user: 'you up?', assistant: 'still here.', persona: 'second-card' })
+    expect(ingest).toHaveBeenCalledWith(expect.objectContaining({ persona: 'second-card' }))
+  })
+
+  // F09: rows the backend creates on its own used to stay invisible to `read` and the prompt index
+  // until the app restarted. One debounced re-read makes them readable.
+  it('re-reads the backend after an ingest so the new row becomes readable', async () => {
+    vi.useFakeTimers()
+    try {
+      const memory = useMemoryStore()
+      const durable: MemoryEntry[] = []
+      memory.attachRemote({
+        list: async () => [...durable],
+        save: async () => {},
+        forget: async () => true,
+        ingest: async () => {
+          durable.push(entry('after-ingest', 'the turn was saved'))
+          return { ok: true }
+        },
+      })
+      await memory.hydrate()
+      expect(memory.read('after-ingest', 'airi')).toBeUndefined()
+
+      await memory.ingestTurn({ user: 'you up?', assistant: 'still here.' })
+      await vi.advanceTimersByTimeAsync(2_500)
+
+      expect(memory.read('after-ingest', 'airi')?.body).toBe('the turn was saved')
+    }
+    finally {
+      vi.useRealTimers()
+    }
   })
 
   it('stops mirroring after detaching', async () => {

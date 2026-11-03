@@ -47,7 +47,7 @@ import {
   i18nGetLocale,
   i18nSetLocale,
 } from '../shared/eventa'
-import { castaliaMemoryFacts, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySelfCycle, castaliaMemorySetEnergy } from '../shared/eventa/castalia-memory'
+import { castaliaMemoryFacts, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySelfCycle, castaliaMemorySetEnergy, castaliaMemoryStatus } from '../shared/eventa/castalia-memory'
 import { electronModelAssetCancel, electronModelAssetEnsure, electronModelAssetRemove, electronModelAssetsClear, electronModelAssetsList, electronModelAssetStatusChanged } from '../shared/eventa/model-assets'
 import {
   electronPluginUpdateCapability,
@@ -98,19 +98,32 @@ const recallCastaliaMemory = useElectronEventaInvoke(castaliaMemoryRecall)
 const searchCastaliaMemory = useElectronEventaInvoke(castaliaMemorySearch)
 const factsCastaliaMemory = useElectronEventaInvoke(castaliaMemoryFacts)
 const ingestCastaliaMemory = useElectronEventaInvoke(castaliaMemoryIngest)
+const statusCastaliaMemory = useElectronEventaInvoke(castaliaMemoryStatus)
 memoryStore.attachRemote({
   list: listCastaliaMemory,
   save: saveCastaliaMemory,
-  forget: async (entry) => { await forgetCastaliaMemory(entry) },
-  recall: query => recallCastaliaMemory(query),
+  // The backend answers whether the row is really gone; dropping that answer made the list a liar
+  // (the entry reappeared on the next hydrate).
+  forget: entry => forgetCastaliaMemory(entry),
+  // 每一路都带上当前卡的 persona：不带时后端只认配置里的角色，第二张卡的内存会串到一起（审计 F01）。
+  recall: (query, persona) => recallCastaliaMemory({ query, persona }),
   // 模型主动查记忆的检索通道：让她真的能"翻记忆体"，而不是只能按索引名逐条读。
-  search: (query, topK) => searchCastaliaMemory({ query, topK }),
+  search: (query, topK, persona) => searchCastaliaMemory({ query, topK, persona }),
   // 同一句查询顺带取结构化事实：一行事实常是记忆行只隐含的答案（她是谁、小托是谁）。
-  facts: (query, topK) => factsCastaliaMemory({ query, topK }),
+  facts: (query, topK, persona) => factsCastaliaMemory({ query, topK, persona }),
   // 每轮对话的写回入口：没有它，她只说、不记。
   ingest: turn => ingestCastaliaMemory(turn),
 })
 void memoryStore.hydrate()
+// 「模块开着」和「后端真的能检索/入库」是两件事：界面要能回答后者（审计 F05）。
+void statusCastaliaMemory()
+  .then(status => memoryStore.setBackend(status))
+  .catch(error => memoryStore.setBackend({
+    transport: 'none',
+    capabilities: { vadSweep: false, recall: false, search: false, facts: false, ingest: false, maintain: false, selfCycle: false, psyche: false },
+    error: `后端状态查询失败：${(error as Error)?.message ?? error}`,
+    checkedAt: Date.now(),
+  }))
 const listModelAssets = useElectronEventaInvoke(electronModelAssetsList)
 const ensureModelAsset = useElectronEventaInvoke(electronModelAssetEnsure)
 const cancelModelAsset = useElectronEventaInvoke(electronModelAssetCancel)
@@ -137,6 +150,9 @@ const windowContext = resolveRendererWindowContext()
 const initialRoutePath = resolveInitialRendererRoutePath(route.path)
 const chatStore = useChatStore()
 const mindStore = useMindStore()
+// The card store is module-scope here on purpose: the card watcher below runs in this scope, and
+// reaching for the one inside `createFullStageRuntime()` was a ReferenceError at startup.
+const airiCards = useAiriCardStore()
 // Her eyes: the screen, summarised to one line per look by the vision workload. The mind stays blind until a host
 // attaches a port, and the perception toggles decide whether this host does.
 const castaliaStore = useCastaliaPluginStore()
@@ -465,12 +481,19 @@ onMounted(async () => {
   // It only listens to finished turns; it never reads the chat store directly, so
   // the two stores stay independent.
   mindStore.attachTurnComplete(chatStore.onChatTurnComplete)
-  await mindStore.initialize(useAiriCardStore().activeCardId)
+
+  // One resolver for every path: the chat maps `default` to `airi`, so the panel, the mind, and the
+  // engine mirror must ask the same question or they read two different self-states (audit F11).
+  const resolvedPersona = () => memoryStore.enabled
+    ? memoryStore.resolvePersona(airiCards.activeCardId)
+    : airiCards.activeCardId
+
+  await mindStore.initialize(resolvedPersona())
 
   // Switching cards switches the mind: drives, sleep, and the diary stream belong to one character, so the
   // outgoing character's state is saved under her own key and the new one resumes from her own.
-  watch(() => cardStore.activeCardId, (cardId) => {
-    void mindStore.switchCharacter(cardId)
+  watch(() => airiCards.activeCardId, () => {
+    void mindStore.switchCharacter(resolvedPersona())
   })
 
   // Her eyes are attached only while perception allows them, and the idle mind glances at the screen on a slow
@@ -487,25 +510,44 @@ onMounted(async () => {
   // Mirror the engine's psyche into her self-state. Without this the state line and the panel only move when the
   // model calls a tool, and she never does; the bank has the values all along.
   const syncPsyche = async () => {
+    // The module switch has to gate the loop it names: a "closed" Castalia that keeps polling and
+    // writing is the switch lying about its scope (audit F14).
+    if (!castaliaStore.enabled)
+      return
     try {
-      const psyche = await invokePsyche({})
+      const psyche = await invokePsyche({ characterId: resolvedPersona() })
       if (psyche?.hasEvidence)
         castaliaStore.syncPsyche({ vad: psyche.vad, mood: psyche.mood, band: psyche.band, at: psyche.updatedAt }, psyche.characterId)
     }
     catch { /* the mirror is best-effort; the engine keeps the truth */ }
   }
   void syncPsyche()
-  psycheSyncTimer = setInterval(() => void syncPsyche(), PSYCHE_SYNC_INTERVAL_MS)
+  // The backend report describes a running process, so it is re-read on the same slow clock: a
+  // module switched on after start shows what it really got, without waiting for a restart.
+  const refreshBackend = () => {
+    void statusCastaliaMemory()
+      .then(status => memoryStore.setBackend(status))
+      .catch(() => {})
+  }
+  refreshBackend()
+  psycheSyncTimer = setInterval(() => {
+    refreshBackend()
+    void syncPsyche()
+  }, PSYCHE_SYNC_INTERVAL_MS)
 
   // 无聊/好奇的时候真的去想一次：mind 的驱力走到 `think`，这里把它接到 Castalia 的自循环
   // （读最近的对话证据、写一篇带出处的日记）。日记正文回来后被内化成一句自言自语。
   // `minIntervalHours: 0` 把节奏交给 mind 的 20 分钟冷却 —— 引擎那道 15 分钟闸门只会让
   // 「她正好无聊」的时刻被无故跳过，而定时自循环（6 小时）仍由引擎自己管。
   mindStore.attachThink(async () => {
+    if (!castaliaStore.enabled)
+      return undefined
     try {
-      const report = await invokeSelfCycle({ minIntervalHours: 0, energy: 100 - mindStore.drives.fatigue })
+      const report = await invokeSelfCycle({ minIntervalHours: 0, energy: 100 - mindStore.drives.fatigue, characterId: resolvedPersona() })
       if (!report?.ok || report.skipped)
         return undefined
+      // The diary is a new row the local cache never saw; re-read so `read` and the index know it (F09).
+      memoryStore.scheduleRefresh()
       return report.diaryText
     }
     catch {
@@ -524,19 +566,28 @@ onMounted(async () => {
     (fatigue) => {
       // A second window would push the same fatigue into the engine and fight
       // the owner's numbers; only the lease holder mirrors energy.
-      if (!mindStore.isOwner)
+      if (!mindStore.isOwner || !castaliaStore.enabled)
         return
-      castaliaStore.setEnergy(100 - fatigue)
+      castaliaStore.setEnergy(100 - fatigue, resolvedPersona())
       // The engine builds the six-hour diary itself; give it the same number so
       // its prompt cannot say 98/100 while the chat says she is running empty.
-      void invokeSetEnergy({ value: 100 - fatigue }).catch(() => {})
+      void invokeSetEnergy({ value: 100 - fatigue, persona: resolvedPersona() }).catch(() => {})
     },
     { immediate: true },
   )
 
   mindStore.attachSleep(async () => {
+    // Nothing to maintain while the module is off; the night becomes a plain sleep rather than a
+    // maintenance that reports success without running (F14).
+    if (!castaliaStore.enabled) {
+      console.info('[castalia] maintain skipped: module is off')
+      return undefined
+    }
     try {
       const report = await invokeMaintain({ limit: 30 })
+      // Maintenance writes facts and digests of its own; they become readable without a restart (F09).
+      if (report?.ok && !report.skipped)
+        memoryStore.scheduleRefresh()
       const reflect = report?.reflect as { ok?: boolean } | undefined
       const consolidate = report?.consolidate as { ok?: boolean } | undefined
       const digest = report?.digest as { success?: boolean } | undefined

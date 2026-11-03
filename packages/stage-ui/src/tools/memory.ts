@@ -1,6 +1,6 @@
 import type { Tool } from '@xsai/shared-chat'
 
-import type { MemoryEntry, MemoryFact, MemorySearchHit } from '../stores/memory'
+import type { MemoryEntry, MemoryFact, MemoryForgetResult, MemoryLookup, MemoryPersistResult, MemorySearchHit, MemoryWriteResult } from '../stores/memory'
 
 import { rawTool } from '@xsai/tool'
 import { array, description, maxLength, minLength, pipe, safeParse, strictObject, string } from 'valibot'
@@ -49,7 +49,8 @@ export function composeMemoryPrompt(index: string) {
     `Read one entry with ${READ_MEMORY_TOOL_NAME} when its line is too short to act on. A line that already states the fact needs no read.`,
     `Search with ${SEARCH_MEMORY_TOOL_NAME} whenever the reply depends on something the index does not state, and whenever someone asks you to look something up. The index is a short list, not the whole memory.`,
     'Search with one short phrase, the words the fact itself would use. A keyword list dilutes the match; one phrase ranks the fact higher.',
-    'An empty search means that fact is not in memory: say so plainly, never fill the gap with a guess.',
+    'An empty search means that fact is not in memory: say so plainly, never fill the gap with a guess. When the tool says the lookup failed or is unavailable, say that instead — a backend that did not answer is not evidence of absence.',
+    'A save or a forget counts only when the tool says it happened. If it says NOT saved or NOT forgotten, tell the owner what failed and keep the fact in this reply instead of promising it next time.',
     'The recalled block attached to a turn is fetched from the owner\'s message text alone, so an instruction like "去搜搜" carries no topic and brings back the wrong memories: search with the words you mean instead of trusting that block.',
     'Memory is reference, not a script. Use it to stay consistent; do not re-enact old lines, and never narrate the lookup.',
     'A remembered line carries the feeling of that moment, not of now. This turn\'s mood comes from this conversation.',
@@ -63,12 +64,12 @@ export function composeMemoryPrompt(index: string) {
 /** What the memory tools change. The caller binds them to the run's character card. */
 interface CreateMemoryToolsOptions {
   read: (name: string) => MemoryEntry | undefined
-  /** Ranked lookup over the whole bank; empty when the backend has no search or nothing matched. */
-  search: (query: string) => Promise<MemorySearchHit[]>
-  /** Structured facts near the same query; printed beside the hits, never as their own tool. */
-  searchFacts: (query: string) => Promise<MemoryFact[]>
-  write: (entry: { name: string, description: string, body: string }) => MemoryEntry | undefined
-  forget: (name: string) => boolean
+  /** Ranked lookup over the whole bank, with the fate of the lookup itself (ran / no backend / failed). */
+  lookup: (query: string) => Promise<MemoryLookup>
+  /** Local write plus the promise that says what the backend did with it. */
+  write: (entry: { name: string, description: string, body: string }) => MemoryWriteResult
+  /** Local delete plus the promise that says whether the backend really dropped the row. */
+  forget: (name: string) => MemoryForgetResult
 }
 
 /** One hit stays readable in a 400-character window; the whole answer stays under 1.4k. */
@@ -99,6 +100,22 @@ function formatFact(fact: MemoryFact) {
   return `- ${fact.subject} · ${fact.predicate} · ${value.length > 160 ? `${value.slice(0, 160)}…` : value}`
 }
 
+/**
+ * One clause for a failed write or forget.
+ *
+ * The model repeats this sentence to the owner, so it has to separate "the backend said no"
+ * from "the backend never answered": the first invites a retry with another entry, the second
+ * an apology and a later attempt.
+ */
+function describeRefusal(result: MemoryPersistResult) {
+  const detail = result.error ? ` (${result.error})` : ''
+  if (result.reason === 'invalid')
+    return `it needs a name and a body${detail}`
+  if (result.reason === 'refused')
+    return `the memory backend refused it, so the entry may be shared, derived, or owned by another character${detail}`
+  return `the memory backend is unreachable, so nothing changed${detail}`
+}
+
 /** Creates the memory tools for one run. The run reads its card's memories and the general ones, and changes only its card's. */
 export async function createMemoryTools(options: CreateMemoryToolsOptions): Promise<Tool[]> {
   return [
@@ -127,9 +144,18 @@ export async function createMemoryTools(options: CreateMemoryToolsOptions): Prom
         const query = parsed.output.query.trim()
         if (!query)
           return 'Give a search query.'
-        const [hits, facts] = await Promise.all([options.search(query), options.searchFacts(query)])
+        const result = await options.lookup(query)
+        // "Nothing matched" is a claim about the memory, so it may only follow a lookup that
+        // actually ran. An unreachable backend answers differently, or the model repeats the
+        // failure as a fact ("I have no memory of that") that nobody can correct later.
+        if (result.status === 'unavailable')
+          return `Memory lookup is unavailable (${result.error ?? 'no backend'}). This says nothing about whether the fact is remembered.`
+        if (result.status === 'failed')
+          return `Memory lookup failed (${result.error ?? 'backend error'}). Do not claim the fact is absent; tell the owner the lookup did not work.`
+        const { hits, facts } = result
+        const note = result.status === 'partial' ? [`(retrieval was partial: ${result.error ?? 'facts unavailable'})`] : []
         if (!hits.length && !facts.length)
-          return `No memory matched "${query}".`
+          return [`No memory matched "${query}".`, ...note].join('\n')
         const lines: string[] = []
         let used = 0
         for (const hit of hits) {
@@ -158,10 +184,19 @@ export async function createMemoryTools(options: CreateMemoryToolsOptions): Prom
         const parsed = safeParse(writeParameters, rawInput)
         if (!parsed.success)
           return 'Memory not saved: each entry needs a name and a body.'
-        return parsed.output.entries.map((input) => {
-          const entry = options.write(input)
-          return entry ? `Saved memory "${entry.name}".` : `Memory "${input.name}" not saved: it needs a name and a body.`
-        }).join('\n')
+        const entries = parsed.output.entries
+        // The answer is a promise the owner will rely on, so it waits for the backend: a refusal
+        // or a thrown write must not read as "Saved".
+        return (await Promise.all(entries.map(async (input) => {
+          const written = options.write(input)
+          const entry = written.entry
+          if (!entry)
+            return `Memory "${input.name}" not saved: it needs a name and a body.`
+          const result = await written.persisted
+          return result.ok
+            ? `Saved memory "${entry.name}".`
+            : `Memory "${entry.name}" was NOT saved: ${describeRefusal(result)}.`
+        }))).join('\n')
       },
     }),
     rawTool({
@@ -170,7 +205,15 @@ export async function createMemoryTools(options: CreateMemoryToolsOptions): Prom
       parameters: await toJsonSchema(forgetParameters),
       execute: async (rawInput) => {
         const parsed = safeParse(forgetParameters, rawInput)
-        return parsed.success && options.forget(parsed.output.name) ? `Forgot memory "${parsed.output.name}".` : 'No memory entry with that name.'
+        if (!parsed.success)
+          return 'No memory entry with that name.'
+        const forgotten = options.forget(parsed.output.name)
+        if (!forgotten.found)
+          return `No memory entry with that name.`
+        const result = await forgotten.persisted
+        return result.ok
+          ? `Forgot memory "${parsed.output.name}".`
+          : `Memory "${parsed.output.name}" was NOT forgotten: ${describeRefusal(result)}.`
       },
     }),
   ]

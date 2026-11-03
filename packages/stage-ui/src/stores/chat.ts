@@ -295,8 +295,6 @@ export const useChatStore = defineStore('chat', () => {
   const memory = useMemoryStore()
   const castalia = useCastaliaPluginStore()
   const relationalPolicy = createRelationalPolicyContextProvider()
-  const memoryRecallContext = createMemoryRecallContext(query => memory.recallForInjection(query))
-
   /**
    * 模型输出里的控制标记不属于她说的话。
    *
@@ -352,6 +350,13 @@ export const useChatStore = defineStore('chat', () => {
   // the leader shows no tool call. Every window creates the chat store, so the chat store creates the card store too.
   const toolCards = useToolCardsStore()
   const { activeSessionId } = storeToRefs(chatSession)
+
+  // The recall is scoped to the turn's own card: the backend used to read the configured
+  // character, so a second card got the first card's memories injected (audit F01).
+  const memoryRecallContext = createMemoryRecallContext((query) => {
+    const sessionId = activeSessionId.value
+    return memory.recallForInjection(query, memory.enabled ? memory.resolvePersona(personaOf(sessionId)) : personaOf(sessionId))
+  })
 
   /** The policy of the send that owns this request, not of the window's active chat. */
   function relationalPolicyContext() {
@@ -682,7 +687,7 @@ export const useChatStore = defineStore('chat', () => {
     const persona = memory.enabled ? memory.resolvePersona(personaOf(sessionId)) : personaOf(sessionId)
     const sourceTools = async () => [
       ...(typeof tools === 'function' ? await tools() ?? [] : tools ?? []),
-      ...memory.enabled ? await createMemoryTools({ read: name => memory.read(name, persona), search: query => memory.search(query), searchFacts: query => memory.searchFacts(query), write: entry => memory.write(entry, persona), forget: name => memory.forget(name, persona) }) : [],
+      ...memory.enabled ? await createMemoryTools({ read: name => memory.read(name, persona), lookup: query => memory.lookup(query, 5, persona), write: entry => memory.write(entry, persona), forget: name => memory.forget(name, persona) }) : [],
       ...castalia.enabled
         ? await createCastaliaStateTools({
             recordEmotion: (vad, reason) => castalia.recordEmotion(vad, reason, persona),
@@ -1115,10 +1120,14 @@ export const useChatStore = defineStore('chat', () => {
       const assistantText = stripAssistantMarkers(messageText).slice(0, 8_000)
       // A one-line goodbye carries no fact: storing it only adds a transcript entry that
       // `isTranscriptEntry()` then has to hide again on the way into the index.
-      if (shouldSkipIngest({ user: userText, assistant: assistantText }))
+      if (shouldSkipIngest({ user: userText, assistant: assistantText })) {
         console.info('[memory] skipped ingest for a closing turn')
-      else
-        void memory.ingestTurn({ user: userText, assistant: assistantText, sessionId })
+      }
+      else {
+        // The turn is written under the card that said it, not under the configured character.
+        const persona = memory.enabled ? memory.resolvePersona(personaOf(sessionId)) : personaOf(sessionId)
+        void memory.ingestTurn({ user: userText, assistant: assistantText, sessionId, persona })
+      }
       const artistry = sessionCard(sessionId)?.extensions?.airi?.modules?.artistry
       if (artistry?.autonomousEnabled && artistry?.autonomousTarget === 'assistant')
         void artistryAutonomousStore.runArtistTask(messageText, toProviderHistory(sessionMessages))
@@ -1525,12 +1534,16 @@ export const useChatStore = defineStore('chat', () => {
     if (!await chatSession.loadSession(payload.sessionId))
       throw new Error('Failed to load the target chat session')
 
+    // Memory and emotion tools live in the run's own set, not in the global store, so a rerun that
+    // only asked the global store answered "not available" for a tool the turn had used (F12).
+    const rerunTools = withRunTools(llmToolsStore.getToolsByNames(payload.toolName), { conversationId: payload.sessionId, turnId: payload.toolCallId })
+    const customTools = typeof rerunTools === 'function' ? await rerunTools() : rerunTools ?? []
     const nextMessages = await executeToolCallRerun({
       messages: chatSession.getSessionMessages(payload.sessionId),
       payload,
       // A rerun stores its result in history, so it reads images like a send.
       resolveTools: () => resolveLlmTools({
-        customTools: llmToolsStore.getToolsByNames(payload.toolName),
+        customTools,
         describeImage: chatVision.toolImageReader(activeModel.value),
       }),
     })

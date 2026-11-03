@@ -1,4 +1,4 @@
-import type { MemoryEntry } from '../stores/memory'
+import type { MemoryEntry, MemoryForgetResult, MemoryLookup, MemoryWriteResult } from '../stores/memory'
 
 import { describe, expect, it, vi } from 'vitest'
 
@@ -9,14 +9,18 @@ const entry: MemoryEntry = { name: 'nickname', description: 'What the owner like
 function options() {
   return {
     read: vi.fn((name: string) => name === 'nickname' ? entry : undefined),
-    search: vi.fn(async (query: string) => query === 'birthday'
-      ? [{ text: 'My birthday column says "unknown".', score: 1.4, memType: 'general', createdAt: '2026-10-28T18:55:00.000Z' }]
-      : []),
-    searchFacts: vi.fn(async (query: string) => query === 'winter'
-      ? [{ subject: 'user', predicate: 'name', object: '小托（Xiao Tuo）', confidence: 0.95, similarity: 0.72 }]
-      : []),
-    write: vi.fn((input: Pick<MemoryEntry, 'name' | 'description' | 'body'>): MemoryEntry => ({ ...input, updatedAt: 0 })),
-    forget: vi.fn(() => true),
+    lookup: vi.fn(async (query: string): Promise<MemoryLookup> => {
+      if (query === 'birthday')
+        return { status: 'ok', hits: [{ text: 'My birthday column says "unknown".', score: 1.4, memType: 'general', createdAt: '2026-10-28T18:55:00.000Z' }], facts: [] }
+      if (query === 'winter')
+        return { status: 'ok', hits: [], facts: [{ subject: 'user', predicate: 'name', object: '小托（Xiao Tuo）', confidence: 0.95, similarity: 0.72 }] }
+      return { status: 'ok', hits: [], facts: [] }
+    }),
+    write: vi.fn((input: Pick<MemoryEntry, 'name' | 'description' | 'body'>): MemoryWriteResult => ({
+      entry: { ...input, updatedAt: 0 },
+      persisted: Promise.resolve({ ok: true }),
+    })),
+    forget: vi.fn((_name: string): MemoryForgetResult => ({ found: true, persisted: Promise.resolve({ ok: true }) })),
   }
 }
 
@@ -46,7 +50,7 @@ describe('memory tools', () => {
     const call = { messages: [], toolCallId: 'call' }
 
     expect(await search!.execute({ query: 'birthday' }, call)).toBe('- My birthday column says "unknown". (sim 1.40 · 2026-10-28 · general)')
-    expect(bound.search).toHaveBeenCalledWith('birthday')
+    expect(bound.lookup).toHaveBeenCalledWith('birthday')
     expect(await search!.execute({ query: 'hair colour' }, call)).toBe('No memory matched "hair colour".')
     expect(await search!.execute({}, call)).toBe('Give a search query.')
   })
@@ -54,14 +58,13 @@ describe('memory tools', () => {
   // A fact is the one-line answer the rows only imply ("who is 小托"), so it rides along with
   // the search instead of costing a second tool call.
   it('prints the near facts beside the hits, and still answers when no row matches', async () => {
-    const bound = { ...options(), search: vi.fn(async () => []) }
+    const bound = { ...options(), lookup: vi.fn(async (): Promise<MemoryLookup> => ({ status: 'ok', hits: [], facts: [{ subject: 'user', predicate: 'name', object: '小托（Xiao Tuo）', confidence: 0.95, similarity: 0.72 }] })) }
     const search = (await createMemoryTools(bound)).find(tool => tool.function.name === SEARCH_MEMORY_TOOL_NAME)!
     const call = { messages: [], toolCallId: 'call' }
 
     expect(await search!.execute({ query: 'winter' }, call)).toBe('known facts:\n- user · name · 小托（Xiao Tuo）')
-    expect(bound.searchFacts).toHaveBeenCalledWith('winter')
     // Facts alone still answer: a query with no matching row must not read as "nothing known".
-    expect(await search!.execute({ query: 'nobody' }, call)).toBe('No memory matched "nobody".')
+    expect(await search!.execute({ query: 'nobody' }, call)).toBe('known facts:\n- user · name · 小托（Xiao Tuo）')
   })
 
   // A hit is a row, not a blob: the store header becomes the address, so the model can read
@@ -73,7 +76,7 @@ describe('memory tools', () => {
         : `# 第 ${index} 条\n${'又一段'.repeat(200)}`
       return { text, score: 0.73 - index * 0.05, memType: 'general' }
     })
-    const bound = { ...options(), search: vi.fn(async () => hits) }
+    const bound = { ...options(), lookup: vi.fn(async (): Promise<MemoryLookup> => ({ status: 'ok', hits, facts: [] })) }
     const search = (await createMemoryTools(bound)).find(tool => tool.function.name === SEARCH_MEMORY_TOOL_NAME)!
 
     const answer = await search!.execute({ query: '生日' }, { messages: [], toolCallId: 'call' }) as string
@@ -82,6 +85,53 @@ describe('memory tools', () => {
     expect(answer).not.toContain('\n\n\n')
     expect(answer.length).toBeLessThanOrEqual(1500)
     expect(answer).toMatch(/more hits; narrow the query/)
+  })
+
+  // F04: an unreachable backend once answered "No memory matched", and the model repeated that
+  // as a fact about the owner. Both sentences now deny the inference explicitly.
+  it('never reports an unreachable or failed lookup as a fact about the memory', async () => {
+    const call = { messages: [], toolCallId: 'call' }
+    const unavailable = { ...options(), lookup: vi.fn(async (): Promise<MemoryLookup> => ({ status: 'unavailable', hits: [], facts: [], error: 'no search backend attached' })) }
+    const failed = { ...options(), lookup: vi.fn(async (): Promise<MemoryLookup> => ({ status: 'failed', hits: [], facts: [], error: 'engine down' })) }
+
+    const unavailableAnswer = await (await createMemoryTools(unavailable)).find(tool => tool.function.name === SEARCH_MEMORY_TOOL_NAME)!.execute({ query: 'birthday' }, call) as string
+    expect(unavailableAnswer).toContain('Memory lookup is unavailable')
+    expect(unavailableAnswer).toContain('says nothing about whether the fact is remembered')
+    expect(unavailableAnswer).not.toContain('No memory matched')
+
+    const failedAnswer = await (await createMemoryTools(failed)).find(tool => tool.function.name === SEARCH_MEMORY_TOOL_NAME)!.execute({ query: 'birthday' }, call) as string
+    expect(failedAnswer).toContain('Memory lookup failed')
+    expect(failedAnswer).toContain('Do not claim the fact is absent')
+    expect(failedAnswer).not.toContain('No memory matched')
+  })
+
+  // F02/F03: a save or a delete the backend refused used to be reported as done, and the owner
+  // only found out when the entry came back after a restart.
+  it('waits for the backend and says NOT saved when the write fails', async () => {
+    const call = { messages: [], toolCallId: 'call' }
+    const bound = {
+      ...options(),
+      write: vi.fn((input: Pick<MemoryEntry, 'name' | 'description' | 'body'>): MemoryWriteResult => ({
+        entry: { ...input, updatedAt: 0 },
+        persisted: Promise.resolve({ ok: false, reason: 'failed' as const, error: 'disk full' }),
+      })),
+    }
+    const write = (await createMemoryTools(bound)).find(tool => tool.function.name === WRITE_MEMORY_TOOL_NAME)!
+
+    expect(await write!.execute({ entries: [{ name: 'city', description: 'Tokyo.', body: 'Tokyo.' }] }, call))
+      .toBe('Memory "city" was NOT saved: the memory backend is unreachable, so nothing changed (disk full).')
+  })
+
+  it('says NOT forgotten when the backend keeps the row, and names the plausible reason', async () => {
+    const call = { messages: [], toolCallId: 'call' }
+    const bound = {
+      ...options(),
+      forget: vi.fn((_name: string): MemoryForgetResult => ({ found: true, persisted: Promise.resolve({ ok: false, reason: 'refused' as const, error: 'the backend kept the entry' }) })),
+    }
+    const forget = (await createMemoryTools(bound)).find(tool => tool.function.name === FORGET_MEMORY_TOOL_NAME)!
+
+    expect(await forget!.execute({ name: 'nickname' }, call))
+      .toBe('Memory "nickname" was NOT forgotten: the memory backend refused it, so the entry may be shared, derived, or owned by another character (the backend kept the entry).')
   })
 
   // Strict function calling rejects a schema whose objects leave a property out of `required`.
@@ -109,5 +159,13 @@ describe('memory tools', () => {
     expect(composeMemoryPrompt('')).toContain('Memory is reference, not a script.')
     expect(composeMemoryPrompt('')).toContain('not of now')
     expect(composeMemoryPrompt('')).toContain('The memory index is empty.')
+  })
+
+  // The prompt must not tell the model that a failed lookup means an absent fact, and it must not
+  // let the model promise a save the backend refused.
+  it('tells the model to report a failed lookup instead of inferring absence', () => {
+    const prompt = composeMemoryPrompt('')
+    expect(prompt).toContain('a backend that did not answer is not evidence of absence')
+    expect(prompt).toContain('A save or a forget counts only when the tool says it happened')
   })
 })

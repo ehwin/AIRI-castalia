@@ -18,7 +18,7 @@ const { lastClickedIndex, setLastClickedIndex } = useRippleGridState()
       <template #item="{ item: module }">
         <IconStatusItem
           :title="module.name"
-          :description="module.description"
+          :description="module.detail ? `${module.description} · ${module.detail}` : module.description"
           :icon="module.icon"
           :icon-color="module.iconColor"
           :icon-image="module.iconImage"

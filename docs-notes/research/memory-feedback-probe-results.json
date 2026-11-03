@@ -1,0 +1,122 @@
+{
+  "at": "2026-10-31T04:09:51.952Z",
+  "repo": "D:\\AI\\castalia\\Castalia-Anima",
+  "temporaryRuntime": "C:\\Users\\1\\AppData\\Local\\Temp\\castalia-paper-feedback-mUyEOG",
+  "method": "Current source transpiled to temp; fresh SQLite bank; EMBED_MODE=none; one synthetic memory, no model calls; snapshots and score changes demonstrate mechanism, not prevalence or answer quality.",
+  "sourceHashes": {
+    "src/affectLexicon.ts": "12bdf514f3dce12bed5921303d4862b5efc893040652d81311fde336364452e1",
+    "src/agentState.ts": "f3cfc42fd86fb626e0f6fc801186bf4e146090ec52f2e3d1526b9b6ac209c988",
+    "src/autoProcessor.ts": "39d11f5e4b88006753730ae16edf361bfb11ae6620439032573d261658473063",
+    "src/bias.ts": "04a8b9b9c8b76db649ef6baca46ed922fb084c3cfb08e44b09000507ddedbd32",
+    "src/bitemporal.ts": "87d703da58c59b7707d5ea1d3dae45764cca3b05cae7b8a560c92bb55423fa8b",
+    "src/buffer.ts": "493f78b9c92f8ac2295fc08e27271c2491454cdbaac57252cd82e259950b426e",
+    "src/category.ts": "313acfb89ac67d1de0941460c6c01914c43e63aa5dbeeb2c5c77651dc6b93104",
+    "src/chunkIndex.ts": "3b1ae2af4e86ccfcdad0c09b33089c7fc402f1f0b1f5acece228a6852e09f59f",
+    "src/configLoader.ts": "2706d551da026558081e02b9e0ec6f27097620e27b0ab289930b683897359ccb",
+    "src/consolidate.ts": "d3dfd6083cf1d0de8d9796d9fc547e173531518d1ac94c1110159bdaa276ccd1",
+    "src/dayKey.ts": "c15c68a2f114eaac2b0186e579d8dfba2552b809e1f864d6997b310e378a28ec",
+    "src/db.ts": "5c60102e417d81a7dea8a3e2cc78b78f301b031ca6c96b3a6641f9e497d3f1ee",
+    "src/digest.ts": "990d2304ff43a0732153dcbd06b45cb605dbe67d6c11d3e4612f138e9da2e1fc",
+    "src/emotion.ts": "0f438b781c23fa5ff4e57fdd1980e188bd9f8c6eeb98d5bb07e75052fea424a3",
+    "src/emotionalRanking.ts": "8a53ef79fc11187b7a3305505a9ff601437382ee17f825046a1a02be560ef266",
+    "src/entities.ts": "18855bf42a0122cbe00b21700770941410663dec90d6e2660b912a1be8297d8a",
+    "src/env.ts": "9e7f6a262e553facd02b2bd0a91c4a9626dfd1ab751f6efdb0cd41c0fb62356b",
+    "src/eventDigest.ts": "ddf7836654cf7e3bff679b5116d157382998b740334a2f53e400d94f7dceda43",
+    "src/factRecall.ts": "f46034630f7ce2bc929233c08cf2b014103f9fcb3ce7513477c176ec4bf34d4b",
+    "src/factWindows.ts": "6de64ae1099d0c9d7c319dd8a526ba945e0565bcfe8b0e86d2175bd32194c1f2",
+    "src/federation/index.ts": "ff6a964875609f8e3cd9140dc32b036ecb7e20b479ffdec741813984411393cf",
+    "src/federation/localDir.ts": "6ea133223260db0b8744edff66ccb8851f58a955ad977766f4b3136348ea222b",
+    "src/federation/mcpHttp.ts": "50addf859d175fc91a07fb203b6589d9ebfc3c1ea9a11c4518b6b4913e294e33",
+    "src/federation/registry.ts": "d49d6e7009fffa171a0d97bfcc51899238dcb7b30eb2f7a50f0247c7778a9166",
+    "src/federation/types.ts": "9f70f6b75411cd4f36648f94715c2f1b7068a55e9e66cca61c1511801e3b49cb",
+    "src/fedServer.ts": "e48667d153140cabb995830f987953bafd755d77eea80b86d67f509cc8b7f72e",
+    "src/index.ts": "b32fbf492862705fef8211d0f7ddfdc204baf18cf4705781f0420b297e344ed7",
+    "src/insightQuality.ts": "02ef843d7a66efc2ac651f4f0225dfd83b2283f5609e9415a1e0222fa70396bf",
+    "src/instructions.ts": "d338afc03a5d3d02409c4125622fef3021675818e33d2eb534cc94b3fccaef93",
+    "src/lexicalIdf.ts": "b65340d6c9de0e9900bc59b1159b0c8c96c08ee50bfc6f8c669a73f1e8b61ae4",
+    "src/memoryProvenance.ts": "f2107859a7f4c1f8111db84f8594e909809e6cef5671bf4a2e562284a1c1a09f",
+    "src/memType.ts": "b6afdd3202b88eb00e9213ebe9d5fcf8c67aabc864f29e6000694abf1cccf9c4",
+    "src/ollama.ts": "2c3a06cf22d639ed0a45eb8db700bb57c2e01b05ad9186b3adc2e46d876ab4d5",
+    "src/orphan.ts": "f7bd098c137e087f756599f795a05973f7e05582b49fa3553223a2ba680d0b21",
+    "src/promptFile.ts": "2f8858b7ce86a4b05d1ad3eb2e7d77c1d47bd9c3b9b648d1cf6353e318852503",
+    "src/psycheState.ts": "a4789775e48d29b02b5890fab0ffd6cf8831e28881ce3f724e8adb57c81ea6df",
+    "src/recallForInjection.ts": "49ce6462fec027e0d2c25f3ed90181fc3bd8da39d6d00298b13bfe694949a8d3",
+    "src/reflect.ts": "1e68b3ddc0a23367cb7c1b8528f21ef0217be9ff00601c0f6494abcead709dda",
+    "src/reflectAll.ts": "032caaa20275fc3e6cc52ad19bc4fdd3b23f40ea298fd8de4d0753c17de32e79",
+    "src/reflectDriver.ts": "8c793a62522a65b6b92752b56eac91a14ca3860cd96d0a97dd9322a0ee078ac5",
+    "src/reflectionFidelity.ts": "c6ecd278a76301779fe70451a30d0f50c714352d6dde4b283a80a6f773328d3d",
+    "src/reflectionLlm.ts": "cc64984cb40aab23f9bb770a9857c1e4de5d57f6356485d61f2d1c60a88bc449",
+    "src/reflectionSources.ts": "36f1d9cc9b7287edf9ccc4b49a8c9563a1cb7f46a3047dc726ce187814850c42",
+    "src/search.ts": "481b7aea53bd73f55281d7ce027ee97c7a488c0f28c0bf3916c8e70bfa4c1c64",
+    "src/selfCycle.ts": "10a204368134860ed04a02330b77d76710a8bdb9850109e45456f653426ecf9f",
+    "src/selfCycleCursor.ts": "1a130728ac6752df74d6f370855f5c919baab5139d7aedcede1faa894106f7f4",
+    "src/store.ts": "be8ebf48d7daa8b41ba679a75b3b92fc355189ee63a89656b17168a12843ff83",
+    "src/tags.ts": "7e57971e7c2d690bb48798a12c6f70913a968fd5994355ef2f157fc77542b5fc",
+    "src/tavern.ts": "b966d040bb1047f8543007368b58bf372a082470c17768859f34ac5dbad34f9d",
+    "src/temporalRecall.ts": "ffbd372b49ce54fa874c4efb70d79a25d8ec89ca1748103c284a385d8f5d5104",
+    "src/triage.ts": "c209521e9db8268594b8b256f740c5242bc3aac818a3e52f9429463a09ce0138",
+    "src/userLearning.ts": "4997eb944194a08441067af732d0cb4bb70f35899fd787e635ebd616b0af906c",
+    "src/version.ts": "1d01e9309a1ac7e3d7832fa9c1f2654cfa341ad91f428fea53cfb7aead4ec4c2",
+    "src/volatility.ts": "f7cf98d2e6d2107be1a19a3996ed4b0c46afc0ead7a64c4ed8e4d994bfb7a8cf"
+  },
+  "readOnly": {
+    "before": {
+      "accessed_count": 0,
+      "last_accessed_at": "2026-10-01T04:09:51.940Z",
+      "status": null,
+      "logs": []
+    },
+    "after": {
+      "accessed_count": 0,
+      "last_accessed_at": "2026-10-01T04:09:51.940Z",
+      "status": null,
+      "logs": []
+    },
+    "unchanged": true,
+    "hitCount": 1
+  },
+  "diagnostic": {
+    "shouldReinforce": false,
+    "after": {
+      "accessed_count": 1,
+      "last_accessed_at": "2026-10-31T04:09:51.950Z",
+      "status": null,
+      "logs": [
+        {
+          "channel": "diagnostic",
+          "rows": 1
+        }
+      ]
+    },
+    "scoreBefore": 0.656,
+    "scoreDuring": 0.656,
+    "scoreAfter": 0.845,
+    "similarityBefore": 1,
+    "similarityAfter": 1,
+    "salienceBefore": 0.188,
+    "salienceAfter": 0.375
+  },
+  "tagFastPath": {
+    "requestedChannel": "explicit_recall",
+    "after": {
+      "accessed_count": 1,
+      "last_accessed_at": "2026-10-31T04:09:51.952Z",
+      "status": null,
+      "logs": [
+        {
+          "channel": "search",
+          "rows": 1
+        }
+      ]
+    }
+  },
+  "checks": {
+    "readOnlyFindsMemory": true,
+    "readOnlyDoesNotWrite": true,
+    "diagnosticIsNotAnAuthorizedReinforcementChannel": true,
+    "diagnosticNeverthelessIncrementsCount": true,
+    "diagnosticNeverthelessWritesLog": true,
+    "subsequentScoreIncreasesAtSameSimilarity": true,
+    "tagPathLosesRequestedChannel": true
+  }
+}
