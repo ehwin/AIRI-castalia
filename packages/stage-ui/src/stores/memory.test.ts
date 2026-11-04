@@ -283,6 +283,22 @@ describe('memory store backend note', () => {
     expect(note).toContain('PSYCHE_FROM_VAD 未开启')
   })
 
+  // The automatic estimator stays off, but the model's judged emotion reaches the engine through the
+  // explicit path. Saying "nothing is connected" there would be as wrong as the old claim.
+  it('says the emotion reaches the engine by an explicit write when that path exists', () => {
+    const memory = useMemoryStore()
+    memory.setBackend({
+      transport: 'in-process',
+      capabilities: { vadSweep: true, recall: true, search: true, facts: true, ingest: true, maintain: true, selfCycle: true, psyche: true },
+      emotion: { autoFromVad: false, explicit: true, estimator: 'lexicon', note: 'PSYCHE_FROM_VAD 未开启：对话不会自动推进 psyche，但 recordEmotion 会把模型判断的情绪写进引擎' },
+      checkedAt: Date.now(),
+    })
+
+    const note = memory.backendNote() ?? ''
+    expect(note).toContain('情感经显式写入')
+    expect(note).not.toContain('未接引擎')
+  })
+
   it('claims every capability when the emotion chain reaches the engine', () => {
     const memory = useMemoryStore()
     memory.setBackend({

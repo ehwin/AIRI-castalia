@@ -282,3 +282,37 @@ describe('store tools (memory_store_* port)', () => {
     try { rmSync(other, { recursive: true, force: true }) } catch {}
   })
 })
+
+describe('explicit emotion reaches the engine psyche', () => {
+  // ROOT CAUSE: recordEmotion wrote the prompt and the panel only. The engine kept its own psyche,
+  // so the panel could say the tone moved while the state machine stayed still.
+  it('moves the psyche and reports the version it landed on', async () => {
+    const before = await bank.psycheState()
+    const result = await bank.applyEmotion({
+      vad: { valence: 0.9, arousal: 0.1, dominance: 0.2 },
+      reason: 'she shared good news',
+      at: Date.now(),
+    })
+
+    expect(result.reason).toBe('applied')
+    expect(result.applied).toBe(true)
+    expect(result.version).toBeGreaterThan(before.version)
+    expect((await bank.psycheState()).version).toBe(result.version)
+  })
+
+  it('applies one turn once, even when the same turn is retried', async () => {
+    const at = Date.now()
+    const first = await bank.applyEmotion({ vad: { valence: -0.9, arousal: 0.6, dominance: -0.4 }, at, eventId: 'turn-42' })
+    const second = await bank.applyEmotion({ vad: { valence: -0.9, arousal: 0.6, dominance: -0.4 }, at, eventId: 'turn-42' })
+
+    expect(first.applied).toBe(true)
+    expect(second.applied).toBe(false)
+    expect(second.version).toBe(first.version)
+  })
+
+  it('refuses a reading with no affect in it', async () => {
+    const result = await bank.applyEmotion({ vad: { valence: 0.01, arousal: 0.02, dominance: 0.03 } })
+    expect(result.reason).toBe('neutral')
+    expect(result.applied).toBe(false)
+  })
+})

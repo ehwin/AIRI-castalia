@@ -13,7 +13,7 @@ import { defineInvokeHandler } from '@moeru/eventa'
 import { createCastaliaMemoryRepository } from '@proj-airi/castalia-plugin/memory'
 import { app } from 'electron'
 
-import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryFacts, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySelfCycle, castaliaMemorySetEnabled, castaliaMemorySetEnergy, castaliaMemoryStatus, castaliaOpenConsole, castaliaTuningGet, castaliaTuningSave } from '../../../shared/eventa/castalia-memory'
+import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryApplyEmotion, castaliaMemoryFacts, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySelfCycle, castaliaMemorySetEnabled, castaliaMemorySetEnergy, castaliaMemoryStatus, castaliaOpenConsole, castaliaTuningGet, castaliaTuningSave } from '../../../shared/eventa/castalia-memory'
 import { openCastaliaConsole } from './castalia-console'
 import { createCastaliaEngineMemory, describeCastaliaEngineConfig, resolveCastaliaEngineOptions } from './castalia-engine'
 import { createCastaliaFullClient, resolveCastaliaFullUrl } from './castalia-full'
@@ -358,6 +358,11 @@ export function setupCastaliaMemoryService(params: {
       console.info(`[castalia] module switches: memory=${moduleEnabled.memory} castalia=${moduleEnabled.castalia}`)
       return { ok: true }
     })
+  // 模型判断出的情绪落到引擎 psyche 的唯一入口。没有它的后端如实回答 unsupported，
+  // 面板据此说明「只写提示词」，而不是让读者以为引擎也在动。
+  defineInvokeHandler(params.context, castaliaMemoryApplyEmotion, async input => engine.applyEmotion
+    ? await engine.applyEmotion({ ...input })
+    : { applied: false, reason: 'unsupported' as const, version: 0 })
   defineInvokeHandler(params.context, castaliaMemoryStatus, () => ({
       transport,
       project: engineOptions.project,
@@ -389,14 +394,18 @@ export function setupCastaliaMemoryService(params: {
         const autoFromVad = raw === 'on'
         const offByAlias = !autoFromVad && raw !== undefined && String(raw).toLowerCase() === 'on'
         const estimator: 'model' | 'lexicon' = process.env.OLLAMA_URL || process.env.VAD_MODEL ? 'model' : 'lexicon'
+        // 有没有显式写入通道，决定 recordEmotion 是真写 psyche 还是只写提示词。
+        const explicit = typeof engine.applyEmotion === 'function'
         const note = offByAlias
-          ? `PSYCHE_FROM_VAD 的值是 "${raw}"，引擎只认小写 on，所以自动情感仍然关闭`
+          ? `PSYCHE_FROM_VAD 的值是 "${raw}"，引擎只认小写 on，所以自动情感仍然关闭${explicit ? '（模型主动记录的情绪仍会写入 psyche）' : ''}`
           : !autoFromVad
-            ? 'PSYCHE_FROM_VAD 未开启：对话不会推进 psyche，recordEmotion 只写提示词'
+            ? explicit
+              ? 'PSYCHE_FROM_VAD 未开启：对话不会自动推进 psyche，但 recordEmotion 会把模型判断的情绪写进引擎'
+              : 'PSYCHE_FROM_VAD 未开启：对话不会推进 psyche，recordEmotion 只写提示词'
           : estimator === 'lexicon'
             ? '自动情感已开启，但只有本地词表可用：它会对模糊句子主动放弃判断，psyche 多数时候不动'
             : '自动情感已开启，分析来自模型端点'
-        return { autoFromVad, estimator, note }
+        return { autoFromVad, explicit, estimator, note }
       })(),
       checkedAt: Date.now(),
     }))

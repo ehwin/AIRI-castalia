@@ -248,6 +248,14 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
       return bank.psycheState(options ?? {})
     },
 
+    async applyEmotion(input) {
+      if (closing)
+        return { applied: false, reason: 'closing' as const, version: 0 }
+      // 情绪必须写进这张卡自己的库：没有角色时引擎会落到配置角色上，第二张卡就串了（审计 F01）。
+      const bank = await ensure(input?.persona)
+      return bank.applyEmotion({ ...input, characterId: input?.persona })
+    },
+
     async selfCycle(input) {
       if (closing)
         return { ok: false, skipped: true, reason: 'closing', evidenceIds: [], project: input?.project ?? '' }

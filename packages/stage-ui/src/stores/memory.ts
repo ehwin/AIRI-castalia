@@ -195,7 +195,13 @@ export interface MemoryBackend {
   character?: string
   capabilities: { vadSweep: boolean, recall: boolean, search: boolean, facts: boolean, ingest: boolean, maintain: boolean, selfCycle: boolean, psyche: boolean }
   /** 自动情感的实验门槛：模块开着也可能一步都不推进 psyche。 */
-  emotion?: { autoFromVad: boolean, estimator: 'model' | 'lexicon', note: string }
+  emotion?: {
+    autoFromVad: boolean
+    /** 后端有没有显式写入通道：模型判断出的情绪能不能落到引擎 psyche。 */
+    explicit?: boolean
+    estimator: 'model' | 'lexicon'
+    note: string
+  }
   entries?: { listed: number, truncated: boolean }
   error?: string
   checkedAt: number
@@ -246,6 +252,24 @@ export interface MemoryRemotePort { /** Every entry the remote holds. Replaces t
    * delay or fail the answer the user already sees.
    */
   ingest?: (turn: MemoryIngestTurn) => Promise<MemoryIngestResult>
+  /**
+   * Writes one judged emotion into the engine's psyche.
+   *
+   * A port without it keeps the emotion in the prompt only, and the panel says so.
+   */
+  emotion?: (vad: MemoryVAD, reason: string, persona?: string) => Promise<MemoryEmotionResult>
+}
+
+/** One emotion the model judged: three dimensions, each between -1 and 1. */
+export interface MemoryVAD {
+  valence: number
+  arousal: number
+  dominance: number
+}
+
+export interface MemoryEmotionResult {
+  applied: boolean
+  reason: string
 }
 
 /** One finished turn: the user's line and the assistant's final answer. */
@@ -518,7 +542,13 @@ export const useMemoryStore = defineStore('memory', () => {
     const truncation = current.entries?.truncated ? ` · 只读到 ${current.entries.listed} 条（撞上限，列表不是全部）` : ''
     if (!missing.length) {
       const emotionGap = Boolean(current.emotion && !current.emotion.autoFromVad)
-      const head = emotionGap ? '记忆在线 · 情感链未接引擎' : '全部能力在线'
+      // An explicit write path means the chain does reach the engine, only not by the automatic
+      // estimator. Claiming nothing is connected there would be as wrong as claiming everything is.
+      const head = !emotionGap
+        ? '全部能力在线'
+        : current.emotion?.explicit
+          ? '记忆在线 · 情感经显式写入'
+          : '记忆在线 · 情感链未接引擎'
       const gate = emotionGap ? ` · ${current.emotion?.note}` : ''
       return `${current.transport} · ${current.project ?? '?'}/${current.character ?? '?'} · ${head}${gate}${truncation}`
     }
@@ -549,6 +579,27 @@ export const useMemoryStore = defineStore('memory', () => {
     const message = (cause as { message?: string } | undefined)?.message
     const text = String(message ?? cause ?? 'unknown error').trim()
     return text.length > 160 ? `${text.slice(0, 160)}…` : text
+  }
+
+  /**
+   * Sends one judged emotion to the engine, where the psyche lives.
+   *
+   * The local agent state holds the same numbers for the prompt and the panel. That copy never
+   * reaches the engine, so without this call the panel could say the tone moved while the engine's
+   * own state machine stayed still.
+   */
+  async function recordEmotion(vad: MemoryVAD, reason: string, persona?: string): Promise<MemoryEmotionResult> {
+    if (!remote?.emotion)
+      return { applied: false, reason: 'unsupported' }
+    try {
+      const result = await remote.emotion(vad, reason, persona)
+      markRemoteOk()
+      return result
+    }
+    catch (error) {
+      markRemoteFailure(error)
+      return { applied: false, reason: errorText(error) }
+    }
   }
 
   function attachRemote(port: MemoryRemotePort | undefined) {
@@ -892,6 +943,7 @@ export const useMemoryStore = defineStore('memory', () => {
     setBackend,
     scheduleRefresh,
     backendNote,
+    recordEmotion,
     remoteAttached,
     remoteHealth,
     remoteDegraded,

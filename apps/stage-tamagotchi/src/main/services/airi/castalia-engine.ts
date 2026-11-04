@@ -192,6 +192,12 @@ export interface CastaliaEngineMemory {
   ingest?: (turn: CastaliaIngestTurn) => Promise<CastaliaIngestResult>
   /** 进程内维护：抽取 + 整合 + digest。没有实现的后端就不跑（返回 ok:false）。 */
   maintain?: (options?: { limit?: number }) => Promise<CastaliaMaintainReport>
+  /**
+   * 模型判断出的情绪写入引擎 psyche。没有实现的后端不写，面板会如实说。
+   *
+   * 与 `PSYCHE_FROM_VAD` 分开：那条开关管的是自动估计器，这一条是带理由的工具写入。
+   */
+  applyEmotion?: (input: import('../../../shared/eventa/castalia-memory').CastaliaEmotionInput) => Promise<import('../../../shared/eventa/castalia-memory').CastaliaEmotionResult>
   /** 引擎当前的 psyche 状态（情绪坐标 + 慢层心境 + band）。没有实现的后端返回 null。 */
   psycheState?: (options?: { characterId?: string }) => Promise<import('../../../shared/eventa/castalia-memory').CastaliaPsycheSnapshot | null>
   /** Mirrors the mind's energy into the engine's own prompt state. */

@@ -94,6 +94,14 @@ export interface BankHandle {
    */
   psycheState: (options?: { characterId?: string, project?: string }) => Promise<PsycheSnapshot>
   /**
+   * 把模型判断出的情绪写进引擎 psyche。
+   *
+   * `PSYCHE_FROM_VAD` 关掉的是**自动估计器**那条链（模型端点与词表都没过 κ≥0.4）。模型自己给出
+   * 判断、并带上理由的这一条属于「工具写入」，与那条链不是一类证据。没有这个方法时，
+   * recordEmotion 只改提示词和面板，引擎的 psyche 一步都不动 —— 面板上那句自相矛盾就是这样来的。
+   */
+  applyEmotion: (input: ApplyEmotionInput) => Promise<ApplyEmotionResult>
+  /**
    * 队列到期检查（审计 F07）。
    *
    * 十分钟是时限，不是「下一次有人说话再说」：最老的一条超过 `maxAgeSec` 就强制处理，
@@ -103,6 +111,26 @@ export interface BankHandle {
   /** Mirrors the mind's energy into the engine so its own prompts stop inventing one. */
   setSelfEnergy: (value: number) => Promise<void>
   close: () => void
+}
+
+/** 模型判断出的情绪：三个维度 + 它为什么这样判断。 */
+export interface ApplyEmotionInput {
+  vad: { valence: number, arousal: number, dominance: number }
+  /** 判断的理由，写进调用方的提示词与面板，不进 psyche_events（那张表没有文本列）。 */
+  reason?: string
+  /** 证据时间。同一轮的重试必须给同一个值，否则一次情绪会被记成两次。 */
+  at?: number
+  /** 幂等键。省略时由角色、项目与证据时间拼出来。 */
+  eventId?: string
+  characterId?: string
+  project?: string
+}
+
+/** `applied` 表示 psyche 版本前进了；`neutral`/`invalid`/`unknown` 表示没有可用的证据。 */
+export interface ApplyEmotionResult {
+  applied: boolean
+  reason: 'applied' | 'neutral' | 'invalid' | 'unknown'
+  version: number
 }
 
 export interface PsycheSnapshot {
@@ -524,6 +552,20 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
         version: Number(state?.version ?? 0),
         updatedAt: Number(state?.updatedAt ?? Date.now()),
       } satisfies PsycheSnapshot
+    },
+    applyEmotion: async (input) => {
+      const { applyPsycheAppraisal, getPsycheState, targetAppraisalFromVAD } = await import('../vendor/engine/psycheState')
+      const character = input.characterId ?? charId
+      const proj = input.project ?? project
+      const at = Number.isFinite(input.at) ? Number(input.at) : Date.now()
+      // 幂等键由调用方给：同一轮重试必须落在同一个 id 上，否则同一句话的情绪会累加两次。
+      const eventId = input.eventId ?? `emotion:llm:${proj}:${character}:${at}`
+      const appraisal = targetAppraisalFromVAD(input.vad, eventId, { allowPartial: true })
+      const before = Number(getPsycheState(character, proj, at)?.version ?? 0)
+      if (appraisal.kind !== 'target')
+        return { applied: false, reason: appraisal.kind as ApplyEmotionResult['reason'], version: before }
+      const next = applyPsycheAppraisal(character, proj, appraisal, at, {})
+      return { applied: Number(next.version) > before, reason: 'applied', version: Number(next.version) }
     },
     close: () => { current = null },
   }

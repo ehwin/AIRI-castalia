@@ -48,7 +48,7 @@ import {
   i18nGetLocale,
   i18nSetLocale,
 } from '../shared/eventa'
-import { castaliaMemoryFacts, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySelfCycle, castaliaMemorySetEnabled, castaliaMemorySetEnergy, castaliaMemoryStatus } from '../shared/eventa/castalia-memory'
+import { castaliaMemoryApplyEmotion, castaliaMemoryFacts, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySelfCycle, castaliaMemorySetEnabled, castaliaMemorySetEnergy, castaliaMemoryStatus } from '../shared/eventa/castalia-memory'
 import { electronModelAssetCancel, electronModelAssetEnsure, electronModelAssetRemove, electronModelAssetsClear, electronModelAssetsList, electronModelAssetStatusChanged } from '../shared/eventa/model-assets'
 import {
   electronPluginUpdateCapability,
@@ -100,6 +100,7 @@ const searchCastaliaMemory = useElectronEventaInvoke(castaliaMemorySearch)
 const factsCastaliaMemory = useElectronEventaInvoke(castaliaMemoryFacts)
 const ingestCastaliaMemory = useElectronEventaInvoke(castaliaMemoryIngest)
 const statusCastaliaMemory = useElectronEventaInvoke(castaliaMemoryStatus)
+const applyCastaliaEmotion = useElectronEventaInvoke(castaliaMemoryApplyEmotion)
 // 主进程自己排的定时器不认识面板开关，把状态推过去，关掉就真的停（审计 A06）。
 const setCastaliaEnabled = useElectronEventaInvoke(castaliaMemorySetEnabled)
 memoryStore.attachRemote({
@@ -116,6 +117,8 @@ memoryStore.attachRemote({
   facts: (query, topK, persona) => factsCastaliaMemory({ query, topK, persona }),
   // 每轮对话的写回入口：没有它，她只说、不记。
   ingest: turn => ingestCastaliaMemory(turn),
+  // 模型判断出的情绪写进引擎 psyche：提示词那份只活在界面里，引擎那份才推动她的状态机。
+  emotion: (vad, reason, persona) => applyCastaliaEmotion({ vad, reason, persona }),
 })
 void memoryStore.hydrate()
 // 「模块开着」和「后端真的能检索/入库」是两件事：界面要能回答后者（审计 F05）。

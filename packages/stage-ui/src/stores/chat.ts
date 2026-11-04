@@ -692,7 +692,13 @@ export const useChatStore = defineStore('chat', () => {
       ...memory.enabled ? await createMemoryTools({ read: name => memory.read(name, persona), lookup: query => memory.lookup(query, 5, persona), write: entry => memory.write(entry, persona), forget: name => memory.forget(name, persona) }) : [],
       ...castalia.enabled
         ? await createCastaliaStateTools({
-            recordEmotion: (vad, reason) => castalia.recordEmotion(vad, reason, persona),
+            recordEmotion: (vad, reason) => {
+              // The prompt copy and the engine copy are two stores: this one is only read by the
+              // prompt and the panel, and the engine keeps its own psyche.
+              castalia.recordEmotion(vad, reason, persona)
+              if (memory.enabled)
+                void memory.recordEmotion(vad, reason, persona)
+            },
             setDesire: desire => castalia.setDesire(desire, persona),
           })
         : [],

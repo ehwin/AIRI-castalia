@@ -160,6 +160,8 @@ export interface CastaliaMemoryCapabilities {
 export interface CastaliaEmotionGate {
   /** PSYCHE_FROM_VAD 是否开启。关了就只有工具写入能改 psyche。 */
   autoFromVad: boolean
+  /** 后端有没有显式写入通道：模型判断出的情绪能不能落到引擎 psyche。 */
+  explicit: boolean
   /** 谁在分析：模型端点，还是本地词表（词表会主动放弃判断，不产生证据）。 */
   estimator: 'model' | 'lexicon'
   /** 一句人话，直接显示在面板上。 */
@@ -181,6 +183,32 @@ export interface CastaliaMemoryStatus {
 }
 
 export const castaliaMemoryStatus = defineInvokeEventa<CastaliaMemoryStatus>('eventa:invoke:castalia:memory:status')
+
+/** 模型判断出的一条情绪：三个维度，加上它为什么这样判断。 */
+export interface CastaliaEmotionInput {
+  vad: { valence: number, arousal: number, dominance: number }
+  reason?: string
+  /** 证据时间。同一轮的重试必须给同一个值，否则一次情绪会被记成两次。 */
+  at?: number
+  eventId?: string
+  /** 这张卡：情绪写到它自己的库里，不落到配置的默认角色上。 */
+  persona?: string
+}
+
+/** `applied` 表示 psyche 版本真的前进了。 */
+export interface CastaliaEmotionResult {
+  applied: boolean
+  reason: 'applied' | 'neutral' | 'invalid' | 'unknown' | 'unsupported' | 'closing'
+  version: number
+}
+
+/**
+ * 把模型判断出的情绪写进引擎 psyche。
+ *
+ * 与 PSYCHE_FROM_VAD 那条自动估计器链分开：模型带理由的显式判断属于工具写入，
+ * 那条链关着时它仍然生效。
+ */
+export const castaliaMemoryApplyEmotion = defineInvokeEventa<CastaliaEmotionResult, CastaliaEmotionInput>('eventa:invoke:castalia:memory:apply-emotion')
 
 /**
  * 把面板上的模块开关推给主进程。
