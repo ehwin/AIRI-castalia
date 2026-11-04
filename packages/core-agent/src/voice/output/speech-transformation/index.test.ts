@@ -141,3 +141,31 @@ describe('toSpeechText', () => {
     expect(toSpeechText(`$a ${marker}\\leq b$ ok.`, { marker })).toBe(`a is less than or equal to b${marker} ok.`)
   })
 })
+
+describe('toSpeechText leaves out text that has no sound', () => {
+  // ROOT CAUSE:
+  //
+  // An account was billed for about 4000 spoken characters after messages of fewer
+  // than 100. The speaker read a bare link letter by letter, an inline path such as
+  // `/v1/v1/`, a table row with its pipes, and a tool payload as JSON. A listener
+  // gets nothing from those, and the provider bills every character.
+  it('drops a bare link and keeps the words around it', () => {
+    expect(toSpeechText('连接 https://api.minimaxi.com/v1/get_voice 时会拼错。'))
+      .toBe('连接时会拼错。')
+  })
+
+  it('drops inline code that is a link or a path, and keeps the numbers', () => {
+    expect(toSpeechText('默认 `300`，路径 `/v1/v1/` 不对。')).toBe('默认 300，路径  不对。')
+    expect(toSpeechText('`https://example.com/x` 打不开。')).toBe('打不开。')
+  })
+
+  it('drops a tool payload, including a nested object', () => {
+    expect(toSpeechText('工具返回：{"status_code":0,"extra_info":{"audio_length":4356}} 完成。'))
+      .toBe('工具返回： 完成。')
+  })
+
+  it('drops table rows and keeps prose that uses brackets', () => {
+    expect(toSpeechText('| 项 | 值 |\n| --- | --- |\n| 状态 | 已修复 |')).toBe('')
+    expect(toSpeechText('[重要] 先备份。')).toBe('[重要] 先备份。')
+  })
+})

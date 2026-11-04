@@ -46,6 +46,106 @@ const asciiOperand = /^[A-Z0-9]$/i
 const sentenceEnd = /[.!?。！？\n]/
 
 /**
+ * Removes what a listener cannot use.
+ *
+ * A voice reads letters, not a destination: a bare link has no sound of its own. A table row
+ * without a table parser in front of it arrives as text with its pipes, and a tool payload
+ * arrives as JSON. All three were spoken, character by character, and all three are billed.
+ */
+function withoutNonSpoken(text: string): string {
+  const withoutTables = text.replace(/^ {0,3}\|.*$/gm, '')
+  const withoutLinks = withoutTables.replace(/https?:\/\/\S+/gi, '')
+  return tidySpacing(withoutDataBlobs(withoutLinks))
+    // A table that lost every row leaves its line breaks behind.
+    .replace(/^\n+|\n+$/g, '')
+}
+
+/**
+ * Tidy the spacing around a removed blob. A dropped link leaves two spaces, or one space between
+ * two CJK characters, where the language has none.
+ */
+function tidySpacing(text: string): string {
+  return text
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/[ \t]+([，。！？；：、,.!?;:])/g, '$1')
+    .replace(/(?<=[\u4E00-\u9FFF])[ \t]+(?=[\u4E00-\u9FFF])/g, '')
+}
+
+/**
+ * Tidy the text that joins several inline nodes. A dropped node leaves its space behind, but the
+ * spacing inside a formula or a word boundary stays: a space between two CJK characters there is a
+ * word boundary the reader uses, not an artifact.
+ */
+function tidyJoined(text: string): string {
+  return text
+    .replace(/[ \t]+([，。！？；：、,.!?;:])/g, '$1')
+    .replace(/^[ \t]+/, '')
+}
+
+/**
+ * Drops JSON objects and arrays, including nested ones. Brackets that carry prose, as `[重要]`,
+ * stay: only a blob with a `"key":` pair is data.
+ */
+function withoutDataBlobs(text: string): string {
+  let spoken = ''
+  let index = 0
+  while (index < text.length) {
+    const char = text[index]!
+    if (char !== '{' && char !== '[') {
+      spoken += char
+      index++
+      continue
+    }
+
+    const close = char === '{' ? '}' : ']'
+    let depth = 0
+    let quoted = false
+    let end = -1
+    for (let cursor = index; cursor < text.length; cursor++) {
+      const current = text[cursor]!
+      if (current === '"') {
+        quoted = !quoted
+      }
+      else if (!quoted && current === char) {
+        depth++
+      }
+      else if (!quoted && current === close) {
+        depth--
+        if (depth === 0) {
+          end = cursor
+          break
+        }
+      }
+    }
+
+    if (end === -1) {
+      spoken += char
+      index++
+      continue
+    }
+
+    const blob = text.slice(index, end + 1)
+    if (/"[^"\n]+"\s*:/.test(blob)) {
+      index = end + 1
+      continue
+    }
+
+    spoken += blob
+    index = end + 1
+  }
+  return spoken
+}
+
+/** Inline code that a listener can use, such as `300`. A link, a path, or a JSON blob is data, not speech. */
+function isSpeakableCode(value: string): boolean {
+  const text = value.trim()
+  if (!text)
+    return false
+  // A URL, a slash-separated path, a JSON or array blob, or a quoted token.
+  return !/^[a-z]+:\/\//i.test(text) && !/[/{["]/.test(text)
+}
+
+/**
  * Compiles markdown to the text that a TTS provider reads.
  *
  * Markup that has no sound is removed: emphasis delimiters, heading and list markers, link URLs, code
@@ -188,16 +288,24 @@ function compile(tree: Root, source: string, options: SpeechTextOptions | undefi
   }
 
   function phrasing(nodes: readonly PhrasingContent[]): string {
-    return nodes.map((node, index) => inline(node, nodes, index)).join('')
+    // A dropped inline node leaves its spaces in the joined text, and a space before punctuation is
+    // not heard as a pause. The spacing inside the text itself stays: see tidyJoined.
+    return tidyJoined(nodes.map((node, index) => inline(node, nodes, index)).join(''))
   }
 
   function inline(node: PhrasingContent, siblings: readonly PhrasingContent[], index: number): string {
     switch (node.type) {
       case 'text':
         // A voice can read `$5` in another language, so a price is read as words of its sentence.
-        return speakProse(node.value, 'text', sentenceAround(siblings, index) + node.value)
-      case 'inlineCode':
-        return speakProse(node.value, 'code', node.value)
+        return speakProse(withoutNonSpoken(node.value), 'text', sentenceAround(siblings, index) + node.value)
+      case 'inlineCode': {
+        // A preprocessor reads code that is a formula, as it reads prose: `\frac{1}{2}` is words.
+        // What no preprocessor reads is data unless a listener can use it: `300` yes, `/v1/v1/` no.
+        const spoken = speakProse(node.value, 'code', node.value)
+        if (spoken !== node.value)
+          return spoken
+        return isSpeakableCode(node.value) ? spoken : keepMarkers(node, '')
+      }
       case 'inlineMath':
         return isFormula(node) ? keepMarkers(node, speakFormula(node.value, sentenceAround(siblings, index))) : keepMarkers(node, range(node))
       case 'emphasis':
