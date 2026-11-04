@@ -2,7 +2,7 @@ import type { GenerationProvider } from '@proj-airi/provider-inference'
 import type {} from 'pinia-plugin-synced'
 
 import type { ProviderMetadata, ProviderValidationPlan } from '../../libs/providers'
-import type { ChatRequestOptions, ModelInfo, ProviderDefinition, ProviderInstance, VoiceInfo } from '../../libs/providers/types'
+import type { ChatRequestOptions, ModelInfo, ProviderDefinition, ProviderInstance, ProviderValidationResult, VoiceInfo } from '../../libs/providers/types'
 
 import { errorMessageFrom } from '@moeru/std'
 import { getGenerationProvider, withReasoning } from '@proj-airi/provider-inference'
@@ -70,6 +70,9 @@ export interface ProviderRuntimeState {
 /** Stable fallback for reactive consumers when a provider has no cached catalog. */
 const emptyProviderModels: ModelInfo[] = []
 Object.freeze(emptyProviderModels)
+
+/** How many recent check times the provider keeps for the settings home's failure notices. */
+const VALIDATION_TIMES_KEPT = 10
 
 // Only the provider data plane crosses renderer boundaries. Async derived refs
 // stay in useProviderStore and recompute locally instead of being patched as
@@ -230,7 +233,12 @@ export const useProviderStore = defineStore('provider', () => {
       await runProviderValidation(plan, { t })
 
     const configOnly = !options.onlyChatPingCheck && !plan.shouldValidate
-    const result = validationResultFromPlan(plan, configOnly)
+    const result = {
+      ...validationResultFromPlan(plan, configOnly),
+      // `validationRequiredWhen` accepted the config. When it did not, a failed check means that fields are not filled in yet,
+      // so the recorded status is unconfigured, not invalid.
+      validationRequired: plan.shouldValidate,
+    }
     if (result.valid)
       return result
 
@@ -248,6 +256,63 @@ export const useProviderStore = defineStore('provider', () => {
       ...result,
       reason: reasons.join('; '),
     }
+  }
+
+  async function recordValidationResult(
+    providerId: string,
+    result: Pick<ProviderValidationResult, 'valid' | 'reason'> & { validationRequired?: boolean },
+  ) {
+    const runtimeState = providerRuntimeState.value[providerId]
+    if (!runtimeState)
+      return
+
+    let outcome: NonNullable<ProviderRuntimeState['validationOutcome']> = 'invalid'
+    if (result.valid) {
+      outcome = 'configured'
+    }
+    else if (result.validationRequired === false) {
+      // The settings page does not check a config that `validationRequiredWhen` rejects, such as one without its API key.
+      // Background checks still run it, so that providers with default configs become configured. A failure here is
+      // an unfinished config, so it gets no failure reason.
+      outcome = 'unconfigured'
+    }
+
+    providerRuntimeState.value[providerId] = {
+      ...runtimeState,
+      validationOutcome: outcome,
+      validationReason: outcome === 'invalid' ? result.reason : undefined,
+      validationTimes: [...(runtimeState.validationTimes ?? []), Date.now()].slice(-VALIDATION_TIMES_KEPT),
+    }
+    await providerConfigStore.setProviderStatus(providerId, outcome)
+  }
+
+  /**
+   * Checks an initialized provider's settings and records the result for failure notices and developer tools.
+   * Settings pages and background checks share this entry. It skips the billable chat probe.
+   * Candidate configs use `validateProviderConfig` without changing the current provider's status or check history.
+   */
+  async function validateProviderSettings(providerId: string, config: Record<string, unknown>) {
+    let result
+    try {
+      result = await validateProviderConfig(providerId, config, {
+        skipChatPingCheck: true,
+      })
+    }
+    catch (error) {
+      await recordValidationResult(providerId, { valid: false, reason: errorMessageFrom(error) ?? '' })
+      throw error
+    }
+
+    await recordValidationResult(providerId, result)
+    return result
+  }
+
+  /** Records a config as not filled in yet, without a failure reason. */
+  async function recordUnfinishedConfig(providerId: string) {
+    const runtimeState = providerRuntimeState.value[providerId]
+    if (runtimeState)
+      providerRuntimeState.value[providerId] = { ...runtimeState, validationOutcome: 'unconfigured', validationReason: undefined }
+    await providerConfigStore.setProviderStatus(providerId, 'unconfigured')
   }
 
   async function hasManualProviderValidators(providerId: string) {
@@ -304,20 +369,11 @@ export const useProviderStore = defineStore('provider', () => {
       // PITFALL: Please consider skip chat ping check during automatic/background validation,
       // since this can consume API tokens and may only be triggered
       // by user action (e.g. "Ping API" button on settings pages) or other user intentions.
-      let validationResult
-      try {
-        validationResult = await validateProviderConfig(providerId, config || {}, {
-          skipChatPingCheck: true,
-        })
-      }
-      catch (error) {
-        providerConfigStore.setProviderStatus(providerId, 'invalid')
-        throw error
-      }
+      // `validateProviderSettings` skips it and records the outcome and the reason for the failure notices.
+      const validationResult = await validateProviderSettings(providerId, config || {})
 
       if (providerRuntimeState.value[providerId]) {
         providerRuntimeState.value[providerId].validatedCredentialHash = configString
-        providerConfigStore.setProviderStatus(providerId, validationResult.valid ? 'configured' : 'invalid')
         // Auto-mark Web Speech API as added if valid and available
         if (validationResult.valid && ['browser-web-speech-api', 'player2'].includes(providerId)) {
           markProviderAdded(providerId)
@@ -399,6 +455,8 @@ export const useProviderStore = defineStore('provider', () => {
         continue
       providerConfigStore.setProviderStatus(providerId, 'unconfigured')
       runtimeState.validatedCredentialHash = undefined
+      runtimeState.validationOutcome = undefined
+      runtimeState.validationReason = undefined
     }
   }
 
@@ -430,8 +488,8 @@ export const useProviderStore = defineStore('provider', () => {
       .map(async ([providerId]) => {
         try {
           initializeProviderRuntimeState(providerId)
-          const isValid = await validateProvider(providerId)
-          providerConfigStore.setProviderStatus(providerId, isValid ? 'configured' : 'invalid')
+          // The check records the status itself. An unfinished config stays unconfigured, not invalid.
+          await validateProvider(providerId)
         }
         catch {
           providerConfigStore.setProviderStatus(providerId, 'invalid')
@@ -497,6 +555,8 @@ export const useProviderStore = defineStore('provider', () => {
   async function setProviderUnconfigured(providerId: string) {
     if (providerRuntimeState.value[providerId]) {
       providerRuntimeState.value[providerId].validatedCredentialHash = undefined
+      providerRuntimeState.value[providerId].validationOutcome = undefined
+      providerRuntimeState.value[providerId].validationReason = undefined
     }
     await providerConfigStore.setProviderStatus(providerId, 'unconfigured')
     await unmarkProviderAdded(providerId)
@@ -1021,6 +1081,8 @@ export const useProviderStore = defineStore('provider', () => {
     findProviderDefinition,
     getDefaultProviderConfig,
     validateProviderConfig,
+    validateProviderSettings,
+    recordUnfinishedConfig,
     hasManualProviderValidators,
     supportsModelListing,
     getTranscriptionFeatures,
@@ -1072,10 +1134,12 @@ export const useProviderStore = defineStore('provider', () => {
       'loadProviderModel',
       'refreshListedProviderValidation',
       'refreshModelsForChangedCredentials',
+      'recordUnfinishedConfig',
       'resetProviderSettings',
       'setProviderUnconfigured',
       'validateProvider',
       'validateProviderConfig',
+      'validateProviderSettings',
     ],
     state: false,
   },

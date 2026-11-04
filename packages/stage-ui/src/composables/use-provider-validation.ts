@@ -73,7 +73,7 @@ export function useProviderValidation(providerId: string) {
   const manualTestMessage = ref('')
 
   /**
-   * `validateProviderConfig` is a synchronized action. A follower renderer posts
+   * `validateProviderSettings` is a synchronized action. A follower renderer posts
    * its arguments over a BroadcastChannel.
    *
    * `structuredClone` rejects a Vue reactive proxy. A shallow copy keeps the
