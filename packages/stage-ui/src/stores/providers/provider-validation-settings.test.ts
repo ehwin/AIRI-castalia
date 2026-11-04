@@ -76,4 +76,25 @@ describe('provider checks for the settings pages', () => {
     expect(providers.providerRuntimeState[providerId].validationReason).toBeUndefined()
     expect(useProviderConfigStore().providers[providerId]?.status).toBe('unconfigured')
   })
+
+  // The developer tools fail a provider check on purpose to test the failure notices. Upstream 0.13.1
+  // ships it; the fork's settings page links to the page that toggles it.
+  it('fails a check on purpose and records the simulated reason', async () => {
+    const providers = useProviderStore()
+    await providers.initializeProvider(providerId)
+
+    await providers.setSimulatedValidationFailure(providerId, true)
+    expect(providers.simulatedValidationFailures).toContain(providerId)
+    expect(providers.providerRuntimeState[providerId].validationOutcome).toBe('invalid')
+    expect(providers.providerRuntimeState[providerId].validationReason)
+      .toBe('settings.pages.system.sections.section.developer.sections.section.needs-attention.simulated-reason')
+
+    await providers.setSimulatedValidationFailure(providerId, false)
+    expect(providers.simulatedValidationFailures).not.toContain(providerId)
+    // The real check runs again. In this environment the Web Speech API is absent, so it can fail
+    // for its own reason; what must go away is the simulated one.
+    const runtimeState = providers.providerRuntimeState[providerId]
+    expect(runtimeState.validationOutcome).toBe(useProviderConfigStore().providers[providerId]?.status)
+    expect(runtimeState.validationReason).not.toContain('simulated-reason')
+  })
 })

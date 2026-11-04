@@ -79,9 +79,13 @@ const VALIDATION_TIMES_KEPT = 10
 // authoritative state by pinia-plugin-synced.
 const useProviderStateStore = defineStore('provider-state', () => {
   const runtime = ref<Record<string, ProviderRuntimeState>>({})
+  // The developer tools make the checks of these providers fail on purpose. Like the rest of the
+  // runtime state, the list is not stored, so it ends when the app quits.
+  const simulatedValidationFailures = ref<string[]>([])
 
   return {
     runtime,
+    simulatedValidationFailures,
   }
 }, {
   synced: {
@@ -258,6 +262,29 @@ export const useProviderStore = defineStore('provider', () => {
     }
   }
 
+  async function hasManualProviderValidators(providerId: string) {
+    const definition = findProviderDefinition(providerId)
+    if (!definition || definition.disableChatPingCheckUI)
+      return false
+    const validators = await Promise.all((definition.validators?.validateProvider ?? [])
+      .map(createValidator => createValidator({ t })))
+    return validators.some(validator => validator.id.includes(CHAT_COMPLETIONS_VALIDATOR_ID))
+  }
+
+  function supportsModelListing(providerId: string) {
+    return findProviderDefinition(providerId) !== undefined
+  }
+
+  /**
+   * A failed check for a provider that the developer tools mark, so the failure notices can be tested
+   * without a broken config. Other providers get `undefined` and run their real check.
+   */
+  function simulatedValidationFailure(providerId: string) {
+    if (!providerStateStore.simulatedValidationFailures.includes(providerId))
+      return undefined
+    return { valid: false, reason: t('settings.pages.system.sections.section.developer.sections.section.needs-attention.simulated-reason'), errors: [] }
+  }
+
   async function recordValidationResult(
     providerId: string,
     result: Pick<ProviderValidationResult, 'valid' | 'reason'> & { validationRequired?: boolean },
@@ -287,6 +314,18 @@ export const useProviderStore = defineStore('provider', () => {
   }
 
   /**
+   * Records that the required fields of a provider are empty, without a check.
+   * The settings page calls it when `validationRequiredWhen` rejects the edited config, so the settings home learns
+   * that a provider in use lost its API key. The check history does not change, because no check ran.
+   */
+  async function recordUnfinishedConfig(providerId: string) {
+    const runtimeState = providerRuntimeState.value[providerId]
+    if (runtimeState)
+      providerRuntimeState.value[providerId] = { ...runtimeState, validationOutcome: 'unconfigured', validationReason: undefined }
+    await providerConfigStore.setProviderStatus(providerId, 'unconfigured')
+  }
+
+  /**
    * Checks an initialized provider's settings and records the result for failure notices and developer tools.
    * Settings pages and background checks share this entry. It skips the billable chat probe.
    * Candidate configs use `validateProviderConfig` without changing the current provider's status or check history.
@@ -294,7 +333,7 @@ export const useProviderStore = defineStore('provider', () => {
   async function validateProviderSettings(providerId: string, config: Record<string, unknown>) {
     let result
     try {
-      result = await validateProviderConfig(providerId, config, {
+      result = simulatedValidationFailure(providerId) ?? await validateProviderConfig(providerId, config, {
         skipChatPingCheck: true,
       })
     }
@@ -307,25 +346,19 @@ export const useProviderStore = defineStore('provider', () => {
     return result
   }
 
-  /** Records a config as not filled in yet, without a failure reason. */
-  async function recordUnfinishedConfig(providerId: string) {
-    const runtimeState = providerRuntimeState.value[providerId]
-    if (runtimeState)
-      providerRuntimeState.value[providerId] = { ...runtimeState, validationOutcome: 'unconfigured', validationReason: undefined }
-    await providerConfigStore.setProviderStatus(providerId, 'unconfigured')
+  /**
+   * Makes the check of a provider fail on purpose, or stop failing, and runs the check again.
+   * The developer tools use it to test the failure notices. It lasts until the app quits.
+   */
+  async function setSimulatedValidationFailure(providerId: string, simulated: boolean) {
+    const rest = providerStateStore.simulatedValidationFailures.filter(id => id !== providerId)
+    providerStateStore.simulatedValidationFailures = simulated ? [...rest, providerId] : rest
+    return validateProvider(providerId, { force: true })
   }
 
-  async function hasManualProviderValidators(providerId: string) {
-    const definition = findProviderDefinition(providerId)
-    if (!definition || definition.disableChatPingCheckUI)
-      return false
-    const validators = await Promise.all((definition.validators?.validateProvider ?? [])
-      .map(createValidator => createValidator({ t })))
-    return validators.some(validator => validator.id.includes(CHAT_COMPLETIONS_VALIDATOR_ID))
-  }
-
-  function supportsModelListing(providerId: string) {
-    return findProviderDefinition(providerId) !== undefined
+  /** How often the provider checks itself in the background, in milliseconds. It is 0 when it has no periodic check. */
+  function getValidationIntervalMs(providerId: string) {
+    return providerValidationIntervalMsById.get(providerId) ?? 0
   }
 
   // Configuration validation functions
@@ -1084,6 +1117,9 @@ export const useProviderStore = defineStore('provider', () => {
     validateProviderSettings,
     recordUnfinishedConfig,
     hasManualProviderValidators,
+    getValidationIntervalMs,
+    simulatedValidationFailures: computed(() => providerStateStore.simulatedValidationFailures),
+    setSimulatedValidationFailure,
     supportsModelListing,
     getTranscriptionFeatures,
     initializeProvider,
@@ -1137,6 +1173,7 @@ export const useProviderStore = defineStore('provider', () => {
       'recordUnfinishedConfig',
       'resetProviderSettings',
       'setProviderUnconfigured',
+      'setSimulatedValidationFailure',
       'validateProvider',
       'validateProviderConfig',
       'validateProviderSettings',
