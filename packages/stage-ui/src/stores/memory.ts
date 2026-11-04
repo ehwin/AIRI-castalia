@@ -500,7 +500,14 @@ export const useMemoryStore = defineStore('memory', () => {
     backend.value = next
   }
 
-  /** One plain sentence about the backend, for a settings row. */
+  /**
+   * One plain sentence about the backend, for a settings row.
+   *
+   * The memory capabilities can all be present while the emotion chain is not connected to the
+   * engine: `recordEmotion` writes the panel and the prompt only, and the engine moves its psyche
+   * from conversation only under `PSYCHE_FROM_VAD`. Saying "全部能力在线" in that state claimed a
+   * capability the same sentence then denied, so the head names the gap instead.
+   */
   function backendNote(): string | undefined {
     const current = backend.value
     if (!current)
@@ -510,8 +517,10 @@ export const useMemoryStore = defineStore('memory', () => {
       return current.error
     const truncation = current.entries?.truncated ? ` · 只读到 ${current.entries.listed} 条（撞上限，列表不是全部）` : ''
     if (!missing.length) {
-      const gate = current.emotion && !current.emotion.autoFromVad ? ` · ${current.emotion.note}` : ''
-      return `${current.transport} · ${current.project ?? '?'}/${current.character ?? '?'} · 全部能力在线${gate}${truncation}`
+      const emotionGap = Boolean(current.emotion && !current.emotion.autoFromVad)
+      const head = emotionGap ? '记忆在线 · 情感链未接引擎' : '全部能力在线'
+      const gate = emotionGap ? ` · ${current.emotion?.note}` : ''
+      return `${current.transport} · ${current.project ?? '?'}/${current.character ?? '?'} · ${head}${gate}${truncation}`
     }
     return `${current.transport} · ${current.project ?? '?'}/${current.character ?? '?'} · 缺 ${missing.join('/')}`
   }

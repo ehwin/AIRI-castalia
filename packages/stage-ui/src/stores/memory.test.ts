@@ -255,3 +255,43 @@ describe('memory store', () => {
     expect(memory.entries).toHaveLength(5)
   })
 })
+
+describe('memory store backend note', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  // ROOT CAUSE:
+  //
+  // The row read "全部能力在线 · 自动情感实验门槛未开启（PSYCHE_FROM_VAD）：引擎不会从对话推进 psyche；
+  // recordEmotion 工具只改界面与提示词状态，不写引擎 psyche". The head claimed a capability that the
+  // tail denied, so a reader saw a contradiction instead of a status.
+  it('names the unconnected emotion chain instead of claiming every capability', () => {
+    const memory = useMemoryStore()
+    memory.setBackend({
+      transport: 'in-process',
+      project: 'airi',
+      character: 'N_h4lzzOfiOAYehOR1T',
+      capabilities: { vadSweep: true, recall: true, search: true, facts: true, ingest: true, maintain: true, selfCycle: true, psyche: true },
+      emotion: { autoFromVad: false, estimator: 'lexicon', note: 'PSYCHE_FROM_VAD 未开启：对话不会推进 psyche，recordEmotion 只写提示词' },
+      checkedAt: Date.now(),
+    })
+
+    const note = memory.backendNote() ?? ''
+    expect(note).toContain('记忆在线 · 情感链未接引擎')
+    expect(note).not.toContain('全部能力在线')
+    expect(note).toContain('PSYCHE_FROM_VAD 未开启')
+  })
+
+  it('claims every capability when the emotion chain reaches the engine', () => {
+    const memory = useMemoryStore()
+    memory.setBackend({
+      transport: 'in-process',
+      capabilities: { vadSweep: true, recall: true, search: true, facts: true, ingest: true, maintain: true, selfCycle: true, psyche: true },
+      emotion: { autoFromVad: true, estimator: 'model', note: '自动情感已开启，分析来自模型端点' },
+      checkedAt: Date.now(),
+    })
+
+    expect(memory.backendNote()).toContain('全部能力在线')
+  })
+})

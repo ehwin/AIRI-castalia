@@ -392,7 +392,7 @@ export function setupCastaliaMemoryService(params: {
         const note = offByAlias
           ? `PSYCHE_FROM_VAD 的值是 "${raw}"，引擎只认小写 on，所以自动情感仍然关闭`
           : !autoFromVad
-            ? '自动情感实验门槛未开启（PSYCHE_FROM_VAD）：引擎不会从对话推进 psyche；recordEmotion 工具只改界面与提示词状态，不写引擎 psyche'
+            ? 'PSYCHE_FROM_VAD 未开启：对话不会推进 psyche，recordEmotion 只写提示词'
           : estimator === 'lexicon'
             ? '自动情感已开启，但只有本地词表可用：它会对模糊句子主动放弃判断，psyche 多数时候不动'
             : '自动情感已开启，分析来自模型端点'
