@@ -41,6 +41,8 @@ export type { AiriCard, AiriExtension } from '../../types/airiCard'
 const BUILT_IN_DISPLAY_MODEL_ID = 'preset-live2d-1'
 /** Global Stage model choice that versions before PR #2458 stored outside any card. */
 const LEGACY_STAGE_MODEL_STORAGE_KEY = 'settings/stage/model'
+/** The selected Character outlives a restart. The card map does not own it. */
+const ACTIVE_CARD_ID_STORAGE_KEY = 'airi-card-active-id'
 const emptyAvatarModels: readonly CharacterAvatarModelReference[] = Object.freeze([])
 const emptyLive2DExpressions: readonly Live2DExpressionControl[] = Object.freeze([])
 const emptyLive2DMotions: readonly Live2DMotionControl[] = Object.freeze([])
@@ -83,6 +85,35 @@ function resolveSystemPrompt(
   return systemPromptParts.join('\n\n')
 }
 
+function readPersistedActiveCardId(): string {
+  try {
+    return globalThis.localStorage?.getItem(ACTIVE_CARD_ID_STORAGE_KEY) || 'default'
+  }
+  catch {
+    return 'default'
+  }
+}
+
+function persistActiveCardId(id: string): boolean {
+  try {
+    globalThis.localStorage?.setItem(ACTIVE_CARD_ID_STORAGE_KEY, id)
+    return true
+  }
+  catch {
+    return false
+  }
+}
+
+function clearPersistedActiveCardId(): boolean {
+  try {
+    globalThis.localStorage?.removeItem(ACTIVE_CARD_ID_STORAGE_KEY)
+    return true
+  }
+  catch {
+    return false
+  }
+}
+
 export const useAiriCardStore = defineStore('airi-card', () => {
   // A watcher or an await runs outside the setup of this store. The active
   // Pinia can then be another one, so keep the Pinia that owns this store.
@@ -90,10 +121,10 @@ export const useAiriCardStore = defineStore('airi-card', () => {
   const { t } = useI18n()
   const displayModels = useDisplayModelsStore()
 
-  // Character configuration is durable. Runtime selection is replicated by
-  // Pinia and starts from the built-in Character for each application run.
+  // Character configuration is durable. The selection is durable too, so a
+  // restart opens the Character that the user picked.
   const cards = useLocalStorageManualReset<Map<string, AiriCard>>('airi-cards', new Map(), { listenToStorageChanges: false })
-  const activeCardId = shallowRef('default')
+  const activeCardId = shallowRef(readPersistedActiveCardId())
   // The active Avatar Model is runtime state. Pinia replicates it between
   // windows, but the Character configuration remains its only durable owner.
   const selectedAvatarModelId = shallowRef<string>()
@@ -281,6 +312,7 @@ export const useAiriCardStore = defineStore('airi-card', () => {
     // before consumers observe a dangling runtime profile after deletion.
     if (activeCardId.value === id) {
       activeCardId.value = 'default'
+      persistActiveCardId(activeCardId.value)
       selectedAvatarModelId.value = resolveDefaultAvatarModelId()
       await applyActiveCardSettings()
     }
@@ -526,6 +558,12 @@ export const useAiriCardStore = defineStore('airi-card', () => {
    */
   async function selectActiveCardVisionProvider(provider: string) {
     const vision = useVisionStore()
+    // Choosing a provider turns the module on again. Without this line, a card
+    // keeps the vision module off and the choice has no effect.
+    vision.enabled = true
+    // A repeated choice must not drop the model that the card already stores.
+    if (vision.activeProvider === provider)
+      return true
     vision.activeProvider = provider
     vision.resetModelSelection()
     await vision.loadModelsForProvider(provider)
@@ -783,6 +821,7 @@ export const useAiriCardStore = defineStore('airi-card', () => {
     // could delete the selected card without repairing its stored id.
     if (!cards.value.has(activeCardId.value))
       activeCardId.value = 'default'
+    persistActiveCardId(activeCardId.value)
 
     // NOTICE:
     // The built-in card stored before PR #2458 has no Avatar Model. Give it the
@@ -836,6 +875,7 @@ export const useAiriCardStore = defineStore('airi-card', () => {
       return false
 
     activeCardId.value = id
+    persistActiveCardId(id)
     selectedAvatarModelId.value = resolveDefaultAvatarModelId()
     await applyActiveCardSettings()
     return true
@@ -979,6 +1019,7 @@ export const useAiriCardStore = defineStore('airi-card', () => {
     cards.reset()
     activeCardId.value = 'default'
     selectedAvatarModelId.value = undefined
+    clearPersistedActiveCardId()
   }
 
   return {
