@@ -25,6 +25,7 @@ import { useChatSessionStore } from '../../chat/session-store'
 import { useChatStreamStore } from '../../chat/stream-store'
 import { useContextObservabilityStore } from '../../devtools/context-observability'
 import { useConsciousnessStore } from '../../modules/consciousness'
+import { useRemoteStageStore } from '../../remote-stage'
 import { useModsServerChannelStore } from './channel-server'
 import { createContextChannel } from './context-channel'
 
@@ -940,6 +941,11 @@ export const useContextBridgeStore = defineStore('mods:api:context-bridge', () =
           // - https://developer.mozilla.org/en-US/docs/Web/API/Web_Locks_API
           await withContextBridgeLock('context-bridge:event:input:text', async () => {
             try {
+              // A turn that carries a phone binding is spoken by that device. Recording it feeds the remote
+              // stage switch; the mute itself follows the live registry, so a device that left cannot keep
+              // this machine silent.
+              if (overrides?.binding?.startsWith('pocket:'))
+                useRemoteStageStore().notePocketTurn()
               const targetSessionId = overrides?.binding
                 ? await chatSession.ensureBoundSession(overrides.binding)
                 : overrides?.sessionId ?? chatSession.activeSessionId

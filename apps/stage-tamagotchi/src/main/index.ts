@@ -11,6 +11,7 @@ import process, { env, platform } from 'node:process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { errorMessageFrom } from '@moeru/std'
 import messages from '@proj-airi/i18n/locales'
 
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
@@ -42,6 +43,7 @@ import { setupComputerUse } from './services/airi/computer-use'
 import { setupGodotStageManager } from './services/airi/godot-stage'
 import { setupHomeAssistant } from './services/airi/home-assistant'
 import { setupBuiltInServer } from './services/airi/http-server'
+import { createSpeechProxyService } from './services/airi/http-server/speech-proxy'
 import { IOTraceHub } from './services/airi/io-trace-hub'
 import { registerIOTraceHub } from './services/airi/io-trace-hub/register'
 import { IOTraceRecordingService } from './services/airi/io-trace-recording'
@@ -293,7 +295,22 @@ app.whenReady().then(async () => {
   })
 
   const airiHttpServer = injeca.provide('modules:airi-http-server', {
-    build: async () => setupBuiltInServer({ servers: [] }),
+    dependsOn: { lifecycle },
+    build: async ({ dependsOn }) => {
+      const server = setupBuiltInServer({ servers: [createSpeechProxyService()] })
+      // The composed service only wires the sub-servers; nothing else starts them.
+      // A busy port must not abort the rest of the startup, so a failure is reported and dropped.
+      try {
+        await server.start()
+      }
+      catch (error) {
+        console.warn(`[AIRI] speech proxy did not start: ${errorMessageFrom(error) ?? 'unknown error'}`)
+      }
+      dependsOn.lifecycle.appHooks.onStop(() => {
+        void server.stop()
+      })
+      return server
+    },
   })
 
   const godotStageManager = injeca.provide('modules:godot-stage-manager', {

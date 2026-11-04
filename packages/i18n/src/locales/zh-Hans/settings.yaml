@@ -2013,6 +2013,19 @@ pages:
       aihubmix:
         description: https://aihubmix.com (九折优惠)
     title: 服务来源
+  cross-device:
+    description: 查看已连接的舞台设备，并决定由谁发声。
+    devices: 已连接的设备
+    empty: 当前没有设备连接。
+    last-turn: 最近一次来自设备的请求：{minutes} 分钟前
+    offline: 离线
+    online: 在线
+    title: 跨端互联
+    unknown: 通道未连接，设备状态未知
+    voice:
+      hint: 状态来自通道注册表，设备断开会立即变为离线。
+      switch: 由已连接的设备发声（本机静音）
+      title: 语音归属
   connection:
     description: 配置 WebSocket 服务器连接
     title: 连接

@@ -2205,6 +2205,19 @@ pages:
         title: AIHubMix
         description: https://aihubmix.com (10% off)
     title: Providers
+  cross-device:
+    description: See which stage devices are connected and decide who speaks.
+    devices: Connected devices
+    empty: No device is connected right now.
+    last-turn: 'Last request from a device: {minutes} min ago'
+    offline: Offline
+    online: Online
+    title: Cross-device
+    unknown: Channel not connected, device state unknown
+    voice:
+      hint: The indicator follows the channel registry, so it drops as soon as a device disconnects.
+      switch: Let the connected device speak (mute this machine)
+      title: Voice ownership
   connection:
     description: Configure WebSocket server connection
     title: Connection

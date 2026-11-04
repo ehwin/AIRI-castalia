@@ -28,6 +28,7 @@ import { useSpeechStore } from '@proj-airi/stage-ui/stores/modules/speech'
 import { useVisionStore } from '@proj-airi/stage-ui/stores/modules/vision'
 import { usePerfTracerBridgeStore } from '@proj-airi/stage-ui/stores/perf-tracer-bridge'
 import { listProvidersForPluginHost, shouldPublishPluginHostCapabilities } from '@proj-airi/stage-ui/stores/plugin-host-capabilities'
+import { useRemoteStageStore } from '@proj-airi/stage-ui/stores/remote-stage'
 import { useSettings, useSettingsAudioDevice } from '@proj-airi/stage-ui/stores/settings'
 import { useSettingsStageModel } from '@proj-airi/stage-ui/stores/settings/stage-model'
 import { useTheme } from '@proj-airi/ui'
@@ -232,6 +233,7 @@ function createFullStageRuntime() {
   const serverChannelSettingsStore = useServerChannelSettingsStore()
   const cardStore = useAiriCardStore()
   const serverChannelStore = useModsServerChannelStore()
+  const remoteStageStore = useRemoteStageStore()
   const characterOrchestratorStore = useCharacterOrchestratorStore()
   const inferencePreload = useInferencePreload()
   const pluginHostInspectorStore = usePluginHostInspectorStore()
@@ -368,6 +370,8 @@ function createFullStageRuntime() {
         token: serverChannelConfig.authToken || undefined,
         possibleEvents: ['ui:configure'],
       }).catch(err => console.error('Failed to initialize Mods Server Channel in App.vue:', err))
+      // The registry of stage peers decides whether this machine keeps its own voice.
+      remoteStageStore.start()
       contextBridgeStore.initialize()
       if (!isWidgetsWindow) {
         characterOrchestratorStore.initialize(syncedPinia)

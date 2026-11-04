@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useStopSpeakingButton } from '@proj-airi/stage-layouts/composables/useStopSpeakingButton'
+import { useRemoteStageStore } from '@proj-airi/stage-ui/stores/remote-stage'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
@@ -13,12 +14,21 @@ defineProps<{
 
 const { t } = useI18n()
 const { speechMuted, toggleSpeechMuted } = useStopSpeakingButton()
+const remoteStage = useRemoteStageStore()
 
 // Muting also publishes a stop request, so it clears the queued and the
 // playing speech on its way.
 const label = computed(() => speechMuted.value
   ? t('tamagotchi.stage.controls-island.unmute')
   : t('tamagotchi.stage.controls-island.mute'))
+
+// Asking this machine to speak by hand supersedes the handover to a connected device, otherwise the next
+// registry event would silence it again.
+function handleClick() {
+  toggleSpeechMuted()
+  if (!speechMuted.value)
+    remoteStage.setRemoteVoicePreferred(false)
+}
 </script>
 
 <template>
@@ -27,7 +37,7 @@ const label = computed(() => speechMuted.value
       :button-style
       :aria-label="label"
       :aria-pressed="speechMuted"
-      @click="toggleSpeechMuted"
+      @click="handleClick"
     >
       <div
         v-if="speechMuted"
