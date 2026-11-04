@@ -75,6 +75,41 @@ The current code deletes links and paths. A placeholder such as "一个链接" i
 | One streaming session per reply | Not done: `unspeech` sends one request per chunk |
 | Speak a placeholder instead of a gap | Not done: deletion leaves the gap |
 
+## MiniMax, measured (2026-11-04)
+
+The work above is not specific to one vendor. MiniMax offers three synchronous interfaces and one
+asynchronous interface, and the reply-playback path maps to the HTTP one.
+
+| Interface | Endpoint | Shape |
+| --- | --- | --- |
+| HTTP | `POST /v1/t2a_v2` | whole text in one call, `stream: true` streams the audio only |
+| WebSocket sync | `wss://.../ws/v1/t2a_v2` | one message per sentence, the client decides the boundary |
+| WebSocket bidi | `wss://.../ws/v1/t2a_v2_bidi` | the server aggregates sentences, `task_cancel` interrupts |
+| Async | `t2a_async_v2` | a task and a file, for long text |
+
+One 130-character reply, `speech-2.8-hd`, a cloned voice:
+
+| Path | Requests | First audio | Total | Billed characters |
+| --- | --- | --- | --- | --- |
+| HTTP, one call | 1 | 458 to 528 ms | 2.4 to 2.9 s | 236 |
+| HTTP, one call per sentence | 5 | 512 to 723 ms | 1.7 to 3.8 s | 236 |
+| WebSocket sync, one message per sentence | 5 | 587 to 667 ms | 3.6 to 4.0 s | not reported |
+| WebSocket bidi, pieces every 120 ms | 6 | 828 ms | 3.0 s | not reported |
+
+Two conclusions follow from the numbers.
+
+The socket is not a latency improvement for reply playback. Bidi pays about 300 ms for its
+server-side aggregation, which is the feature a full-duplex voice agent needs and this path does not.
+
+The billed count does not change with the split. A 汉字 counts as 2 characters and every other
+character counts as 1, so 130 characters bill 236 whether one call or five carries them. Cleaning the
+text is therefore the lever for the bill, and the split is not.
+
+Two more measured facts. Text normalization keeps the billed count equal: the same line billed 35
+characters with and without `text_normalization_mode: 'basic'`. About ten requests within a few
+seconds answer `base_resp.status_code 1002`, `rate limit exceeded(RPM)`, so the client must surface
+that code rather than report a silence.
+
 ## Sources
 
 - https://arxiv.org/abs/2603.06444 — prosodic boundary aware streaming generation

@@ -128,7 +128,10 @@ function minimaxRefusal(payload: MinimaxBaseResponse, fallbackMessage: string): 
   if (statusCode === undefined || statusCode === MINIMAX_STATUS_OK)
     return ''
 
-  return payload.base_resp?.status_msg || fallbackMessage
+  // The code is what a reader acts on: 1002 is the rate limit, and the message alone
+  // reads the same as a transient failure. Measured: about ten requests within a few
+  // seconds answer 1002 `rate limit exceeded(RPM)`.
+  return `${payload.base_resp?.status_msg || fallbackMessage} (${statusCode})`
 }
 
 /** The API message from a failed HTTP response, when its body carries one. */
