@@ -299,6 +299,26 @@ describe('memory store backend note', () => {
     expect(note).not.toContain('未接引擎')
   })
 
+  // Retries of one turn must land on one event: the engine drops a repeat key, and without the key
+  // it counted the same sentence twice.
+  it('forwards the caller event id to the backend', async () => {
+    const memory = useMemoryStore()
+    let seen: string | undefined
+    memory.attachRemote({
+      list: async () => [],
+      save: async () => {},
+      forget: async () => true,
+      emotion: async (_vad, _reason, _persona, eventId) => {
+        seen = eventId
+        return { applied: true, reason: 'applied' }
+      },
+    })
+
+    await memory.recordEmotion({ valence: 0.4, arousal: 0.2, dominance: 0.5 }, 'calm', 'airi', 'emotion:turn:s1:t7')
+
+    expect(seen).toBe('emotion:turn:s1:t7')
+  })
+
   // A refused psyche write is not a memory outage: recall, search and ingest still work, and the
   // "记忆后端异常" card used to appear for it.
   it('does not count a refused emotion write as a backend failure', async () => {

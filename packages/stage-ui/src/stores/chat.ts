@@ -699,7 +699,9 @@ export const useChatStore = defineStore('chat', () => {
               // No gate on the memory module here: the psyche belongs to the Castalia module, and the
               // main process refuses the write when that switch is off. Gating on `memory.enabled`
               // meant a card could claim "情感经显式写入" while every write was skipped.
-              void memory.recordEmotion(vad, reason, persona)
+              // The turn id is the idempotency key: a retried turn lands on the same event and the
+              // engine drops the repeat instead of counting the same sentence twice.
+              void memory.recordEmotion(vad, reason, persona, `emotion:turn:${correlation.conversationId}:${correlation.turnId}`)
             },
             setDesire: desire => castalia.setDesire(desire, persona),
           })

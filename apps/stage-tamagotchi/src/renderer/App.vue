@@ -118,7 +118,7 @@ memoryStore.attachRemote({
   // 每轮对话的写回入口：没有它，她只说、不记。
   ingest: turn => ingestCastaliaMemory(turn),
   // 模型判断出的情绪写进引擎 psyche：提示词那份只活在界面里，引擎那份才推动她的状态机。
-  emotion: (vad, reason, persona) => applyCastaliaEmotion({ vad, reason, persona }),
+  emotion: (vad, reason, persona, eventId) => applyCastaliaEmotion({ vad, reason, persona, eventId }),
 })
 void memoryStore.hydrate()
 // 「模块开着」和「后端真的能检索/入库」是两件事：界面要能回答后者（审计 F05）。

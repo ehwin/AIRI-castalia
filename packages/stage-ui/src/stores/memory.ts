@@ -257,7 +257,7 @@ export interface MemoryRemotePort { /** Every entry the remote holds. Replaces t
    *
    * A port without it keeps the emotion in the prompt only, and the panel says so.
    */
-  emotion?: (vad: MemoryVAD, reason: string, persona?: string) => Promise<MemoryEmotionResult>
+  emotion?: (vad: MemoryVAD, reason: string, persona?: string, eventId?: string) => Promise<MemoryEmotionResult>
 }
 
 /** One emotion the model judged: three dimensions, each between -1 and 1. */
@@ -588,11 +588,15 @@ export const useMemoryStore = defineStore('memory', () => {
    * reaches the engine, so without this call the panel could say the tone moved while the engine's
    * own state machine stayed still.
    */
-  async function recordEmotion(vad: MemoryVAD, reason: string, persona?: string): Promise<MemoryEmotionResult> {
+  /**
+   * `eventId` is the caller's idempotency key. A retried turn must reuse it, or the same sentence
+   * moves psyche twice (the engine has no other way to tell the two writes apart).
+   */
+  async function recordEmotion(vad: MemoryVAD, reason: string, persona?: string, eventId?: string): Promise<MemoryEmotionResult> {
     if (!remote?.emotion)
       return { applied: false, reason: 'unsupported' }
     try {
-      const result = await remote.emotion(vad, reason, persona)
+      const result = await remote.emotion(vad, reason, persona, eventId)
       markRemoteOk()
       return result
     }

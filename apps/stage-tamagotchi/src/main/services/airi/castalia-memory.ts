@@ -194,6 +194,8 @@ export async function runMaintenance(
  * 队列原本只在「下一条消息」或维护时被检查，所以一段安静下来的对话永远等不到情感更新。
  * 没有超龄批次时这里什么都不做。
  */
+let lastVadSweepWarningAt = 0
+
 function scheduleVadAgeSweep(engine: CastaliaEngineMemory) {
   const minutes = Number(process.env.VAD_SWEEP_MINUTES ?? 2)
   if (!Number.isFinite(minutes) || minutes <= 0)
@@ -210,7 +212,15 @@ function scheduleVadAgeSweep(engine: CastaliaEngineMemory) {
         if (result && result.updated > 0)
           console.info(`[castalia] vad sweep flushed ${result.updated} (pending ${result.pending})`)
       })
-      .catch(() => {})
+      .catch((error) => {
+        // Silence here hid a queue that failed every two minutes. Warn at most every ten minutes:
+        // the sweep is a background repair, and a console flood would hide the rest of the log.
+        const now = Date.now()
+        if (now - lastVadSweepWarningAt < 10 * 60_000)
+          return
+        lastVadSweepWarningAt = now
+        console.warn('[castalia] vad sweep failed:', (error as Error)?.message ?? String(error))
+      })
   }, minutes * 60_000)
   timer.unref?.()
 }
@@ -364,6 +374,11 @@ export function setupCastaliaMemoryService(params: {
       // The panel switch scopes the loop it names, and this write is part of it (audit A06/A14).
       if (!moduleEnabled.castalia)
         return { applied: false, reason: 'disabled' as const, version: 0 }
+      // One writer owns psyche. Under `PSYCHE_FROM_VAD=on` the automatic chain already judges this
+      // turn; letting the explicit write land too counted one moment twice (measured: +5% valence
+      // per turn on top of the first appraisal, and it compounds over a conversation).
+      if (process.env.PSYCHE_FROM_VAD === 'on')
+        return { applied: false, reason: 'estimator_active' as const, version: 0 }
       return engine.applyEmotion
         ? await engine.applyEmotion({ ...input })
         : { applied: false, reason: 'unsupported' as const, version: 0 }
@@ -408,8 +423,8 @@ export function setupCastaliaMemoryService(params: {
               ? 'PSYCHE_FROM_VAD 未开启：对话不会自动推进 psyche，但 recordEmotion 会把模型判断的情绪写进引擎'
               : 'PSYCHE_FROM_VAD 未开启：对话不会推进 psyche，recordEmotion 只写提示词'
           : estimator === 'lexicon'
-            ? '自动情感已开启，但只有本地词表可用：它会对模糊句子主动放弃判断，psyche 多数时候不动'
-            : '自动情感已开启，分析来自模型端点'
+            ? '自动情感已开启，但只有本地词表可用：它会对模糊句子主动放弃判断，psyche 多数时候不动（模型显式记录的情绪不再重复写入）'
+            : '自动情感已开启，分析来自模型端点（模型显式记录的情绪不再写入，避免同一轮算两次）'
         return { autoFromVad, explicit, estimator, note }
       })(),
       checkedAt: Date.now(),
