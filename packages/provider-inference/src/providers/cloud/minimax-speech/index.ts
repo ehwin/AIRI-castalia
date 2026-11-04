@@ -271,6 +271,10 @@ export const providerMinimaxSpeech = defineProvider<MinimaxSpeechConfig, 'minima
               model: body.model || DEFAULT_SPEECH_MODEL,
               text: body.input ?? '',
               stream: true,
+              // MiniMax reads numbers, dates and money as written unless normalization is on.
+              // The rule-based mode adds no measurable delay, and the LLM mode is unavailable here
+              // because it needs a non-streaming request. See docs/tts-text-trim-research.md.
+              text_normalization_mode: 'basic',
               voice_setting: {
                 voice_id: body.voice || 'English_Graceful_Lady',
                 speed: 1,

@@ -255,6 +255,25 @@ describe('providerMinimaxSpeech base URL', () => {
 
     expect(fetchMock.mock.calls[0]![0]).toBe('https://api.minimaxi.com/v1/t2a_v2')
   })
+
+  // MiniMax reads "2.8" and "1024" as written unless normalization is on. The rule-based mode
+  // works on a streaming request, and the LLM mode falls back to it here.
+  it('asks MiniMax to normalize the written form of numbers and dates', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => sseResponse([audioEvent()]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const provider = await providerMinimaxSpeech.createProvider(config) as SpeechProviderWithExtraOptions<string, { model?: string }>
+    const options = provider.speech('speech-2.8-hd')
+
+    await options.fetch!(new URL('https://api.minimaxi.com/v1/audio/speech'), {
+      method: 'POST',
+      body: JSON.stringify({ input: 'hola', voice: 'yunoclone1104' }),
+    })
+
+    const sent = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body)) as { text_normalization_mode?: string, stream?: boolean }
+    expect(sent.text_normalization_mode).toBe('basic')
+    expect(sent.stream).toBe(true)
+  })
 })
 
 describe('providerMinimaxSpeech synthesis model', () => {
