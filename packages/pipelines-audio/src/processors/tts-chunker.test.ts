@@ -195,7 +195,7 @@ describe('chunkTtsInput character budget', () => {
     const chunks = await collectChunkText(input)
 
     expect(chunks.length).toBeGreaterThan(1)
-    expect(Math.max(...chunks.map(chunk => chunk.length))).toBeLessThanOrEqual(300)
+    expect(Math.max(...chunks.map(chunk => chunk.length))).toBeLessThanOrEqual(2000)
     expect(chunks.join('')).toBe(input)
   })
 
@@ -204,8 +204,20 @@ describe('chunkTtsInput character budget', () => {
 
     const chunks = await collectChunkText(input)
 
-    expect(Math.max(...chunks.map(chunk => chunk.length))).toBeLessThanOrEqual(300)
+    expect(Math.max(...chunks.map(chunk => chunk.length))).toBeLessThanOrEqual(2000)
     expect(chunks.join('')).toBe(input)
+  })
+
+  // Research and provider documentation agree that a chunk should end at a sentence, not at a
+  // character count: a mid-clause cut loses the prosody of the clause. The budget is a guard for
+  // text with no sentence end at all, so text below it must reach the provider in one request.
+  it('leaves a run shorter than the budget in one request', async () => {
+    const input = '没有任何标点的一段话'.repeat(80)
+
+    const chunks = await collectChunkText(input)
+
+    expect(chunks).toHaveLength(1)
+    expect(chunks[0]).toBe(input)
   })
 
   it('honours a budget the caller lowers', async () => {

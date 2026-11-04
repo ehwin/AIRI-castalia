@@ -51,7 +51,7 @@ export interface TtsInputChunkOptions {
    * punctuation. Such a run reached a provider as a single request of thousands
    * of characters, and a hosted provider bills that request and can refuse it.
    *
-   * @default 300
+   * @default 2000
    */
   maximumCharacters?: number
   stripNarrative?: boolean
@@ -72,7 +72,7 @@ export async function* chunkTtsInput(
     boost = 2,
     minimumWords = 4,
     maximumWords = 12,
-    maximumCharacters = 300,
+    maximumCharacters = 2000,
   } = options ?? {}
 
   const iterator = readGraphemeClusters(
