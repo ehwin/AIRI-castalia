@@ -43,6 +43,17 @@ export interface TtsInputChunkOptions {
   minimumWords?: number
   /** @default 12 */
   maximumWords?: number
+  /**
+   * Character count a chunk must not exceed.
+   *
+   * `maximumWords` cannot bound a run that the segmenter reads as one word, or
+   * as no word at all: a long link, a base64 blob, or CJK prose without any
+   * punctuation. Such a run reached a provider as a single request of thousands
+   * of characters, and a hosted provider bills that request and can refuse it.
+   *
+   * @default 300
+   */
+  maximumCharacters?: number
   stripNarrative?: boolean
   keepNarrativeText?: boolean
 }
@@ -61,6 +72,7 @@ export async function* chunkTtsInput(
     boost = 2,
     minimumWords = 4,
     maximumWords = 12,
+    maximumCharacters = 300,
   } = options ?? {}
 
   const iterator = readGraphemeClusters(
@@ -75,6 +87,42 @@ export async function* chunkTtsInput(
   )
 
   const segmenter = new Intl.Segmenter(undefined, { granularity: 'word' }) // I love Intl.Segmenter
+
+  /**
+   * Where a cut may land so that words stay whole. CJK text has no spaces, so its
+   * punctuation serves as the boundary.
+   */
+  const cutPreference = /[\s，、,;；:：!?！？。…）)」』】"'”’]/g
+
+  /**
+   * Splits text that the word and punctuation rules left longer than the budget.
+   * The last preferred boundary inside the window wins, so a link or a CJK run is
+   * cut between words instead of inside one. A window without a usable boundary is
+   * cut hard: an over-long request is worse than a word split in the middle.
+   */
+  function* withinBudget(text: string): Generator<string> {
+    let rest = text
+    while (rest.length > maximumCharacters) {
+      const window = rest.slice(0, maximumCharacters + 1)
+      cutPreference.lastIndex = 0
+      let cut = 0
+      for (let match = cutPreference.exec(window); match !== null; match = cutPreference.exec(window))
+        cut = match.index + match[0].length
+      // A boundary that keeps less than half the budget leaves a fragment too short to be worth its own request.
+      if (cut < maximumCharacters / 2)
+        cut = maximumCharacters
+      const piece = rest.slice(0, cut).trim()
+      if (piece)
+        yield piece
+      rest = rest.slice(cut).trimStart()
+    }
+    if (rest)
+      yield rest
+  }
+
+  function wordsOf(text: string) {
+    return [...segmenter.segment(text)].filter(word => word.isWordLike).length
+  }
 
   let yieldCount = 0
   let buffer = ''
@@ -149,12 +197,14 @@ export async function* chunkTtsInput(
         // read it twice, as 方向、？ and then 移动？.
         const text = chunk.trim()
         if (regexpSound.test(text)) {
-          yield {
-            text,
-            words: chunkWordsCount,
-            reason: 'limit',
+          for (const piece of withinBudget(text)) {
+            yield {
+              text: piece,
+              words: wordsOf(piece),
+              reason: 'limit',
+            }
+            yieldCount++
           }
-          yieldCount++
         }
         chunk = ''
         chunkWordsCount = 0
@@ -166,12 +216,14 @@ export async function* chunkTtsInput(
 
       if (special) {
         const text = chunk.slice(0, -1).trim()
-        yield {
-          text,
-          words: chunkWordsCount,
-          reason: 'special',
+        for (const piece of withinBudget(text)) {
+          yield {
+            text: piece,
+            words: wordsOf(piece),
+            reason: 'special',
+          }
+          yieldCount++
         }
-        yieldCount++
         chunk = ''
         chunkWordsCount = 0
       }
@@ -180,12 +232,15 @@ export async function* chunkTtsInput(
       else if (flush || hard || chunkWordsCount > maximumWords || (yieldCount < boost && chunkWordsCount >= minimumWords)) {
         const text = chunk.trim()
         if (regexpSound.test(text)) {
-          yield {
-            text,
-            words: chunkWordsCount,
-            reason: flush ? 'flush' : hard ? 'hard' : chunkWordsCount > maximumWords ? 'limit' : 'boost',
+          const reason = flush ? 'flush' : hard ? 'hard' : chunkWordsCount > maximumWords ? 'limit' : 'boost'
+          for (const piece of withinBudget(text)) {
+            yield {
+              text: piece,
+              words: wordsOf(piece),
+              reason,
+            }
+            yieldCount++
           }
-          yieldCount++
         }
         chunk = ''
         chunkWordsCount = 0
@@ -213,14 +268,36 @@ export async function* chunkTtsInput(
     previousValue = value
     next = await iterator.next()
     current = next
+
+    // No punctuation arrived within the budget: a link, or prose that has no period at all. Ending
+    // the chunk here keeps the request bounded and starts the audio, instead of waiting for an end
+    // that may be thousands of characters away.
+    if (chunk.length + buffer.length >= maximumCharacters) {
+      const text = (chunk + buffer).trim()
+      for (const piece of withinBudget(text)) {
+        if (regexpSound.test(piece)) {
+          yield {
+            text: piece,
+            words: wordsOf(piece),
+            reason: 'limit',
+          }
+          yieldCount++
+        }
+      }
+      chunk = ''
+      buffer = ''
+      chunkWordsCount = 0
+    }
   }
 
   if (regexpSound.test(chunk + buffer)) {
     const text = (chunk + buffer).trim()
-    yield {
-      text,
-      words: chunkWordsCount + [...segmenter.segment(buffer)].filter(w => w.isWordLike).length,
-      reason: 'flush',
+    for (const piece of withinBudget(text)) {
+      yield {
+        text: piece,
+        words: wordsOf(piece),
+        reason: 'flush',
+      }
     }
   }
 }

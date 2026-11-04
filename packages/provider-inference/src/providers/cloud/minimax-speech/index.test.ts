@@ -213,6 +213,50 @@ describe('providerMinimaxSpeech voice catalog', () => {
   })
 })
 
+describe('providerMinimaxSpeech base URL', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  // ROOT CAUSE:
+  //
+  // The catalog and the synthesis client appended `/v1` to whatever host the
+  // caller configured. A base URL copied from the documentation, which names
+  // `/v1` on some pages, therefore asked for `/v1/v1/get_voice` and answered 404
+  // with an nginx body. Both forms must reach the same endpoint.
+  it.each([
+    'https://api.minimaxi.com',
+    'https://api.minimaxi.com/',
+    'https://api.minimaxi.com/v1',
+    'https://api.minimaxi.com/v1/',
+  ])('requests the catalog once from the host of %s', async (baseUrl) => {
+    const fetchMock = vi.fn<typeof fetch>(async () => voiceResponse(ACCEPTED_CATALOG))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const providerConfig = { ...config, baseUrl }
+    const provider = await providerMinimaxSpeech.createProvider(providerConfig)
+    await listVoices(providerConfig, provider)
+
+    expect(fetchMock.mock.calls[0]![0]).toBe('https://api.minimaxi.com/v1/get_voice')
+  })
+
+  it('keeps one version prefix in the synthesis request', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => sseResponse([audioEvent()]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const providerConfig = { ...config, baseUrl: 'https://api.minimaxi.com/v1/' }
+    const provider = await providerMinimaxSpeech.createProvider(providerConfig) as SpeechProviderWithExtraOptions<string, { model?: string }>
+    const options = provider.speech('speech-2.8-hd')
+
+    await options.fetch!(new URL('https://api.minimaxi.com/v1/audio/speech'), {
+      method: 'POST',
+      body: JSON.stringify({ input: 'hola', voice: 'yunoclone1104' }),
+    })
+
+    expect(fetchMock.mock.calls[0]![0]).toBe('https://api.minimaxi.com/v1/t2a_v2')
+  })
+})
+
 describe('providerMinimaxSpeech synthesis model', () => {
   afterEach(() => {
     vi.unstubAllGlobals()

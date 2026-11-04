@@ -5,12 +5,28 @@ import { z } from 'zod'
 
 import { defineProvider } from '../../registry'
 
+const DEFAULT_MINIMAX_SPEECH_HOST = 'https://api.minimax.io'
+
 const minimaxSpeechConfigSchema = z.object({
   apiKey: z.string(),
-  baseUrl: z.string().default('https://api.minimax.io'),
+  baseUrl: z.string().default(DEFAULT_MINIMAX_SPEECH_HOST),
 })
 
 type MinimaxSpeechConfig = z.input<typeof minimaxSpeechConfigSchema>
+
+/**
+ * The host that every endpoint of this provider hangs from.
+ *
+ * The documentation names the version prefix on some pages and omits it on
+ * others, so a caller copies either `https://api.minimaxi.com` or
+ * `https://api.minimaxi.com/v1`. Both must reach the same endpoint: the version
+ * belongs to the path built below this host, and keeping the caller's copy
+ * doubles it into `/v1/v1/...`, which answers 404.
+ */
+function minimaxSpeechHostOf(baseUrl: string | undefined): string {
+  const trimmed = (baseUrl?.trim() || DEFAULT_MINIMAX_SPEECH_HOST).replace(/\/+$/, '')
+  return trimmed.replace(/\/v1$/, '')
+}
 
 /**
  * The synthesis model used when the caller names none. The settings page and
@@ -153,7 +169,7 @@ async function requestMinimaxVoices(config: MinimaxSpeechConfig): Promise<VoiceC
   if (!apiKey)
     return { kind: 'rejected', reason: 'API key is required.' }
 
-  const baseUrl = (config.baseUrl || 'https://api.minimax.io').replace(/\/$/, '')
+  const baseUrl = minimaxSpeechHostOf(config.baseUrl)
 
   let response: Response
   try {
@@ -232,7 +248,7 @@ export const providerMinimaxSpeech = defineProvider<MinimaxSpeechConfig, 'minima
   createProviderConfig: () => minimaxSpeechConfigSchema,
   createProvider(config) {
     const apiKey = config.apiKey.trim()
-    const baseUrl = (config.baseUrl || 'https://api.minimax.io').replace(/\/$/, '')
+    const baseUrl = minimaxSpeechHostOf(config.baseUrl)
 
     return {
       // The caller owns the model choice. Returning a fixed one made the page

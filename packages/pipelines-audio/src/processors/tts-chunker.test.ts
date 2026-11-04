@@ -181,3 +181,46 @@ describe('tTS Chunker Logic Cleanup', () => {
     })
   })
 })
+
+describe('chunkTtsInput character budget', () => {
+  // ROOT CAUSE:
+  //
+  // The chunker bounded chunks by word count only. An account was billed for one
+  // TTS request of roughly 4000 characters: CJK prose without a period, and a long
+  // link, both read as a single word to `Intl.Segmenter`, so no rule ended the
+  // chunk and the whole run reached the provider as one request.
+  it('bounds CJK prose that has no sentence end', async () => {
+    const input = '这是一段没有任何句号的中文文本'.repeat(400)
+
+    const chunks = await collectChunkText(input)
+
+    expect(chunks.length).toBeGreaterThan(1)
+    expect(Math.max(...chunks.map(chunk => chunk.length))).toBeLessThanOrEqual(300)
+    expect(chunks.join('')).toBe(input)
+  })
+
+  it('bounds one long token, such as a link', async () => {
+    const input = `https://example.com/${'a'.repeat(3000)}`
+
+    const chunks = await collectChunkText(input)
+
+    expect(Math.max(...chunks.map(chunk => chunk.length))).toBeLessThanOrEqual(300)
+    expect(chunks.join('')).toBe(input)
+  })
+
+  it('honours a budget the caller lowers', async () => {
+    const chunks: TtsInputChunk[] = []
+    for await (const chunk of chunkTtsInput('没有任何标点的句子'.repeat(60), { maximumCharacters: 40 }))
+      chunks.push(chunk)
+
+    expect(chunks.every(chunk => chunk.text.length <= 40)).toBe(true)
+  })
+
+  it('keeps sentence ends as the preferred cut', async () => {
+    const input = '第一句话说完了。第二句话说完了。第三句话说完了。'
+
+    const chunks = await collectChunkText(input)
+
+    expect(chunks).toEqual(['第一句话说完了。', '第二句话说完了。', '第三句话说完了。'])
+  })
+})
