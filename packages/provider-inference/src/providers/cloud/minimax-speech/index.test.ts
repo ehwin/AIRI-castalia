@@ -302,7 +302,9 @@ describe('providerMinimaxSpeech synthesis model', () => {
     const provider = await providerMinimaxSpeech.createProvider(config) as SpeechProviderWithExtraOptions<string, { model?: string }>
     const options = provider.speech('')
 
-    expect(options.model).toBe('speech-2.8-hd')
+    // Turbo is the tier the documentation names for voice chat, and it bills at
+    // ¥0.20 per 1,000 characters against ¥0.35 on HD.
+    expect(options.model).toBe('speech-2.8-turbo')
 
     await options.fetch!(new URL('https://api.minimax.io/v1/audio/speech'), {
       method: 'POST',
@@ -310,7 +312,7 @@ describe('providerMinimaxSpeech synthesis model', () => {
     })
 
     const sent = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body)) as { model: string }
-    expect(sent.model).toBe('speech-2.8-hd')
+    expect(sent.model).toBe('speech-2.8-turbo')
   })
 
   it('returns the decoded audio of an accepted stream', async () => {

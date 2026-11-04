@@ -19,7 +19,11 @@ import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
 
 const providerId = 'minimax-speech'
-const defaultModel = 'speech-2.8-hd'
+// Turbo is the tier the documentation names for voice chat, and it costs ¥0.20
+// per 1,000 characters against ¥0.35 on HD. A companion that speaks every reply
+// pays 1.75 times more on HD for the same text, so the default is Turbo and HD
+// stays one click away for a voice that needs its emotion rendering.
+const defaultModel = 'speech-2.8-turbo'
 
 // MiniMax takes synthesis parameters in its own `voice_setting` envelope. The
 // provider definition maps speed/volume/pitch itself, so the page adds nothing.

@@ -31,8 +31,11 @@ function minimaxSpeechHostOf(baseUrl: string | undefined): string {
 /**
  * The synthesis model used when the caller names none. The settings page and
  * the Speech module both name a model, so this covers a bare provider call.
+ *
+ * Turbo is the documented tier for voice chat, at ¥0.20 per 1,000 characters against ¥0.35 on HD.
+ * The documentation places HD at emotion rendering, so it stays a choice, not the default.
  */
-const DEFAULT_SPEECH_MODEL = 'speech-2.8-hd'
+const DEFAULT_SPEECH_MODEL = 'speech-2.8-turbo'
 
 /** Locale of a voice that the catalog cannot resolve from its ID. */
 const UNKNOWN_VOICE_LANGUAGE = { code: 'und', title: 'Unknown' }
