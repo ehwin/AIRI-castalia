@@ -7,6 +7,15 @@ import { computed, ref } from 'vue'
 
 import { aggregateMood, currentEnergyFrom } from './agent-state'
 
+/** One psyche snapshot from the engine. `hasEvidence: false` means the engine let the evidence expire. */
+interface SyncPsycheInput {
+  vad?: VADVector
+  mood?: VADVector
+  band?: string
+  at?: number
+  hasEvidence?: boolean
+}
+
 interface PersistedAgentState {
   moodHistory: MoodEvent[]
   currentDesire: string | null
@@ -78,10 +87,26 @@ export const useCastaliaPluginStore = defineStore('castalia-plugin', () => {
    * called a tool, and it never did. The psyche-derived mood replaces the previous psyche event instead of
    * appending, so a periodic sync cannot grow the history.
    */
-  function syncPsyche(input: { vad: VADVector, mood?: VADVector, band?: string, at?: number }, characterId = activeCharacterId.value) {
+  function syncPsyche(input: SyncPsycheInput, characterId = activeCharacterId.value) {
     const now = input.at ?? Date.now()
     updateState((state) => {
+      // Two answers race: a slow query can land after a tool call already recorded a newer emotion.
+      // An older answer must not overwrite it and walk the clock backwards.
+      if (state.vadUpdatedAt !== undefined && now < state.vadUpdatedAt)
+        return state
       const kept = state.moodHistory.filter(event => event.reason !== 'psyche')
+      // The engine says the evidence expired. Continuing to show the old coordinates makes the
+      // panel and the prompt assert a feeling the engine no longer holds. Desire, energy and the
+      // explicit emotion records stay: those are hers, not the engine's evidence.
+      if (input.hasEvidence === false) {
+        const cleared: PersistedAgentState = { ...state, vadUpdatedAt: now, moodHistory: kept, lastUpdated: now }
+        delete cleared.vad
+        delete cleared.moodVad
+        delete cleared.band
+        return cleared
+      }
+      if (!input.vad)
+        return state
       const mood = Math.max(-10, Math.min(10, Math.round(input.vad.valence * 10)))
       return {
         ...state,

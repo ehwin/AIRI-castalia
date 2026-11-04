@@ -525,8 +525,10 @@ onMounted(async () => {
       return
     try {
       const psyche = await invokePsyche({ characterId: resolvedPersona() })
-      if (psyche?.hasEvidence)
-        castaliaStore.syncPsyche({ vad: psyche.vad, mood: psyche.mood, band: psyche.band, at: psyche.updatedAt }, psyche.characterId)
+      // Every answer counts, including the one that says the evidence expired: the store needs that
+      // signal to drop a mirror the engine no longer stands behind.
+      if (psyche)
+        castaliaStore.syncPsyche({ vad: psyche.vad, mood: psyche.mood, band: psyche.band, at: psyche.updatedAt, hasEvidence: psyche.hasEvidence }, psyche.characterId)
     }
     catch { /* the mirror is best-effort; the engine keeps the truth */ }
   }

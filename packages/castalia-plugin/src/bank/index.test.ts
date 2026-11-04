@@ -310,6 +310,21 @@ describe('explicit emotion reaches the engine psyche', () => {
     expect(second.version).toBe(first.version)
   })
 
+  // 冻结的负性倍率必须落库：每次应用事件都优先读数据库状态，内存里冻结、库里没有，
+  // 「落库后读一次」的轨迹就会偏离内存轨迹。
+  it('persists the frozen negative bias so a reread keeps the same trajectory', async () => {
+    await bank.applyEmotion({ vad: { valence: -0.9, arousal: 0.5, dominance: -0.2 }, at: Date.now(), eventId: 'turn-bias' })
+
+    const { DatabaseSync } = await import('node:sqlite')
+    const db = new DatabaseSync(join(dir, 'testproj', 'general', 'memory.sqlite'))
+    const row = db.prepare('SELECT valence_bias FROM psyche_state WHERE character_id = ?').get('airi') as any
+    db.close()
+
+    expect(Number(row?.valence_bias)).toBeGreaterThanOrEqual(1)
+    const snapshot = await bank.psycheState()
+    expect(snapshot.version).toBeGreaterThan(0)
+  })
+
   it('refuses a reading with no affect in it', async () => {
     const result = await bank.applyEmotion({ vad: { valence: 0.01, arousal: 0.02, dominance: 0.03 } })
     expect(result.reason).toBe('neutral')
