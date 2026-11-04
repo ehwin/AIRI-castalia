@@ -110,6 +110,21 @@ characters with and without `text_normalization_mode: 'basic'`. About ten reques
 seconds answer `base_resp.status_code 1002`, `rate limit exceeded(RPM)`, so the client must surface
 that code rather than report a silence.
 
+## Price, and why the model tier matters more than the path
+
+MiniMax sells speech as character packs: HD at ¥700 per 2,000,000 characters and Turbo at ¥400 per
+2,000,000, which is ¥0.35 against ¥0.20 per 1,000 characters. A 汉字 bills as 2 characters, so 1,000
+spoken 汉字 cost ¥0.70 on HD and ¥0.40 on Turbo.
+
+A reply of 130 汉字 bills 260 characters: ¥0.091 on HD, ¥0.052 on Turbo. Over a thousand replies that
+is ¥91 against ¥52, and the split between one call and five changes neither number.
+
+The documentation places Turbo at voice chat and digital humans, and HD at emotion rendering. A chat
+voice that defaults to HD pays 1.75 times the rate of the tier meant for the same job.
+
+The pack page also states the rate limit that decides a probing budget: the smallest pack allows RPM
+60, and a burst above it answers `1002 rate limit exceeded(RPM)`.
+
 ## Sources
 
 - https://arxiv.org/abs/2603.06444 — prosodic boundary aware streaming generation
@@ -119,3 +134,6 @@ that code rather than report a silence.
 - https://github.com/home-assistant/core/issues/121819 — markdown spoken as asterisks
 - https://community.home-assistant.io/t/tts-proxy-sits-between-your-llm-and-tts-service-and-allows-reg-ex-replacements-markdown-emoji-stripping-and-more/1018627
 - https://github.com/home-assistant/architecture/discussions/1120 — markdown removal for TTS
+- https://platform.minimaxi.com/docs/guides/pricing-speech — HD and Turbo character packs, RPM per pack
+- https://platform.minimaxi.com/docs/api-reference/speech-t2a-websocket-bidi — sentence aggregation and interruption
+- https://platform.minimaxi.com/docs/guides/speech-t2a-websocket — model tiers and text normalization modes
