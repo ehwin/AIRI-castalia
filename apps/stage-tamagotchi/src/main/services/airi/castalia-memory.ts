@@ -358,11 +358,16 @@ export function setupCastaliaMemoryService(params: {
       console.info(`[castalia] module switches: memory=${moduleEnabled.memory} castalia=${moduleEnabled.castalia}`)
       return { ok: true }
     })
-  // 模型判断出的情绪落到引擎 psyche 的唯一入口。没有它的后端如实回答 unsupported，
-  // 面板据此说明「只写提示词」，而不是让读者以为引擎也在动。
-  defineInvokeHandler(params.context, castaliaMemoryApplyEmotion, async input => engine.applyEmotion
-    ? await engine.applyEmotion({ ...input })
-    : { applied: false, reason: 'unsupported' as const, version: 0 })
+    // 模型判断出的情绪落到引擎 psyche 的唯一入口。没有它的后端如实回答 unsupported，
+    // 面板据此说明「只写提示词」，而不是让读者以为引擎也在动。
+    defineInvokeHandler(params.context, castaliaMemoryApplyEmotion, async (input) => {
+      // The panel switch scopes the loop it names, and this write is part of it (audit A06/A14).
+      if (!moduleEnabled.castalia)
+        return { applied: false, reason: 'disabled' as const, version: 0 }
+      return engine.applyEmotion
+        ? await engine.applyEmotion({ ...input })
+        : { applied: false, reason: 'unsupported' as const, version: 0 }
+    })
   defineInvokeHandler(params.context, castaliaMemoryStatus, () => ({
       transport,
       project: engineOptions.project,
@@ -476,6 +481,12 @@ export function setupCastaliaMemoryService(params: {
   defineInvokeHandler(params.context, castaliaMemoryMaintain, () => ({ ok: false, startedAt: new Date().toISOString(), ms: 0, reflectConfigured: false, error: 'no castalia bank configured' }))
   defineInvokeHandler(params.context, castaliaMemorySelfCycle, () => ({ ok: false, skipped: true, reason: 'no castalia bank configured', evidenceIds: [], project: '' }))
   defineInvokeHandler(params.context, castaliaMemoryPsyche, () => null)
+  // 没有完整引擎时也要回答，否则渲染层每次写情绪都会撞上「没有注册处理器」的拒绝。
+  defineInvokeHandler(params.context, castaliaMemoryApplyEmotion, () => ({
+    applied: false,
+    reason: 'unsupported' as const,
+    version: 0,
+  }))
   defineInvokeHandler(params.context, castaliaMemorySetEnabled, (input) => {
     moduleEnabled = { memory: Boolean(input?.memory), castalia: Boolean(input?.castalia) }
     return { ok: true }

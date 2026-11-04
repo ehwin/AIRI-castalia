@@ -198,7 +198,7 @@ export interface CastaliaEmotionInput {
 /** `applied` 表示 psyche 版本真的前进了。 */
 export interface CastaliaEmotionResult {
   applied: boolean
-  reason: 'applied' | 'neutral' | 'invalid' | 'unknown' | 'unsupported' | 'closing'
+  reason: 'applied' | 'neutral' | 'invalid' | 'unknown' | 'unsupported' | 'closing' | 'disabled' | 'persist_failed'
   version: number
 }
 

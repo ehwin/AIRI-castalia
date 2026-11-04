@@ -299,6 +299,24 @@ describe('memory store backend note', () => {
     expect(note).not.toContain('未接引擎')
   })
 
+  // A refused psyche write is not a memory outage: recall, search and ingest still work, and the
+  // "记忆后端异常" card used to appear for it.
+  it('does not count a refused emotion write as a backend failure', async () => {
+    const memory = useMemoryStore()
+    memory.attachRemote({
+      list: async () => [],
+      save: async () => {},
+      forget: async () => true,
+      emotion: async () => { throw new Error('psyche write refused') },
+    })
+
+    const result = await memory.recordEmotion({ valence: 0.5, arousal: 0.1, dominance: 0.2 }, 'a good line')
+
+    expect(result.applied).toBe(false)
+    expect(result.reason).toContain('refused')
+    expect(memory.remoteHealth.consecutiveFailures).toBe(0)
+  })
+
   it('claims every capability when the emotion chain reaches the engine', () => {
     const memory = useMemoryStore()
     memory.setBackend({

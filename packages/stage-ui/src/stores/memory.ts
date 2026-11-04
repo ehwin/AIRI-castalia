@@ -597,7 +597,8 @@ export const useMemoryStore = defineStore('memory', () => {
       return result
     }
     catch (error) {
-      markRemoteFailure(error)
+      // A rejected psyche write is not a memory outage: recall, search and ingest still work.
+      // Counting it here raised the "记忆后端异常" card for one refused emotion.
       return { applied: false, reason: errorText(error) }
     }
   }

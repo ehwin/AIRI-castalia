@@ -70,13 +70,19 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
     const existing = banks.get(character)
     if (existing)
       return existing
-    const opened = openBank({
+    // A rejected open used to stay in the map, so one transient failure (a WAL lock at start)
+    // failed every later call for that character until the app restarted.
+    const guarded: ReturnType<typeof openBank> = openBank({
       bankDir: options.bankDir,
       project: options.project,
       charId: character,
+    }).catch((error) => {
+      if (banks.get(character) === guarded)
+        banks.delete(character)
+      throw error
     })
-    banks.set(character, opened)
-    return opened
+    banks.set(character, guarded)
+    return guarded
   }
 
   let listState: { listed: number, truncated: boolean } | undefined

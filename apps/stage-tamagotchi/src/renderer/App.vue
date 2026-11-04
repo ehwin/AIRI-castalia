@@ -518,11 +518,17 @@ onMounted(async () => {
 
   // Mirror the engine's psyche into her self-state. Without this the state line and the panel only move when the
   // model calls a tool, and she never does; the bank has the values all along.
+  let psycheSyncInFlight = false
   const syncPsyche = async () => {
     // The module switch has to gate the loop it names: a "closed" Castalia that keeps polling and
     // writing is the switch lying about its scope (audit F14).
     if (!castaliaStore.enabled)
       return
+    // One query at a time: a slow answer used to let the next tick start another, and the replies
+    // came back in whatever order the engine finished them.
+    if (psycheSyncInFlight)
+      return
+    psycheSyncInFlight = true
     try {
       const psyche = await invokePsyche({ characterId: resolvedPersona() })
       // Every answer counts, including the one that says the evidence expired: the store needs that
@@ -531,6 +537,9 @@ onMounted(async () => {
         castaliaStore.syncPsyche({ vad: psyche.vad, mood: psyche.mood, band: psyche.band, at: psyche.updatedAt, hasEvidence: psyche.hasEvidence }, psyche.characterId)
     }
     catch { /* the mirror is best-effort; the engine keeps the truth */ }
+    finally {
+      psycheSyncInFlight = false
+    }
   }
   void syncPsyche()
   // The backend report describes a running process, so it is re-read on the same slow clock: a

@@ -696,8 +696,10 @@ export const useChatStore = defineStore('chat', () => {
               // The prompt copy and the engine copy are two stores: this one is only read by the
               // prompt and the panel, and the engine keeps its own psyche.
               castalia.recordEmotion(vad, reason, persona)
-              if (memory.enabled)
-                void memory.recordEmotion(vad, reason, persona)
+              // No gate on the memory module here: the psyche belongs to the Castalia module, and the
+              // main process refuses the write when that switch is off. Gating on `memory.enabled`
+              // meant a card could claim "情感经显式写入" while every write was skipped.
+              void memory.recordEmotion(vad, reason, persona)
             },
             setDesire: desire => castalia.setDesire(desire, persona),
           })

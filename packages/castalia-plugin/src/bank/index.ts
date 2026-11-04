@@ -126,10 +126,13 @@ export interface ApplyEmotionInput {
   project?: string
 }
 
-/** `applied` 表示 psyche 版本前进了；`neutral`/`invalid`/`unknown` 表示没有可用的证据。 */
+/**
+ * `applied` 表示 psyche 版本前进**并且**落到了库里；`persist_failed` 表示算出来了但没写进 SQLite，
+ * 重启后会忘记，所以不能算应用成功。
+ */
 export interface ApplyEmotionResult {
   applied: boolean
-  reason: 'applied' | 'neutral' | 'invalid' | 'unknown'
+  reason: 'applied' | 'neutral' | 'invalid' | 'unknown' | 'persist_failed'
   version: number
 }
 
@@ -564,7 +567,15 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
       const before = Number(getPsycheState(character, proj, at)?.version ?? 0)
       if (appraisal.kind !== 'target')
         return { applied: false, reason: appraisal.kind as ApplyEmotionResult['reason'], version: before }
-      const next = applyPsycheAppraisal(character, proj, appraisal, at, {})
+      let next
+      try {
+        // 显式情绪的目的就是让引擎的状态机动起来，所以要求必须落库：写失败却报 applied，
+        // 重启后这次情绪就凭空消失了。
+        next = applyPsycheAppraisal(character, proj, appraisal, at, { requirePersistence: true })
+      }
+      catch {
+        return { applied: false, reason: 'persist_failed', version: before }
+      }
       return { applied: Number(next.version) > before, reason: 'applied', version: Number(next.version) }
     },
     close: () => { current = null },
