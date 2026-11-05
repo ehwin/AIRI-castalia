@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import type { ProviderDeployment, ProviderPricing } from '../../libs/providers/attributes'
 
+import {
+  PopoverContent,
+  PopoverPortal,
+  PopoverRoot,
+  PopoverTrigger,
+} from 'reka-ui'
 import { computed } from 'vue'
 
 const props = defineProps<{
@@ -12,6 +18,10 @@ const props = defineProps<{
   to: string
   configured?: boolean
   syncState?: 'synced' | 'pending' | 'not-uploaded'
+  /** What the running backend can do. It belongs in the status menu, not on the card face. */
+  detail?: string
+  /** The switch is on, but the backend cannot do what the module is named after. */
+  degraded?: boolean
   pricing?: ProviderPricing
   deployment?: ProviderDeployment
   beginnerRecommended?: boolean
@@ -120,6 +130,40 @@ const syncIcon = computed(() => props.syncState ? syncIcons[props.syncState] : u
         >
       </template>
     </RouterLink>
+    <!-- The status text stays off the card face: two long sentences per row made the module list
+         hard to scan. The button opens it as a panel. -->
+    <PopoverRoot v-if="props.detail">
+      <PopoverTrigger as-child>
+        <button
+          type="button"
+          class="absolute right-3 top-3 z-3 rounded-md p-1 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+          :aria-label="$t('settings.pages.modules.runtime_status')"
+          :title="$t('settings.pages.modules.runtime_status')"
+          @click.stop
+        >
+          <div
+            size-4
+            :class="props.degraded ? 'i-solar:danger-triangle-bold-duotone text-amber-500' : 'i-solar:menu-dots-bold'"
+          />
+        </button>
+      </PopoverTrigger>
+      <PopoverPortal>
+        <PopoverContent
+          side="bottom"
+          align="end"
+          :side-offset="6"
+          class="z-[10000] w-72 border border-neutral-200 rounded-xl bg-white p-3 text-xs text-neutral-600 leading-relaxed shadow-lg outline-none dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-300"
+        >
+          <div class="mb-1 text-[11px] text-neutral-400 font-medium tracking-wide uppercase dark:text-neutral-500">
+            {{ $t('settings.pages.modules.runtime_status') }}
+          </div>
+          <div class="whitespace-pre-wrap break-words">
+            {{ props.detail }}
+          </div>
+        </PopoverContent>
+      </PopoverPortal>
+    </PopoverRoot>
+
     <span
       v-if="syncIcon"
       role="img"
@@ -132,7 +176,8 @@ const syncIcon = computed(() => props.syncState ? syncIcons[props.syncState] : u
       ]"
     />
     <div p-2>
-      <div v-if="props.configured" size-4 bg="green-500" rounded-full shadow="lg" />
+      <div v-if="props.configured && !props.degraded" size-4 bg="green-500" rounded-full shadow="lg" />
+      <div v-else-if="props.degraded" size-4 bg="amber-500" rounded-full shadow="lg" />
       <div v-else size-4 border="2 neutral-200 dark:neutral-700" rounded-full bg="white dark:neutral-900" />
     </div>
   </div>

@@ -469,6 +469,7 @@ pages:
   modules:
     availability:
       none: 无
+    runtime_status: 运行状态
     beat_sync:
       description: 随音源节拍律动
       title: 同步音律

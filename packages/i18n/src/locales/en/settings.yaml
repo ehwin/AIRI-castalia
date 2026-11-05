@@ -505,6 +505,7 @@ pages:
   modules:
     availability:
       none: None
+    runtime_status: Runtime status
     beat_sync:
       description: Vibe with beats from the audio source
       title: Beat Sync
