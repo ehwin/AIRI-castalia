@@ -5,6 +5,7 @@ import { useElectronEventaInvoke } from '@proj-airi/electron-vueuse'
 import { useLLM } from '@proj-airi/stage-ui/stores/ai/chat-llm/llm'
 import { useMemoryStore } from '@proj-airi/stage-ui/stores/memory'
 import { useAiriCardStore } from '@proj-airi/stage-ui/stores/modules/airi-card'
+import { useSelfInitiatedSpeechStore } from '@proj-airi/stage-ui/stores/modules/self-initiated-speech'
 import { FieldCheckbox, FieldRange, SettingsCard } from '@proj-airi/ui'
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, ref, watch } from 'vue'
@@ -24,8 +25,24 @@ const llm = useLLM()
 const capabilities = computed(() => Object.entries(memory.backend?.capabilities ?? {}))
 const { enabled, currentMood, currentDesire, currentEnergy, activeCharacterId, moodHistory } = storeToRefs(castalia)
 const { locale, t } = useI18n()
+// 「她为什么不主动开口」在别处没有答案：哨兵在内存里，重启就没。这里读落盘的那份。
+const selfInitiated = useSelfInitiatedSpeechStore()
+const selfInitiatedLine = computed(() => {
+  const state = selfInitiated.diagnostics
+  if (!state.lastReasonAt)
+    return t('settings.pages.modules.castalia.self-initiated-empty')
+  const at = new Date(state.lastReasonAt).toLocaleString(locale.value)
+  return t('settings.pages.modules.castalia.self-initiated-last', {
+    reason: state.lastReason ?? '—',
+    at,
+    count: state.gatedCount ?? 0,
+  })
+})
 // The newest five events are the short-term memory the next prompt carries.
 const recentMoodEvents = computed(() => moodHistory.value.slice(-5).reverse())
+// Zero is "steady". Having no reading is a different answer, and the panel used to print both as 0.
+const moodKnown = computed(() =>
+  Boolean(castalia.snapshotFor(activeCharacterId.value).vad) || moodHistory.value.length > 0)
 // The chat maps `default` to `airi` before it touches Castalia, so the panel has to ask the same
 // question: reading the raw card id showed an empty `default` partition next to a real `airi` one (F11).
 watch(() => cards.activeCardId, characterId => castalia.setCharacter(
@@ -177,7 +194,12 @@ onMounted(() => {
             {{ t('settings.pages.modules.castalia.mood') }}
           </div>
           <div class="text-xl font-medium">
-            {{ currentMood }}
+            <template v-if="moodKnown">
+              {{ currentMood }}
+            </template>
+            <span v-else class="text-base text-neutral-400 font-normal">
+              {{ t('settings.pages.modules.castalia.no-mood-evidence') }}
+            </span>
           </div>
         </div>
         <div class="rounded-lg bg-neutral-50 p-3 dark:bg-neutral-800">
@@ -226,6 +248,9 @@ onMounted(() => {
         </p>
         <p v-if="memory.backend?.error" class="mt-1 text-xs text-red-600">
           {{ memory.backend.error }}
+        </p>
+        <p class="mt-1 text-xs text-neutral-500">
+          {{ t('settings.pages.modules.castalia.self-initiated') }} · {{ selfInitiatedLine }}
         </p>
         <div v-if="llm.toolsDisabledFor.length" class="mt-2 flex flex-wrap items-center gap-2 text-xs text-amber-600">
           <span>{{ t('settings.pages.modules.castalia.backend-tools-disabled', { models: llm.toolsDisabledFor.join(', ') }) }}</span>

@@ -295,6 +295,14 @@ export const useMindStore = defineStore('mind', () => {
   /** 她此刻可不可以开口：屏幕在开会/游戏/全屏时置 false。speech ticker 读这个。 */
   const interruptAllowed = ref(true)
   const interruptReason = ref<string>()
+  /**
+   * When the last verdict arrived.
+   *
+   * A verdict answers "was the screen interruptible a moment ago". Vision can fail for hours, and the
+   * last `false` then held her quiet with nothing left to refresh it. A caller that finds this stamp
+   * older than its own limit must treat the verdict as unknown instead of as a refusal.
+   */
+  const interruptVerdictAt = ref<number>()
   /** 想说话但被挡住时的冷却，避免每秒重算一次屏幕。 */
   let lastProvokeAt = 0
 
@@ -601,6 +609,7 @@ export const useMindStore = defineStore('mind', () => {
    */
   function applyScreenLine(line: string, verdict?: { interruptible?: boolean, reason?: string }) {
     lastScreenLine.value = line
+    interruptVerdictAt.value = Date.now()
     if (typeof verdict?.interruptible === 'boolean') {
       interruptAllowed.value = verdict.interruptible
       interruptReason.value = verdict.reason
@@ -974,6 +983,7 @@ export const useMindStore = defineStore('mind', () => {
     considerSpeaking,
     interruptAllowed,
     interruptReason,
+    interruptVerdictAt,
     lastScreenLine,
     lastDiaryText,
     lastSenseDiagnostics,

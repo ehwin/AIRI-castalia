@@ -979,15 +979,19 @@ pages:
       enable: Enable Castalia
       enable-description: Keep a separate mood, desire, and energy state for each character.
       mood: Current mood
+      no-mood-evidence: No engine evidence
       desire: Current desire
       no-desire: No record yet
       energy: Energy
       tsundere-level: Tsundere level
-      tsundere-level-description: A higher value makes a recorded emotion decay slower. The setting is saved for each character.
+      tsundere-level-description: A higher value makes her tone pricklier. It does not change how fast an emotion fades. The setting is saved for each character.
       status-description: The state updates after an AIRI conversation feeds an emotion or desire event. The plugin copy updates independently from the AIRI core.
       backend-title: What the backend can actually do
       backend-tools-disabled: "Tools were switched off after a provider error: {models}"
       backend-retry-tools: Re-check tools
+      self-initiated: Self-initiated speech
+      self-initiated-empty: no attempt recorded yet
+      self-initiated-last: last {reason} at {at}, held back {count} times
       backend-truncated: "Only {listed} entries were read: the list hit its limit, so this is not the whole bank." 
       short-term-memory: Short-term memory
       short-term-memory-description: The recent mood events that the next turn carries.

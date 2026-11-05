@@ -35,6 +35,16 @@ export interface SpeechTickerOptions {
   readInput: (args: TickerReadArgs) => AutonomyInput | undefined
   speak: (decision: SpeakDecision) => void | Promise<void>
   tickMs?: number
+  /**
+   * How long one utterance may hold the loop.
+   *
+   * `speak` awaits a screen look and a model call. A promise that never settles used to stop every later
+   * tick, so one stuck request silenced her until the app restarted. The guard gives the lock back and
+   * records why, instead of trusting every dependency to return.
+   */
+  speakBudgetMs?: number
+  /** Called when the budget ran out, so the caller can record it. */
+  onStuck?: (info: { at: number }) => void
 }
 
 export interface SpeechTicker {
@@ -49,6 +59,9 @@ export interface SpeechTicker {
 /** One second is the shortest wait that still looks like a pause to a person. */
 export const TICK_MS = 1000
 
+/** One utterance may hold the loop this long before the loop takes itself back. */
+export const SPEAK_BUDGET_MS = 120_000
+
 /**
  * Runs the speak decision on a fixed tick.
  *
@@ -58,6 +71,7 @@ export const TICK_MS = 1000
  */
 export function createSpeechTicker(options: SpeechTickerOptions): SpeechTicker {
   const tickMs = options.tickMs ?? TICK_MS
+  const speakBudgetMs = options.speakBudgetMs ?? SPEAK_BUDGET_MS
   let handle: ReturnType<typeof setInterval> | undefined
   let lastSpokeAt: number | null = null
   let sending = false
@@ -92,9 +106,19 @@ export function createSpeechTicker(options: SpeechTickerOptions): SpeechTicker {
     sending = true
     // A failed send must not stop the loop. The chat store records the send error itself.
     // A speak that throws before it returns never reaches .finally, so settle it here too.
+    let guard: ReturnType<typeof setTimeout> | undefined
     const settle = () => {
+      if (guard)
+        clearTimeout(guard)
+      guard = undefined
       sending = false
     }
+    guard = setTimeout(() => {
+      if (!sending)
+        return
+      settle()
+      options.onStuck?.({ at: now })
+    }, speakBudgetMs)
     try {
       void Promise.resolve(options.speak(decision))
         .catch(() => {})

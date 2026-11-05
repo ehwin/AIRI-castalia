@@ -928,15 +928,19 @@ pages:
       enable: 启用 Castalia
       enable-description: 为角色维护独立的情绪、愿望和精力状态。
       mood: 当前情绪
+      no-mood-evidence: 引擎暂无证据
       desire: 当前愿望
       no-desire: 暂无记录
       energy: 精力
       tsundere-level: 傲娇浓度
-      tsundere-level-description: 数值越高，已记录情绪衰减得越慢。此设置按角色分别保存。
+      tsundere-level-description: 数值越高，她的语气越冲。它不改变情绪衰减速度。此设置按角色分别保存。
       status-description: AIRI 对话接入情绪或愿望事件后才会更新状态。插件副本独立于 AIRI 核心更新。
       backend-title: 后端实际能做什么
       backend-tools-disabled: 工具已被服务商错误降级：{models}
       backend-retry-tools: 重新探测工具
+      self-initiated: 主动发言
+      self-initiated-empty: 还没有记录
+      self-initiated-last: 上次 {reason}（{at}），累计被挡 {count} 次
       backend-truncated: 只读到 {listed} 条：列表撞到上限，这不是整个库。
       short-term-memory: 短期记忆
       short-term-memory-description: 下一轮对话会带入的最近心情事件。
