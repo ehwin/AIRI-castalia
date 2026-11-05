@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { errorMessageFrom } from '@moeru/std'
 import { useElectronEventaInvoke } from '@proj-airi/electron-vueuse'
-import { extractMessageText } from '@proj-airi/stage-ui/libs/chat-sync/wire-message'
+import { extractMessageText } from '@proj-airi/stage-ui/libs/chat-sync'
 import { useChatStore } from '@proj-airi/stage-ui/stores/chat'
 import { useChatSessionStore } from '@proj-airi/stage-ui/stores/chat/session-store'
 import { useWindowFocus } from '@vueuse/core'

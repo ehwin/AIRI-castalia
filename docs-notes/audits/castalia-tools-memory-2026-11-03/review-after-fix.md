@@ -268,3 +268,48 @@ ISO、空值），两个适配器（进程内 / stdio）都改用它，并加 `c
   `resolvePersona('default')` 返回它、检索/读取走的正是这个 persona。
 - 语音、Live2D、视频工具等与本轮无关的链路未回归。
 - 面板的"逐能力"目前是一排 chip，没有逐项开关（能力由后端决定，UI 不提供开关）。
+
+## 8. 2026-11-05 补丁：情绪链与日记链
+
+这一轮按“数据来源、时间语义、失败反馈”三条线补，改动都落在 AIRI 进程内跑的那份代码上。
+
+### 8.1 情绪链
+
+| 洞 | 位置 | 处理 |
+| --- | --- | --- |
+| `psyche` 镜像标记被当成事件 | `castalia-plugin/src/agent-state.ts` | 提示词与设置面板都过滤 `reason === 'psyche'`；轮询不是她经历过的事 |
+| `updatedAt` 是读时间，不是观测时间 | `shared/eventa/castalia-memory.ts`、`bank/index.ts`、`App.vue`、`store.ts` | 快照新增 `lastEvidenceAt`（`-1` = 从未）；镜像按证据时间老化；过期分支不再拨动 `lastUpdated`（精力衰减钟） |
+| 重启后 `pending` 行永远悬着 | `bank/index.ts` `flushStaleVadQueue` | 先按 `character_id` 聚合 durable 的 `pending` / `pending_psyche` 行，逐角色 `recoverPendingVadQueue`；到期判断改成项目级 |
+
+实测：真库 8 条 2026-11-03 02:33–03:18 的 `vad_queue` 行悬了 33 小时，恢复路径原本只在夜间维护里跑一次。
+
+### 8.2 日记链
+
+| 洞 | 位置 | 处理 |
+| --- | --- | --- |
+| 蒸馏假成功 | `stage-ui/src/stores/modules/diary.ts` | 改判 `memory.write()` 的 `persisted`；后端拒绝时返回 `undefined`，不写“已记住” |
+| 安静的一天重复同一行 | `core-agent/src/persona/diary-distill.ts` | `slots = min(max - shared, rest.length)` |
+| 比率当条数 | `stage-pages/.../diary.vue` | `said: shared.length` |
+| 无 persona 的旧想法每张卡都看得到 | `stage-ui/src/stores/modules/diary.ts` | 读日记的第一张卡收养（写回 persona），与 `switchCharacter` 同一策略 |
+| 失败没有反馈 | `stage-pages/.../diary.vue` | 后端拒绝时按钮旁显示“没记住：记忆库没有接收这次写入” |
+
+`core-agent` 的 `dist` 已重建；消费方读的是 dist。
+
+### 8.3 验证
+
+- `castalia-plugin`：120 passed / 16 files（新增 `psyche` 标记、队列恢复两条）。
+- `stage-ui`：`diary-distill.integration` 6 passed；`chat.contract` / `video-share` / `memory` / `memory.remote` / `tools/castalia` / `castalia-path` 111 passed。
+- `core-agent`：`diary-distill` 8 passed。
+- 审计套件：15 passed。
+- `eslint` 改动文件 0 新增（`bank/index.ts` 16 条、`bank/index.test.ts` 11 条与 HEAD 一致）。
+- `@proj-airi/stage-tamagotchi build`：通过（28 s）。
+- 队列恢复做了 red→green：去掉恢复块时 `expected 0 to be greater than 0`，恢复后通过。
+
+### 8.4 仍要产品定夺
+
+- `shared` 没有生产者：她主动开口不会写 `visibility: 'shared'`，所以“她说出口的”一栏恒空。补生产者还是删栏目？
+- 日记标题取的是主人那句，注释却说取她自己那句。改注释还是改语气模板？
+- `PSYCHE_FROM_VAD=on` 时显式写入被拒（`estimator_active`），自动词表只覆盖 8.6% 的对话。
+- psyche band 工作点 `-0.35/0.12/0.05` 是在 CPED 语料上调的；套到 41 条 AIRI 真实会话上会把 38 条判成 positive（`psycheState.ts:109`）。
+- 引擎日记的“情绪指数（旧量表）”恒 0：进程内 `addMood()` 没有调用方。它属于 vendor 镜像，改动要同步上游。
+- 日记只读最新 200 条思绪，更早的日期没有“记住这一天”。

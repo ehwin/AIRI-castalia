@@ -37,6 +37,29 @@ describe('in-process bank', () => {
     expect(recent.some(r => String(r.text).includes('插件化'))).toBe(true)
   })
 
+  it('keeps a diary day out of the memory list until the diary is searched', async () => {
+    const saved = await bank.saveDiaryDay({
+      date: '2026-11-06',
+      description: 'He stayed up again.',
+      body: 'watched two episodes at midnight.',
+      characterId: 'airi',
+    })
+    expect(saved.name).toBe('diary-2026-11-06')
+
+    // 页面、索引、默认检索都不该看到这一天
+    expect(bank.listMemories(500).some(row => String(row.text ?? '').includes('diary-2026-11-06'))).toBe(false)
+    const casual = await bank.search({ query: 'midnight', characterId: 'airi', topK: 5 })
+    expect(Array.isArray(casual)).toBe(true)
+    expect(casual.some(row => String(row.text ?? '').includes('midnight'))).toBe(false)
+
+    // 明确翻日记才拿得到
+    expect(bank.listDiaryDays({ characterId: 'airi' })[0]?.name).toBe('diary-2026-11-06')
+    const found = await bank.searchDiary('midnight', { characterId: 'airi' })
+    expect(found.some(row => String(row.text ?? '').includes('midnight'))).toBe(true)
+    // 日记工具按这个头行解析一天：`# diary-YYYY-MM-DD`
+    expect(String(found[0]?.text ?? '').startsWith('# diary-2026-11-06')).toBe(true)
+  })
+
   it('finds it back by lexical search', async () => {
     const hits = await bank.search({ query: '进程内跑引擎', project: 'testproj', characterId: 'airi', topK: 5, minScore: 0 })
     expect(hits.length).toBeGreaterThan(0)
@@ -329,5 +352,63 @@ describe('explicit emotion reaches the engine psyche', () => {
     const result = await bank.applyEmotion({ vad: { valence: 0.01, arousal: 0.02, dominance: 0.03 } })
     expect(result.reason).toBe('neutral')
     expect(result.applied).toBe(false)
+  })
+})
+
+describe('pending VAD rows survive a restart', () => {
+  // ROOT CAUSE: the in-memory queue is rebuilt only by the nightly digest, and only for its own
+  // character. A row left pending by a previous process, or by a character nobody opens any more,
+  // waited forever (live bank: 8 rows from 03:18 the same night, still pending 33 h later).
+  it('flushes a row the live queue never saw, under another character', async () => {
+    const { DatabaseSync } = await import('node:sqlite')
+    const file = join(dir, 'testproj', 'general', 'memory.sqlite')
+    const text = '用户: 旧进程留下的一句\n助手: 我还在。'
+    const at = new Date().toISOString()
+    const db = new DatabaseSync(file)
+    db.prepare(`INSERT INTO memory (id, text, project, character_id, source, is_active, affect_status, affect_source, created_at, updated_at)
+      VALUES (?, ?, 'testproj', 'left-behind', 'conversation_log', 1, 'pending', 'vad_queue', ?, ?)`)
+      .run('left-behind-row', text, at, at)
+    db.close()
+
+    const result = await bank.flushStaleVadQueue(0)
+    expect(result.updated).toBeGreaterThan(0)
+
+    const check = new DatabaseSync(file)
+    const row = check.prepare('SELECT affect_status FROM memory WHERE id = ?').get('left-behind-row') as { affect_status?: string } | undefined
+    check.close()
+
+    expect(row?.affect_status).not.toBe('pending')
+  })
+})
+
+describe('a turn the model already judged', () => {
+  // ROOT CAUSE: the explicit write and the VAD sweep both appraised the same turn, so one switch
+  // refused the explicit write and the other made it optional. The verdict now travels with the
+  // turn: the row lands analyzed and never enters the queue.
+  it('stores the verdict on the row and keeps it out of the VAD queue', async () => {
+    const result = await bank.ingestTurn({
+      user: '今天有点累',
+      assistant: '那就早点睡。',
+      affect: { vad: { valence: 0.4, arousal: 0.2, dominance: 0.1 }, reason: '心疼' },
+    })
+    expect(result.ok).toBe(true)
+    const id = String(result.id)
+
+    const { DatabaseSync } = await import('node:sqlite')
+    const file = join(dir, 'testproj', 'general', 'memory.sqlite')
+    const db = new DatabaseSync(file)
+    const row = db.prepare('SELECT affect_status, affect_source, vad_valence, affect_analyzed_at FROM memory WHERE id = ?').get(id) as { affect_status?: string, affect_source?: string, vad_valence?: number, affect_analyzed_at?: string } | undefined
+    db.close()
+
+    expect(row?.affect_status).toBe('analyzed')
+    expect(row?.affect_source).toBe('model')
+    expect(Number(row?.vad_valence)).toBeCloseTo(0.4)
+
+    await bank.flushStaleVadQueue(0)
+    const after = new DatabaseSync(file)
+    const kept = after.prepare('SELECT affect_status, affect_analyzed_at FROM memory WHERE id = ?').get(id) as { affect_status?: string, affect_analyzed_at?: string } | undefined
+    after.close()
+    expect(kept?.affect_status).toBe('analyzed')
+    expect(kept?.affect_analyzed_at).toBe(row?.affect_analyzed_at)
   })
 })

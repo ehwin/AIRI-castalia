@@ -11,7 +11,7 @@ export { distillDay } from './diary-distill'
 export type { FrictionConfig, FrictionResult, PersonaTraits, RequestTraits, Stance } from './friction'
 export { applyFriction, assessFriction, defaultFrictionConfig } from './friction'
 export type { InnerStream, Thought, ThoughtVisibility } from './inner-stream'
-export { createStream, recent, record, sharedRatio, surface } from './inner-stream'
+export { createStream, markShared, recent, record, sharedRatio, surface } from './inner-stream'
 export type { RefusalDecision, RefusalInput, RefusalPolicy, RefusalState } from './refusal-policy'
 export { createRefusalState, defaultRefusalPolicy, evaluateRefusal } from './refusal-policy'
 export type {

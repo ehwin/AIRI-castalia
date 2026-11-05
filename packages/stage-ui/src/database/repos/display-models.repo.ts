@@ -1,7 +1,20 @@
-import type { TransferTask } from '../../libs/file-transfer/transfer-queue'
 import type { DisplayModelFile } from '../../stores/display-models'
 
 import localforage from 'localforage'
+
+/**
+ * One pending upload as this device stored it.
+ *
+ * The transfer queue that declared this shape went with the hosted model store, so the type lives
+ * here now. The rows an earlier release wrote stay readable; nothing queues a new upload.
+ */
+export interface StoredTransferTask {
+  id: string
+  kind?: string
+  ownerId?: string
+  payload?: unknown
+  status?: string
+}
 
 /** The part of localforage that the repository uses. */
 export interface DisplayModelStore {
@@ -44,15 +57,15 @@ export function createDisplayModelsRepo(store: DisplayModelStore) {
     },
 
     async listUploads() {
-      const tasks: TransferTask[] = []
-      await store.iterate<TransferTask, void>((task, key) => {
+      const tasks: StoredTransferTask[] = []
+      await store.iterate<StoredTransferTask, void>((task, key) => {
         if (key.startsWith(uploadPrefix))
           tasks.push(task)
       })
       return tasks
     },
 
-    async saveUpload(task: TransferTask) {
+    async saveUpload(task: StoredTransferTask) {
       await store.setItem(`${uploadPrefix}${task.id}`, task)
     },
 

@@ -127,6 +127,44 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
       })
     },
 
+    async rememberDay(day) {
+      if (closing)
+        return { ok: false, reason: 'closed' }
+      const bank = await ensure(day.persona)
+      try {
+        await bank.saveDiaryDay({
+          date: day.date,
+          description: day.description,
+          body: day.body,
+          characterId: day.persona?.trim() || options.character,
+        })
+        return { ok: true }
+      }
+      catch (error) {
+        return { ok: false, reason: String((error as Error)?.message ?? error) }
+      }
+    },
+
+    async searchDiary(query, topK = 5, persona) {
+      if (closing)
+        return []
+      const bank = await ensure(persona)
+      const rows = await bank.searchDiary(String(query), {
+        topK,
+        characterId: persona?.trim() || options.character,
+      }) as Array<{ id?: string, text?: string, score?: number, memType?: string, category?: string, createdAt?: string }>
+      return (Array.isArray(rows) ? rows : [])
+        .filter(row => typeof row.text === 'string' && row.text.trim().length > 0)
+        .map(row => ({
+          ...(row.id ? { id: String(row.id) } : {}),
+          text: String(row.text),
+          score: typeof row.score === 'number' ? row.score : 0,
+          ...(row.memType ? { memType: String(row.memType) } : {}),
+          ...(row.category ? { category: String(row.category) } : {}),
+          ...(row.createdAt ? { createdAt: String(row.createdAt) } : {}),
+        }))
+    },
+
     async forget(entry) {
       if (closing)
         return false

@@ -286,6 +286,57 @@ export function createVideoEngine(options: VideoEngineOptions) {
     return body.data
   }
 
+  /**
+   * The order bilibili mixes the two halves of its wbi keys in.
+   *
+   * Measured 2026-11-03: the unsigned `x/player/v2` endpoint answers a caption request with
+   * another video's captions (8 requests for one clip returned 0, 6, and 1 track whose cues ran
+   * to 836 s of a 349 s clip). The signed `x/player/wbi/v2` answered the same clip 8 times out of
+   * 8 with the same 143 cues ending at exactly 349 s. So the signature is not an optional header:
+   * without it the text track is not this video's text.
+   */
+  const WBI_MIXIN_ORDER = (
+    '46 47 18 2 53 8 23 32 15 50 10 31 58 3 45 35 '
+    + '27 43 5 49 33 9 42 19 29 28 14 39 12 38 41 13 '
+    + '37 48 7 16 24 55 40 61 26 17 0 1 60 51 30 4 '
+    + '22 25 54 21 56 59 6 63 57 62 11 36 20 34 44 52'
+  ).split(' ').map(Number)
+  /** The keys rotate, and every signed request in one run can share them. */
+  const WBI_KEY_TTL_MS = 6 * 3_600_000
+  let wbiMixin: { key: string, at: number } | undefined
+
+  /** The mixing key of the two nav images, fetched at most once per six hours. */
+  async function wbiMixinKey(cookie?: string): Promise<string> {
+    const now = Date.now()
+    if (wbiMixin && now - wbiMixin.at < WBI_KEY_TTL_MS)
+      return wbiMixin.key
+
+    const nav = await bilibiliJson<{ wbi_img?: { img_url?: string, sub_url?: string } }>(
+      'https://api.bilibili.com/x/web-interface/nav',
+      cookie,
+    )
+    const nameOf = (url?: string) => url?.split('/').pop()?.split('.')[0] ?? ''
+    const raw = `${nameOf(nav.wbi_img?.img_url)}${nameOf(nav.wbi_img?.sub_url)}`
+    if (raw.length < 64)
+      throw new Error('bilibili published no wbi keys, so a signed player request cannot be made.')
+
+    const key = WBI_MIXIN_ORDER.map(index => raw[index] ?? '').join('').slice(0, 32)
+    wbiMixin = { key, at: now }
+    return key
+  }
+
+  /** `params` plus `wts` and `w_rid`, as the signed player endpoint expects them. */
+  async function signedQuery(params: Record<string, string | number>, cookie?: string): Promise<string> {
+    const mixin = await wbiMixinKey(cookie)
+    const withTime: Record<string, string | number> = { ...params, wts: Math.floor(Date.now() / 1000) }
+    const query = Object.keys(withTime)
+      .sort()
+      .map(name => `${encodeURIComponent(name)}=${encodeURIComponent(String(withTime[name]))}`)
+      .join('&')
+    const wRid = createHash('md5').update(`${query}${mixin}`).digest('hex')
+    return `${query}&w_rid=${wRid}`
+  }
+
   interface BilibiliMeta {
     bvid: string
     cid: number
@@ -456,10 +507,11 @@ export function createVideoEngine(options: VideoEngineOptions) {
         : await embeddedSubtitleLines(source)
 
       if (lines.length === 0) {
+        const noCaptions = request.cookie?.trim()
+          ? 'the platform returned no captions for this video even with the cookie. Read the picture with builtIn_videoStoryboard instead.'
+          : 'this video publishes no captions to an anonymous request. Fill the bilibili cookie in the video module, or read the picture with builtIn_videoStoryboard.'
         return {
-          error: reference
-            ? 'this video publishes no captions to a request without a login. Fill the bilibili cookie in the video module, or read the picture with builtIn_videoStoryboard.'
-            : 'this source has no subtitle stream. Read the picture with builtIn_videoStoryboard.',
+          error: reference ? noCaptions : 'this source has no subtitle stream. Read the picture with builtIn_videoStoryboard.',
         }
       }
 
@@ -486,8 +538,10 @@ export function createVideoEngine(options: VideoEngineOptions) {
   }
 
   async function bilibiliCaptionList(meta: BilibiliMeta, cookie?: string) {
+    // Signed on purpose: the unsigned endpoint above answers with another clip's captions.
+    const query = await signedQuery({ bvid: meta.bvid, cid: meta.cid }, cookie)
     const player = await bilibiliJson<{ subtitle?: { subtitles?: Array<{ subtitle_url?: string }> } }>(
-      `https://api.bilibili.com/x/player/v2?bvid=${meta.bvid}&cid=${meta.cid}`,
+      `https://api.bilibili.com/x/player/wbi/v2?${query}`,
       cookie,
     )
     return player.subtitle?.subtitles ?? []
@@ -498,8 +552,18 @@ export function createVideoEngine(options: VideoEngineOptions) {
     if (!track)
       return []
     const url = track.startsWith('//') ? `https:${track}` : track
-    const body = await (await fetchImpl(url, { headers: bilibiliHeaders(cookie) })).json() as { body?: Array<{ from: number, content: string }> }
-    return bilibiliCuesToLines(body.body ?? [])
+    const body = await (await fetchImpl(url, { headers: bilibiliHeaders(cookie) })).json() as { body?: Array<{ from: number, content: string, to?: number }> }
+    const cues = body.body ?? []
+
+    // Measured 2026-11-03: a caption list that runs past the end of the clip is another video's.
+    // Quoting it would put someone else's words in her mouth, so refuse instead of shortening it.
+    const lastEnd = cues.reduce((max, cue) => Math.max(max, cue.to ?? cue.from), 0)
+    if (lastEnd > meta.durationSeconds * 1.1 + 30) {
+      throw new Error(
+        `the platform answered with captions that run to ${Math.round(lastEnd)} s of a ${Math.round(meta.durationSeconds)} s video, so they belong to another clip. Read the picture with builtIn_videoStoryboard instead.`,
+      )
+    }
+    return bilibiliCuesToLines(cues)
   }
 
   async function embeddedSubtitleLines(source: string) {

@@ -22,6 +22,29 @@ describe('memory store', () => {
     setActivePinia(createPinia())
   })
 
+  it('keeps a pile of watched clips to one index line', () => {
+    // One memory per clip, one index line for all: the index grows with what she did, not how often.
+    const memory = useMemoryStore()
+    for (const clip of ['甲', '乙', '丙']) {
+      memory.write({ name: `看过的片子 ${clip}`, description: '她自己决定看的一条视频（2026-11-05）。', body: 'x' }, 'airi')
+    }
+
+    expect(memory.entries).toHaveLength(3)
+    expect(linesOf(memory.indexFor('airi')).filter(line => line.includes('看过的片子'))).toHaveLength(1)
+  })
+
+  it('refuses a programmatic write while the module is off', async () => {
+    // ROOT CAUSE: write() had no switch check while read/recall/ingest did, so a watched clip or a
+    // remembered day landed rows with the module off.
+    const memory = useMemoryStore()
+    memory.enabled = false
+
+    const { persisted } = memory.write({ name: '看过的片子', description: 'd', body: 'b' }, 'airi')
+    expect(await persisted).toEqual({ ok: false, reason: 'disabled' })
+    expect(memory.entries).toHaveLength(0)
+    expect(memory.read('看过的片子', 'airi')).toBeUndefined()
+  })
+
   it('keeps one entry per name on a card and lists it in the index', () => {
     const memory = useMemoryStore()
     memory.write({ name: 'Favorite Game', description: 'Porridge games, mostly.', body: 'Porridge games.' }, 'airi')

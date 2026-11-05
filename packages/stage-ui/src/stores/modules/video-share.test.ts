@@ -6,11 +6,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // engine, and what this file is about is the card bookkeeping, not the engine.
 const recordMood = vi.fn()
 const memoryWrite = vi.fn()
+const castalia = { enabled: true, recordMood }
 
 vi.mock('@proj-airi/castalia-plugin', () => ({
-  useCastaliaPluginStore: () => ({ recordMood }),
+  useCastaliaPluginStore: () => castalia,
 }))
-vi.mock('../memory', () => ({ useMemoryStore: () => ({ write: memoryWrite }) }))
+vi.mock('../memory', () => ({
+  useMemoryStore: () => ({
+    enabled: true,
+    // The bank keys rows by persona: the built-in card's id and its bank name differ.
+    resolvePersona: (id: string) => id === 'default' ? 'airi' : id,
+    write: memoryWrite,
+  }),
+}))
 vi.mock('./airi-card', () => ({ useAiriCardStore: () => ({ activeCardId: 'default' }) }))
 
 const { feedbackEffect, useVideoShareStore } = await import('./video-share')
@@ -21,6 +29,7 @@ describe('video share panel', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     localStorage.clear()
+    castalia.enabled = true
     recordMood.mockClear()
     memoryWrite.mockClear()
   })
@@ -83,9 +92,25 @@ describe('video share panel', () => {
     store.applyPending()
 
     expect(recordMood).toHaveBeenCalledTimes(1)
-    expect(recordMood).toHaveBeenCalledWith(2, '主人点开了我分享的视频')
+    expect(recordMood).toHaveBeenCalledWith(2, '主人点开了我分享的视频', 'airi')
     expect(memoryWrite).toHaveBeenCalledTimes(1)
+    // The entry lands on the same persona as the mood, not on the raw card id.
+    expect(memoryWrite.mock.calls[0]![1]).toBe('airi')
     expect(store.unapplied).toHaveLength(0)
+    expect(store.list[0]!.applied).toBe(true)
+  })
+
+  it('does not move her mood while the module is off', () => {
+    // The same gate the speech path uses. The memory write keeps its own switch.
+    castalia.enabled = false
+    const store = useVideoShareStore()
+    const card = store.publish({ source: 'BV1', headline: 'h', why: 'w', note })!
+    store.react(card.id, 'wants')
+
+    store.applyPending()
+
+    expect(recordMood).not.toHaveBeenCalled()
+    expect(memoryWrite).toHaveBeenCalledTimes(1)
     expect(store.list[0]!.applied).toBe(true)
   })
 

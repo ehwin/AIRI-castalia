@@ -199,9 +199,9 @@ describe('useVisionInference', () => {
       workloadId: 'screen:interpret',
       promptOverride: 'Interpret this frame',
     })
-    const expectation = expect(result).rejects.toThrow('Vision inference timed out after 60000ms')
+    const expectation = expect(result).rejects.toThrow('Vision inference timed out after 90000ms')
 
-    await vi.advanceTimersByTimeAsync(60_000)
+    await vi.advanceTimersByTimeAsync(90_000)
 
     await expectation
   })

@@ -56,10 +56,11 @@ export function diaryTitle(text: string): string | undefined {
   if (titled)
     return titled.split('·').pop()?.trim().slice(0, 40)
 
-  // 退而求其次：日记里最具体的一句是用户原话，去掉「用户:」前缀。
+  // 退而求其次：日记里最具体的一句是主人原话，去掉「用户:」前缀。
   const quote = lines.find(line => /^用户\s*[:：]/u.test(line))
   if (quote) {
-    // 一行里常把她的回应也串在一起（`用户: … 助手: …`）；她心里复述的是自己说的那句。
+    // 一行里常把她的回应也串在一起（`用户: … 助手: …`）；她心里反复的是主人那句。
+    // 主语在下面拼句时用「主人」，不写「她」——写「她」会把主人的状态安到她身上。
     const said = quote
       .replace(/^用户\s*[:：]\s*/u, '')
       .split(/\s+助手\s*[:：]/u)[0]
@@ -175,9 +176,9 @@ export function composeInnerVoice(material: InnerVoiceMaterial): string | undefi
   const again = Boolean(lastPrev && said && sameSubject(lastPrev, said))
   const lead = again ? '还在想刚才那件事——' : ''
   if (said && brief)
-    return `${lead}她${said}……刚看到${brief}，${mood || '先记着'}。`
+    return `${lead}主人${said}……刚看到${brief}，${mood || '先记着'}。`
   if (said)
-    return `${lead}她${said}……${mood || '先记着，不急'}。`
+    return `${lead}主人${said}……${mood || '先记着，不急'}。`
   if (brief)
     return `${mood ? `${mood}——` : ''}屏幕上${brief}，没什么要说的。`
   return undefined

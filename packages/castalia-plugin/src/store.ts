@@ -99,7 +99,8 @@ export const useCastaliaPluginStore = defineStore('castalia-plugin', () => {
       // panel and the prompt assert a feeling the engine no longer holds. Desire, energy and the
       // explicit emotion records stay: those are hers, not the engine's evidence.
       if (input.hasEvidence === false) {
-        const cleared: PersistedAgentState = { ...state, vadUpdatedAt: now, moodHistory: kept, lastUpdated: now }
+        // `lastUpdated` is the energy decay clock; a poll that found no evidence must not wind it.
+        const cleared: PersistedAgentState = { ...state, vadUpdatedAt: now, moodHistory: kept }
         delete cleared.vad
         delete cleared.moodVad
         delete cleared.band

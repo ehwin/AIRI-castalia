@@ -120,12 +120,21 @@ export const useVideoShareStore = defineStore('video-share', () => {
     for (const card of unapplied.value) {
       const { mood, reason } = feedbackEffect(card.reaction!)
       try {
-        useCastaliaPluginStore().recordMood(mood, reason)
-        useMemoryStore().write({
+        const memory = useMemoryStore()
+        const cardId = useAiriCardStore().activeCardId
+        // The bank keys rows by persona, not by card id, and the mood and the entry must land on
+        // the same key the chat writes to (audit F01).
+        const persona = memory.enabled ? memory.resolvePersona(cardId) : cardId
+        // The module switch gates her state, the same way it gates self-initiated speech. The
+        // memory write keeps its own switch: a reaction can be remembered while the state is frozen.
+        const castalia = useCastaliaPluginStore()
+        if (castalia.enabled)
+          castalia.recordMood(mood, reason, persona)
+        memory.write({
           name: `分享过的片子 ${(card.title ?? card.source).slice(0, 36)}`,
           description: `我主动分享给主人的一条视频，主人的反应：${card.reaction}`,
           body: `${card.headline} — ${card.note}`,
-        }, useAiriCardStore().activeCardId)
+        }, persona)
         markApplied(card.id)
       }
       catch (error) {

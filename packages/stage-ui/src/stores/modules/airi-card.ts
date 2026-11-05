@@ -943,23 +943,6 @@ export const useAiriCardStore = defineStore('airi-card', () => {
     return resolveModules(card.extensions.airi.modules, defaults)
   }
 
-  function resolveModules(modules: AiriExtension['modules'], defaults: CardModuleDefaults): CardModuleDefaults {
-    const speechSelection = resolveModuleSelection(modules.speech, defaults.speech)
-    const resolved: CardModuleDefaults = {
-      consciousness: resolveModuleSelection(modules.consciousness, defaults.consciousness),
-      vision: resolveModuleSelection(modules.vision, defaults.vision),
-      speech: {
-        ...speechSelection,
-        voice_id: modules.speech.voice_id || (
-          speechSelection.provider === defaults.speech.provider && speechSelection.model === defaults.speech.model
-            ? defaults.speech.voice_id
-            : ''
-        ),
-      },
-    }
-    return resolved
-  }
-
   function getSystemPrompt(characterId: string) {
     // Live2D controls are inspected only for the active Avatar Model. Another
     // Character gets its prompt without ACT controls until it becomes active.

@@ -89,7 +89,9 @@ function scrollTo(index: number) {
 function handlePromoBannerAction(action: PromoBannerAction) {
   close()
 
-  void router.push(action.to)
+  // The login action needs the hosted account, which this fork does not have, so it only closes.
+  if (action.type === 'route')
+    void router.push(action.to)
 }
 
 function close() {

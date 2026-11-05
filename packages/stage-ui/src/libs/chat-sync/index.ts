@@ -1,1 +1,1 @@
-export { extractMessageText } from './wire-message'
+export { extractMessageText } from './message-text'

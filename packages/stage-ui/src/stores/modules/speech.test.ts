@@ -340,32 +340,15 @@ describe('vOICEVOX provider defaults', () => {
 })
 
 describe('speechFieldStatus', () => {
-  const official = { provider: OFFICIAL_SPEECH_PROVIDER_ID, model: 'auto', voice_id: '' }
-  const streaming = { provider: OFFICIAL_SPEECH_STREAMING_PROVIDER_ID, model: '', voice_id: 'voice' }
-
-  it('waits for the voice that the store picks while the voice catalog of an official provider loads', () => {
-    expect(speechFieldStatus(official, {}, () => null, true)).toEqual({ missing: [], pending: ['voice'] })
-  })
-
-  it('reports the voice of an official provider as missing when its voice catalog is not loading', () => {
-    // A catalog that failed, came back empty, or was not requested picks no voice, so the reply stays text only.
-    expect(speechFieldStatus(official, {}, () => null, false)).toEqual({ missing: ['voice'], pending: [] })
-  })
-
-  it('waits for the default model while the model catalog of a streaming provider loads', () => {
-    expect(speechFieldStatus(streaming, {}, () => undefined, false)).toEqual({ missing: [], pending: ['model'] })
-  })
-
-  it('reports the model of a streaming provider as missing when its catalog has no default model', () => {
-    expect(speechFieldStatus(streaming, {}, () => null, false)).toEqual({ missing: ['model'], pending: [] })
-  })
-
-  it('takes the default model of a streaming provider', () => {
-    expect(speechFieldStatus(streaming, {}, () => 'volcengine/seed-tts-1.0', false)).toEqual({ missing: [], pending: [] })
-  })
+  // The hosted speech catalog went with the account layer, so no provider picks a voice for you
+  // now (`picksSpeechVoiceAutomatically` is false in this fork). An empty voice is always missing.
 
   it('reports a missing voice of a provider that does not pick one, even while a catalog loads', () => {
     expect(speechFieldStatus({ provider: 'minimax-speech', model: 'speech-02-hd', voice_id: '' }, {}, () => undefined, true)).toEqual({ missing: ['voice'], pending: [] })
+  })
+
+  it('reports a missing model when the selection and the config carry none', () => {
+    expect(speechFieldStatus({ provider: 'minimax-speech', model: '', voice_id: 'voice' }, {}, () => undefined, false)).toEqual({ missing: ['model'], pending: [] })
   })
 
   it('takes the model and the voice from the provider config', () => {

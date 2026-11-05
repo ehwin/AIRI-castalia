@@ -39,7 +39,8 @@ const selfInitiatedLine = computed(() => {
   })
 })
 // The newest five events are the short-term memory the next prompt carries.
-const recentMoodEvents = computed(() => moodHistory.value.slice(-5).reverse())
+// `psyche` is the mirror's own marker, not an event she lived through.
+const recentMoodEvents = computed(() => moodHistory.value.filter(event => event.reason !== 'psyche').slice(-5).reverse())
 // Zero is "steady". Having no reading is a different answer, and the panel used to print both as 0.
 const moodKnown = computed(() =>
   Boolean(castalia.snapshotFor(activeCharacterId.value).vad) || moodHistory.value.length > 0)

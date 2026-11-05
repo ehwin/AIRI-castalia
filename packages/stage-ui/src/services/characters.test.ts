@@ -1,8 +1,8 @@
 import type { CreateCharacterPayload } from '../types/character'
 
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
-import { charactersService } from './characters'
+import { buildLocalCharacter } from './characters'
 
 const payload = {
   character: {
@@ -10,93 +10,45 @@ const payload = {
     coverUrl: 'cover.png',
     characterId: 'airi',
   },
-  capabilities: [],
-  avatarModels: [],
-  i18n: [],
-  prompts: [],
+  capabilities: [{ type: 'llm', config: { apiKey: 'test-key', apiBaseUrl: '' } }],
+  avatarModels: [{ name: 'Live2D', type: 'live2d', description: '', config: {} }],
+  i18n: [{ language: 'en', name: 'Airi', description: '', tags: [] }],
+  prompts: [{ language: 'en', type: 'system', content: 'You are Airi.' }],
 } satisfies CreateCharacterPayload
 
 /**
- * @example
- * describe('services characters', () => {})
+ * The character manager creates a character on this device.
+ *
+ * The hosted characters API went with the account layer, so the service builds a local row and
+ * sends nothing. These tests pin what a local row carries.
  */
 describe('services characters', () => {
-  /**
-   * @example
-   * const character = charactersService.buildLocal('user-1', payload)
-   */
-  it('builds a schema-valid local character with owner fields', () => {
-    const character = charactersService.buildLocal('user-1', payload)
+  it('builds a character owned by this device', () => {
+    const character = buildLocalCharacter(payload)
 
-    expect(character.id).toBeDefined()
-    expect(character.creatorId).toBe('user-1')
-    expect(character.ownerId).toBe('user-1')
+    expect(character.id).toBeTruthy()
+    expect(character.creatorId).toBe('local')
+    expect(character.ownerId).toBe('local')
     expect(character.characterId).toBe('airi')
     expect(character.likes).toEqual([])
     expect(character.bookmarks).toEqual([])
   })
 
-  /**
-   * @example
-   * await charactersService.fetchRemote(client, { all: true })
-   */
-  it('fetches remote characters and parses them', async () => {
-    const built = charactersService.buildLocal('user-1', payload)
-    const client = {
-      api: {
-        v1: {
-          characters: {
-            '$get': vi.fn(async () => ({ ok: true, json: async () => [built] })),
-            '$post': vi.fn(async () => ({ ok: true, json: async () => built })),
-            ':id': {
-              $delete: vi.fn(async () => ({ ok: true })),
-              $get: vi.fn(async () => ({ ok: true, json: async () => built })),
-              $patch: vi.fn(async () => ({ ok: true, json: async () => built })),
-              bookmark: {
-                $post: vi.fn(async () => ({ ok: true, json: async () => built })),
-              },
-              like: {
-                $post: vi.fn(async () => ({ ok: true, json: async () => built })),
-              },
-            },
-          },
-        },
-      },
-    }
+  it('gives every relation the new character id', () => {
+    const character = buildLocalCharacter(payload)
 
-    await expect(charactersService.fetchRemote(client, { all: true })).resolves.toEqual([built])
-    expect(client.api.v1.characters.$get).toHaveBeenCalledWith({ query: { all: 'true' } }, undefined)
+    expect(character.capabilities).toHaveLength(1)
+    expect(character.capabilities?.[0]?.characterId).toBe(character.id)
+    expect(character.avatarModels?.[0]?.characterId).toBe(character.id)
+    expect(character.i18n?.[0]?.characterId).toBe(character.id)
+    expect(character.prompts?.[0]?.characterId).toBe(character.id)
+    expect(character.prompts?.[0]?.content).toBe('You are Airi.')
   })
 
-  /**
-   * @example
-   * await expect(charactersService.fetchRemote(client, {}, { abortSignal })).rejects.toThrow()
-   */
-  it('throws before remote work when aborted', async () => {
-    const controller = new AbortController()
-    controller.abort()
-    const client = {
-      api: {
-        v1: {
-          characters: {
-            '$get': vi.fn(),
-            '$post': vi.fn(),
-            ':id': {
-              $delete: vi.fn(),
-              $get: vi.fn(),
-              $patch: vi.fn(),
-              bookmark: {
-                $post: vi.fn(),
-              },
-              like: {
-                $post: vi.fn(),
-              },
-            },
-          },
-        },
-      },
-    }
+  it('keeps the id that the payload already carries', () => {
+    const character = buildLocalCharacter({ ...payload, character: { ...payload.character, id: 'airi-local' } })
 
-    await expect(charactersService.fetchRemote(client, {}, { abortSignal: controller.signal })).rejects.toThrow()
+    expect(character.id).toBe('airi-local')
+    expect(character.prompts?.[0]?.characterId).toBe('airi-local')
   })
 })

@@ -183,6 +183,14 @@ export interface CastaliaEngineMemory {
    * backend cannot search simply exposes no search tool result.
    */
   search?: (query: string, topK?: number, persona?: string) => Promise<CastaliaSearchedMemory[]>
+  /**
+   * 「记住这一天」:一天一条,写进独立的日记分区。
+   *
+   * 不是 `save`:记得的一天不是关于主人的事实,也不该出现在提示词索引里,更不该被普通检索搜到。
+   */
+  rememberDay?: (day: { date: string, description: string, body: string, persona?: string }) => Promise<{ ok: boolean, reason?: string }>
+  /** 只读日记分区。普通 search 永远拿不到这些行。 */
+  searchDiary?: (query: string, topK?: number, persona?: string) => Promise<CastaliaSearchedMemory[]>
   /** Structured facts for the same query; `[]` when the backend has none or they are far off. */
   facts?: (query: string, topK?: number, persona?: string) => Promise<CastaliaSearchedFact[]>
   /**

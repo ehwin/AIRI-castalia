@@ -49,7 +49,9 @@ export function distillDay(thoughts: Thought[], options: DistillOptions): DiaryE
 
   // Even spacing keeps a long day from collapsing into its first hour.
   const spaced: Thought[] = []
-  const slots = Math.max(0, max - shared.length)
+  // Never ask for more slots than there are thoughts left: clamping the index afterwards repeated
+  // the same line two or three times in the memory body on a quiet day.
+  const slots = Math.max(0, Math.min(max - shared.length, rest.length))
   for (let index = 0; index < slots && rest.length > 0; index++) {
     const at = Math.floor((index + 0.5) * rest.length / slots)
     spaced.push(rest[Math.min(rest.length - 1, at)])

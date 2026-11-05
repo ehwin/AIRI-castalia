@@ -1115,10 +1115,13 @@ pages:
       hidden: '{count} lines kept to herself'
       distill: Remember this day
       distilled: Remembered
+      distill-failed: Not saved. The memory bank refused the write.
       reveal:
         label: Show everything she wrote
         description: Off by default. The lines stay hidden so the diary stays hers.
         warning: With this on you read what she did not choose to say. It stops being a diary.
+      watched:
+        title: Watched clips
       shared:
         title: What she said out loud
         empty: Nothing yet. She keeps almost everything to herself.

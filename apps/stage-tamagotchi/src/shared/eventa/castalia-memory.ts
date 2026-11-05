@@ -58,6 +58,25 @@ export interface CastaliaMemorySearchInput {
 export const castaliaMemorySearch = defineInvokeEventa<CastaliaSearchedMemory[], CastaliaMemorySearchInput>('eventa:invoke:castalia:memory:search')
 
 /**
+ * 「记住这一天」:一天一条,落在独立的日记分区。
+ *
+ * 普通 search、注入块、提示词索引都读不到这个分区;只有日记页和 `search-diary` 读它。
+ */
+export interface CastaliaDiaryDayInput {
+  /** 本地日,`YYYY-MM-DD`。同一天再记一次是替换,不是追加。 */
+  date: string
+  /** 一句话,页面上显示的那行。 */
+  description: string
+  /** 当天的原文摘录。 */
+  body: string
+  persona?: string
+}
+
+export const castaliaMemoryRememberDay = defineInvokeEventa<{ ok: boolean, reason?: string }, CastaliaDiaryDayInput>('eventa:invoke:castalia:memory:remember-day')
+/** 只有明确翻日记时才走这条路;普通 search 看不到日记分区。 */
+export const castaliaMemorySearchDiary = defineInvokeEventa<CastaliaSearchedMemory[], CastaliaMemorySearchInput>('eventa:invoke:castalia:memory:search-diary')
+
+/**
  * One structured fact (subject · predicate · object) found by the same lookup.
  *
  * Facts are the one-line answers the memory rows only imply, so the search tool prints them
@@ -80,6 +99,12 @@ export interface CastaliaIngestTurnInput {
   sessionId?: string
   /** 这一轮对话属于哪张卡；缺省时后端用配置里的角色。 */
   persona?: string
+  /**
+   * 这一轮模型已经判定过情绪时一起交回。
+   *
+   * 行落成 analyzed 并带上 VAD，不进 VAD 队列，同一轮不会被自动估计器再算一次。
+   */
+  affect?: { vad: { valence: number, arousal: number, dominance: number }, reason?: string }
 }
 export interface CastaliaIngestTurnResult {
   ok: boolean
@@ -115,7 +140,10 @@ export interface CastaliaPsycheSnapshot {
   vad: { valence: number, arousal: number, dominance: number }
   mood: { valence: number, arousal: number, dominance: number }
   version: number
+  /** `updatedAt` follows reads (decay), so it cannot say when the last observation was. */
   updatedAt: number
+  /** When an appraisal was last applied. -1 means never. */
+  lastEvidenceAt: number
 }
 export const castaliaMemorySetEnergy = defineInvokeEventa<{ ok: boolean }, { value: number, persona?: string }>('eventa:invoke:castalia:memory:set-energy')
 export const castaliaMemoryPsyche = defineInvokeEventa<CastaliaPsycheSnapshot | null, { characterId?: string } | undefined>('eventa:invoke:castalia:memory:psyche')

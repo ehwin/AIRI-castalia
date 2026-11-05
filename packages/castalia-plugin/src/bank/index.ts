@@ -39,6 +39,16 @@ export interface OpenBankOptions {
   allowNoConfig?: boolean
 }
 
+export interface DiaryDayInput {
+  /** 本地日，`YYYY-MM-DD`。同一天再记一次是替换，不是追加。 */
+  date: string
+  /** 一句话，页面和索引里显示的那行。 */
+  description: string
+  /** 当天的原文摘录。 */
+  body: string
+  characterId?: string
+}
+
 export interface BankHandle {
   bankDir: string
   project: string
@@ -61,6 +71,15 @@ export interface BankHandle {
   stats: () => Array<{ memType: string, active: number, vec: number, chunk: number }>
   /** 库里所有活跃记忆（全部 memType，带行 id）：长期记忆页展示用 */
   listMemories: (limit?: number) => Array<{ id: string, text: string, characterId?: string, memType?: string, updatedAt?: string }>
+  /**
+   * 「记住这一天」—— 一天一条，落在独立的 diary 分区。
+   *
+   * 分区不在 MEM_TYPES 里：目录枚举、跨库召回、反刍、衰减、星图都看不到它。只有 `searchDiary`
+   * 和 `listDiaryDays` 读得到，入口是日记页与模型显式翻日记的工具。
+   */
+  saveDiaryDay: (input: DiaryDayInput) => Promise<{ id: string, name: string, replaced: boolean }>
+  searchDiary: (query: string, options?: { topK?: number, characterId?: string }) => Promise<any[]>
+  listDiaryDays: (options?: { limit?: number, characterId?: string }) => Array<{ id: string, name: string | null, description: string, body: string, updatedAt?: string }>
   /** memory_store_list 的进程内版本（源 = 引擎的 store 工具实现） */
   listStore: (args?: Record<string, unknown>) => { records: any[] }
   saveStore: (args: Record<string, unknown>) => Promise<{ id: string, updated: boolean }>
@@ -144,7 +163,9 @@ export interface PsycheSnapshot {
   vad: { valence: number, arousal: number, dominance: number }
   mood: { valence: number, arousal: number, dominance: number }
   version: number
+  /** `updatedAt` is the last read; this is the last applied appraisal. -1 means never. */
   updatedAt: number
+  lastEvidenceAt: number
 }
 
 export interface MaintainOptions {
@@ -182,6 +203,13 @@ export interface IngestTurn {
   assistant: string
   /** 会话 ID:仅 MEMORY_AUTO_PROCESS=1 时用于引擎的会话缓冲 */
   sessionId?: string
+  /**
+   * 这一轮模型已经给出情感结论时一起交回。
+   *
+   * 行落成 analyzed 并带上 VAD，不进 VAD 队列。同一轮只允许一个估计器写 psyche，
+   * 否则显式判定和两分钟后的自动扫描会把同一句话算两次。
+   */
+  affect?: { vad: { valence: number, arousal: number, dominance: number }, reason?: string }
 }
 export interface IngestResult {
   ok: boolean
@@ -261,7 +289,8 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
   const db = await import('../vendor/engine/db')
   const orphan = await import('../vendor/engine/orphan')
   // store 工具（memory_store_list/save/forget + memory_recall 的进程内版本）
-  const { createStoreTools, loadEngineDeps } = await import('./store-tools')
+  const { createStoreTools, loadEngineDeps, parseStoreText } = await import('./store-tools')
+  const { DIARY_MEM_TYPE } = await import('../vendor/engine/memType')
   const storeTools = createStoreTools(await loadEngineDeps())
 
   const handle: BankHandle = {
@@ -281,13 +310,67 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
     restore: id => store.restoreMemory(id, project, charId),
     // 不按 source 过滤：长期记忆页要的是"这个库里的全部记忆"，不是 app 自己写的那几条 store 条目
     listMemories: (limit = 500) => storeTools.listStoreEntries({ project, allCharacters: true, limit })
-      .records.map(record => ({
+      .records
+      // Self-cycle diaries are derived observations, not memories the page or the prompt index
+      // should list. An explicit diary view asks for them with its own entry.
+      .filter(record => record.source !== 'agent_diary')
+      .map(record => ({
         id: record.id,
         text: record.text ?? record.body,
         characterId: record.characterId,
         memType: record.memType,
         updatedAt: record.updatedAt,
       })),
+    saveDiaryDay: async ({ date, description, body, characterId }) => {
+      const persona = (characterId ?? '').trim() || charId
+      const name = `diary-${date}`
+      const text = `# ${name}\n\n${description}\n\n${body}`
+      const conn = (db as any).DatabaseManager.getInstance(project, DIARY_MEM_TYPE)
+      // 同一天重记 = 替换，不追加：旧行连同向量一起软删，避免同一天在库里留下两版。
+      const stale = conn.prepare(
+        'SELECT id FROM memory WHERE is_active = 1 AND project = ? AND character_id IS ? AND text LIKE ?',
+      ).all(project, persona, `# ${name}%`) as Array<{ id: string }>
+      const replaced = stale.length > 0
+      for (const row of stale) {
+        conn.prepare('UPDATE memory SET is_active = 0, updated_at = ? WHERE id = ?').run(new Date().toISOString(), row.id)
+      }
+      const record = await store.saveMemory({
+        text,
+        project,
+        memType: DIARY_MEM_TYPE,
+        type: 'episodic',
+        category: 'diary',
+        subject: 'self',
+        source: 'diary_day',
+        characterId: persona,
+        importance: 0.6,
+      } as any)
+      return { id: record.id, name, replaced }
+    },
+    searchDiary: async (query, options = {}) => {
+      const persona = (options.characterId ?? '').trim() || charId
+      return search.searchMemory({
+        query,
+        project,
+        memType: DIARY_MEM_TYPE,
+        characterId: persona,
+        topK: options.topK ?? 5,
+      } as any)
+    },
+    listDiaryDays: (options = {}) => {
+      const persona = (options.characterId ?? '').trim() || charId
+      const conn = (db as any).DatabaseManager.getInstance(project, DIARY_MEM_TYPE)
+      const rows = conn.prepare(
+        `SELECT id, text, created_at, updated_at FROM memory
+         WHERE is_active = 1 AND project = ? AND character_id IS ?
+         ORDER BY created_at DESC LIMIT ?`,
+      ).all(project, persona, options.limit ?? 60) as any[]
+      return rows.map(row => ({
+        id: String(row.id),
+        ...parseStoreText(String(row.text ?? '')),
+        updatedAt: row.updated_at ?? row.created_at,
+      }))
+    },
     listStore: args => storeTools.listStoreEntries({ project, ...args }),
     saveStore: args => storeTools.saveStoreEntry({ project, ...args } as any),
     forgetStore: args => storeTools.forgetStoreEntry({ project, ...args } as any),
@@ -334,6 +417,8 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
       const fullAuto = process.env.MEMORY_AUTO_PROCESS === '1'
       try {
         if (fullAuto) {
+          // fullAuto 的落库在引擎的 autoProcess 里，拿不到行 id；显式判定在这条路径上不参与去重。
+          // 应用默认走最小路径，这一条只在 MEMORY_AUTO_PROCESS=1 时启用。
           const auto = await import('../vendor/engine/autoProcessor')
           const result = await auto.autoProcess({
             userMessage: user,
@@ -352,7 +437,15 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
           return { ok: Boolean(result?.conversationSaved), mode: 'auto', details: result?.details ?? [] }
         }
         // 最小路径:conversation_log + 用户观察。两者都是本地计算,离线/无 key 也能跑。
-        const saved = await store.saveConversationTurn(user, assistant, charId, undefined, undefined, project)
+        const saved = await store.saveConversationTurn(
+          user,
+          assistant,
+          charId,
+          undefined,
+          undefined,
+          project,
+          turn.affect ? { status: 'analyzed' as const, source: 'model', vad: turn.affect.vad } : undefined,
+        )
         try {
           const userLearning = await import('../vendor/engine/userLearning')
           userLearning.observeUserMessage(charId, 'default', user, project)
@@ -522,12 +615,26 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
     flushStaleVadQueue: async (maxAgeSec = 600) => {
       try {
         const emotion = await import('../vendor/engine/emotion')
-        const before = emotion.vadQueueStatus(project, charId) as { size?: number, oldestAgeSec?: number } | undefined
+        // Rows outlive a restart; the in-memory queue does not. Only the nightly digest rebuilt it,
+        // and only for its own character, so a persona switch left its rows pending forever.
+        try {
+          const conn = (db as any).DatabaseManager.getInstance(project, 'general')
+          const rows = conn.prepare(`
+            SELECT DISTINCT character_id FROM memory
+            WHERE project = ? AND source = 'conversation_log' AND is_active = 1
+              AND affect_status IN ('pending', 'pending_psyche')
+          `).all(project) as { character_id?: string }[]
+          for (const row of rows)
+            emotion.recoverPendingVadQueue(project, String(row.character_id || charId))
+        }
+        catch { /* recovery is best-effort; the live queue still works */ }
+        // Judge the deadline across the project: a late batch under another character is still late.
+        const before = emotion.vadQueueStatus(project) as { size?: number, oldestAgeSec?: number } | undefined
         const pending = before?.size ?? 0
         if (!pending || (before?.oldestAgeSec ?? 0) < maxAgeSec)
           return { updated: 0, pending }
         const flushed = await emotion.flushVadQueueDetailed(project, { force: true }) as { updated?: number } | undefined
-        const after = emotion.vadQueueStatus(project, charId) as { size?: number } | undefined
+        const after = emotion.vadQueueStatus(project) as { size?: number } | undefined
         return { updated: flushed?.updated ?? 0, pending: after?.size ?? 0 }
       }
       catch {
@@ -554,6 +661,7 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
         },
         version: Number(state?.version ?? 0),
         updatedAt: Number(state?.updatedAt ?? Date.now()),
+        lastEvidenceAt: Number.isFinite(state?.lastEvidenceAt) ? Number(state.lastEvidenceAt) : -1,
       } satisfies PsycheSnapshot
     },
     applyEmotion: async (input) => {

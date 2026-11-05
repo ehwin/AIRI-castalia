@@ -4,6 +4,8 @@
 //  - 情绪惯性：Kuppens et al. 2010, emotional inertia（状态自相关）
 //  - 重要性/反刍决定持续时间：Verduyn & Lavrijsen 2014, "Which emotions last longest and why"
 //  - 饱和 + 单步限幅：Murmur 的三道闸（惯性 / 饱和 / 限幅）在生产里的写法
+import type { PsycheTransitionOptions } from './vendor/engine/psycheState'
+
 import { describe, expect, it } from 'vitest'
 import {
   createPsycheState,
@@ -19,7 +21,7 @@ function fresh() {
 }
 
 /** 从当前状态推一个绝对目标，返回新状态。 */
-function push(state: ReturnType<typeof fresh>, target: number, at: number, id: string, opts: any = {}) {
+function push(state: ReturnType<typeof fresh>, target: number, at: number, id: string, opts: PsycheTransitionOptions = {}) {
   return transitionPsycheState(
     state,
     { kind: 'target', target: { valence: target }, eventId: id },
@@ -111,6 +113,33 @@ describe('类人性质：重要性延长持续时间', () => {
     const highFrac = Math.abs(high.vad.valence - base)
     expect(highFrac).toBeGreaterThan(lowFrac * 1.2)
   })
+
+  // ROOT CAUSE:
+  // New salience changed decay before the new evidence arrived.
+  // Decay must use the previous evidence's salience until the next event.
+  it('新事件的重要性不改变它到来之前的衰减', () => {
+    const initial = push(fresh(), -0.5, t0, 'initial', { salience: 0 })
+    const nextAt = t0 + 4 * HOUR
+    const direct = push(initial, -0.1, nextAt, 'next', { salience: 1 })
+    const readFirst = push(wait(initial, 4, t0), -0.1, nextAt, 'next', { salience: 1 })
+
+    expect(direct.vad.valence).toBeCloseTo(readFirst.vad.valence, 12)
+    expect(direct.mood.valence).toBeCloseTo(readFirst.mood.valence, 12)
+    expect(direct.salience).toBe(1)
+  })
+
+  it('重复或无效事件的重要性不改变衰减轨迹', () => {
+    const initial = push(fresh(), -0.5, t0, 'initial', { salience: 0 })
+    const nextAt = t0 + 4 * HOUR
+    const expected = wait(initial, 4, t0)
+    const duplicate = push(initial, -0.5, nextAt, 'initial', { salience: 1 })
+    const invalid = transitionPsycheState(initial, { kind: 'invalid' }, nextAt, { salience: 1 })
+
+    expect(duplicate.vad).toEqual(expected.vad)
+    expect(invalid.vad).toEqual(expected.vad)
+    expect(duplicate.salience).toBe(initial.salience)
+    expect(invalid.salience).toBe(initial.salience)
+  })
 })
 
 describe('回归：确定性边界没被类人项破坏', () => {
@@ -126,6 +155,44 @@ describe('回归：确定性边界没被类人项破坏', () => {
     const back = transitionPsycheState(down, { kind: 'state_neutral', eventId: 'sn' }, t0 + 1000)
     expect(back.vad.valence).toBeGreaterThan(down.vad.valence)
     expect(back.vad.valence).toBeLessThan(s.baseline.valence + 1e-9)
+  })
+
+  it('首次 state_neutral 观测会建立互动证据', () => {
+    const observedAt = t0 + 1000
+    const after = transitionPsycheState(
+      fresh(),
+      { kind: 'state_neutral', eventId: 'baseline-observation' },
+      observedAt,
+    )
+
+    expect(after.hasEvidence).toBe(true)
+    expect(after.lastEvidenceAt).toBe(observedAt)
+  })
+
+  it('过期证据的重复事件不会重新建立证据', () => {
+    const evidenceTtlHours = 1
+    const initial = transitionPsycheState(
+      fresh(),
+      { kind: 'target', target: { valence: -0.5 }, eventId: 'expired-event' },
+      t0,
+      { evidenceTtlHours },
+    )
+    const expired = transitionPsycheState(
+      initial,
+      { kind: 'no_event' },
+      t0 + 2 * HOUR,
+      { evidenceTtlHours },
+    )
+    const replayed = transitionPsycheState(
+      expired,
+      { kind: 'target', target: { valence: -0.5 }, eventId: 'expired-event' },
+      t0 + 2 * HOUR + 1000,
+      { evidenceTtlHours },
+    )
+
+    expect(expired.hasEvidence).toBe(false)
+    expect(replayed.hasEvidence).toBe(false)
+    expect(replayed.lastEvidenceAt).toBe(t0)
   })
 
   it('重复 eventId 不产生第二次位移', () => {

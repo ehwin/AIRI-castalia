@@ -28,7 +28,10 @@ describe('castalia prompt and reply paths', () => {
     castalia.setCharacter('alice')
     const persona = castalia.activeCharacterId
     const tools = await createCastaliaStateTools({
-      recordEmotion: (vad, reason) => castalia.recordEmotion(vad, reason, persona),
+      recordEmotion: async (vad, reason) => {
+        castalia.recordEmotion(vad, reason, persona)
+        return true
+      },
       setDesire: desire => castalia.setDesire(desire, persona),
     })
 

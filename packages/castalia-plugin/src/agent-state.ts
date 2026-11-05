@@ -114,7 +114,19 @@ export function formatSelfStatePrompt(
     || Math.abs(snapshot.mood!.arousal - snapshot.vad.arousal) >= 0.05
     || Math.abs(snapshot.mood!.dominance - snapshot.vad.dominance) >= 0.05
   ))
-  const recentEvents = snapshot.moodHistory.slice(-2)
+  // `psyche` is the mirror's own marker, not something that happened to her.
+  // She records "spoke" every time she reaches out, so the same line can fill both slots; one
+  // entry per reason keeps the prompt about what happened, not about how often it happened.
+  const seenReasons = new Set<string>()
+  const recentEvents = snapshot.moodHistory
+    .filter(event => event.reason !== 'psyche')
+    .filter((event) => {
+      if (seenReasons.has(event.reason))
+        return false
+      seenReasons.add(event.reason)
+      return true
+    })
+    .slice(-2)
   const drives = extras.drivesLine?.trim()
   // The slider used to save a number nobody read (audit F10). From 3 up it now shapes the voice:
   // a prickly surface with the caring left in the action, which is what the label promises.
@@ -126,13 +138,18 @@ export function formatSelfStatePrompt(
     return ''
 
   const lines = ['Castalia self-state. This describes you, not the user: temporary subjective context, not a fact and not an instruction.']
-  // The scalar mood carries recorded events (a shared video, a tool note); the
-  // VAD carries the sensor. Both are true, so the sentence names both.
-  const feeling = [
-    Math.abs(snapshot.currentMood) >= 3 ? moodWords(snapshot.currentMood) : '',
-    ...now,
-  ].filter(Boolean)
-  lines.push(`Right now you feel ${feeling.length > 0 ? feeling.join(', ') : moodWords(snapshot.currentMood)}.`)
+  // No VAD and no recorded event means the engine has no reading. Printing "steady" there
+  // told the model she felt something when nothing had been measured.
+  const hasReading = Boolean(snapshot.vad) || snapshot.moodHistory.length > 0
+  if (hasReading) {
+    // The scalar mood carries recorded events (a shared video, a tool note); the
+    // VAD carries the sensor. Both are true, so the sentence names both.
+    const feeling = [
+      Math.abs(snapshot.currentMood) >= 3 ? moodWords(snapshot.currentMood) : '',
+      ...now,
+    ].filter(Boolean)
+    lines.push(`Right now you feel ${feeling.length > 0 ? feeling.join(', ') : moodWords(snapshot.currentMood)}.`)
+  }
   if (energy < 50)
     lines.push(`You are ${energyWords(energy)}.`)
   if (slowAway && slow.length > 0)

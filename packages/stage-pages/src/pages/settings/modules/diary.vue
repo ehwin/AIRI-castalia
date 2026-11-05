@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { useDiaryStore } from '@proj-airi/stage-ui/stores/modules/diary'
+import { useVideoWatchStore } from '@proj-airi/stage-ui/stores/modules/video-watch'
 import { FieldCheckbox, GhostButton, SettingsCard } from '@proj-airi/ui'
 import { storeToRefs } from 'pinia'
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
 const diary = useDiaryStore()
-const { byDay, loading, reveal, saidOutLoud, shared, lastDistilled } = storeToRefs(diary)
+// Watched clips are their own dataset; the page joins them onto the day it reads.
+const watchlist = useVideoWatchStore()
+const { byDay, loading, reveal, shared } = storeToRefs(diary)
 
 onMounted(() => {
   void diary.load()
@@ -15,13 +18,26 @@ onMounted(() => {
 
 const KEY = 'settings.pages.modules.diary'
 const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+const watchedOn = (date: string) => watchlist.watchedByDay[date] ?? []
+
+/** Days the bank refused. The button keeps saying "remember" so the day can be retried. */
+const failedDays = ref<Set<string>>(new Set())
+async function remember(date: string) {
+  const entry = await diary.distill(date)
+  const next = new Set(failedDays.value)
+  if (entry)
+    next.delete(date)
+  else
+    next.add(date)
+  failedDays.value = next
+}
 </script>
 
 <template>
   <div :class="['flex flex-col', 'gap-4']">
     <SettingsCard>
       <p :class="['text-sm', 'text-neutral-500 dark:text-neutral-400']">
-        {{ t(`${KEY}.summary`, { days: byDay.length, said: saidOutLoud }) }}
+        {{ t(`${KEY}.summary`, { days: byDay.length, said: shared.length }) }}
       </p>
       <p :class="['text-xs', 'text-neutral-400 dark:text-neutral-500']">
         {{ t(`${KEY}.privacy`) }}
@@ -99,8 +115,29 @@ const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: '2-dig
         </li>
       </ul>
 
-      <div :class="['flex', 'justify-end']">
-        <GhostButton :label="diary.hasDistilled(day.date) ? t(`${KEY}.distilled`) : t(`${KEY}.distill`)" @click="diary.distill(day.date)" />
+      <div v-if="watchedOn(day.date).length" :class="['flex', 'flex-col', 'gap-2']">
+        <h3 :class="['flex items-center', 'gap-2', 'text-xs font-medium', 'text-neutral-500 dark:text-neutral-400']">
+          <span :class="['i-solar:videocamera-record-bold-duotone', 'text-base', 'text-primary-500 dark:text-primary-400']" aria-hidden="true" />
+          <span :class="['min-w-0 flex-1', 'truncate']">{{ t(`${KEY}.watched.title`) }}</span>
+          <span :class="['text-neutral-400 dark:text-neutral-500']">{{ watchedOn(day.date).length }}</span>
+        </h3>
+        <ul :class="['flex', 'flex-col', 'gap-2']">
+          <li
+            v-for="clip in watchedOn(day.date)"
+            :key="clip.id"
+            :class="['flex', 'items-start', 'gap-3', 'rounded-lg', 'bg-white dark:bg-neutral-900/60', 'px-3 py-2.5']"
+          >
+            <span :class="['shrink-0', 'text-xs', 'text-neutral-400']">{{ clip.watchedAt ? clock(clip.watchedAt) : '' }}</span>
+            <span :class="['min-w-0 flex-1', 'text-sm', 'text-neutral-700 dark:text-neutral-200']">{{ clip.title ?? clip.source }}</span>
+          </li>
+        </ul>
+      </div>
+
+      <div :class="['flex', 'items-center', 'justify-end', 'gap-2']">
+        <span v-if="failedDays.has(day.date)" :class="['text-xs', 'text-red-500 dark:text-red-400']">
+          {{ t(`${KEY}.distill-failed`) }}
+        </span>
+        <GhostButton :label="diary.hasDistilled(day.date) ? t(`${KEY}.distilled`) : t(`${KEY}.distill`)" @click="remember(day.date)" />
       </div>
     </section>
   </div>

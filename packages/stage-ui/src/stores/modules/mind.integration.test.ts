@@ -43,6 +43,31 @@ describe('mind store, end to end', () => {
     mind.dispose()
   })
 
+  it('moves a thought out of the diary when she repeats it aloud', async () => {
+    // ROOT CAUSE: nothing ever set `visibility: 'shared'`, so the diary's "said out loud"
+    // column could only read zero. The producer is the delivered line itself.
+    store.thoughts = [{ id: 'said-1', at: 1, text: 'noticed: 主人今天看起来很累', visibility: 'private', topic: 'self-cycle' }]
+    const mind = useMindStore()
+    await mind.initialize()
+
+    const marked = mind.markSaidOutLoud('主人今天看起来很累，那就早点睡吧。')
+
+    expect(marked?.id).toBe('said-1')
+    expect(mind.stream.entries.find(entry => entry.id === 'said-1')?.visibility).toBe('shared')
+    expect(store.append).toHaveBeenCalledWith(expect.objectContaining({ id: 'said-1', visibility: 'shared' }))
+    mind.dispose()
+  })
+
+  it('leaves a thought private when the line does not repeat it', async () => {
+    store.thoughts = [{ id: 'said-2', at: 1, text: 'noticed: 主人今天看起来很累', visibility: 'private', topic: 'self-cycle' }]
+    const mind = useMindStore()
+    await mind.initialize()
+
+    expect(mind.markSaidOutLoud('我去把窗户关上。')).toBeUndefined()
+    expect(mind.stream.entries.find(entry => entry.id === 'said-2')?.visibility).toBe('private')
+    mind.dispose()
+  })
+
   it('says nothing when nothing happened', async () => {
     const mind = useMindStore()
     await mind.initialize()

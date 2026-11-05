@@ -98,11 +98,9 @@ function normalizeLane(value: string | undefined): UpdateLane | undefined {
 
   switch (value.toLowerCase()) {
     case 'stable':
-    case 'latest':
-    case 'alpha':
-    case 'beta':
     case 'nightly':
     case 'canary':
+    case 'dev':
       return value.toLowerCase() as UpdateLane
     default:
       return undefined
@@ -126,9 +124,6 @@ function isTagInLane(tag: string, lane: UpdateLane) {
   const version = getSemverFromTag(tag)
   if (!version)
     return false
-
-  if (lane === 'latest')
-    return true
 
   const prerelease = semver.prerelease(version)?.[0]?.toString().toLowerCase()
   if (lane === 'stable')

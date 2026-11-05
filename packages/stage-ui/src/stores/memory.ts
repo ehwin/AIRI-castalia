@@ -39,6 +39,8 @@ export const INDEX_PER_DAY = 1
 /** Facts printed beside a lookup: three short rows, never the whole fact table. */
 export const FACT_TOP_K = 3
 
+// A dated entry is named `YYYY-MM-DD`; the date is what makes it a moment. A remembered day never
+// reaches this list: it lives in the diary partition, which the prompt index does not read.
 const DAY_PREFIX = /^(\d{4}-\d{2}-\d{2})/
 
 const TRANSCRIPT_NAME = /^mem-[0-9a-z]{4,12}$/
@@ -162,12 +164,13 @@ export interface MemoryFact {
  * What a write or a forget actually achieved on the durable side.
  *
  * A tool answer is a promise to the owner, so "saved" may only be said after this resolves `ok`.
- * `refused` is the backend saying no (a shared or derived entry), `failed` is it throwing, and
- * `invalid` is the entry never being well formed enough to send.
+ * `refused` is the backend saying no (a shared or derived entry), `failed` is it throwing,
+ * `invalid` is the entry never being well formed enough to send, and `disabled` is the module
+ * switch being off before the entry was even attempted.
  */
 export interface MemoryPersistResult {
   ok: boolean
-  reason?: 'refused' | 'failed' | 'invalid'
+  reason?: 'refused' | 'failed' | 'invalid' | 'disabled'
   error?: string
 }
 
@@ -238,6 +241,14 @@ export interface MemoryRemotePort { /** Every entry the remote holds. Replaces t
    */
   search?: (query: string, topK?: number, persona?: string) => Promise<MemorySearchHit[]>
   /**
+   * 「记住这一天」:一天一条,落在独立的日记分区。
+   *
+   * 不是事实条目:它不进提示词索引,也不回答普通检索;只有日记页和 `searchDiary` 读它。
+   */
+  rememberDay?: (day: MemoryDiaryDay) => Promise<MemoryDiaryResult>
+  /** 只读日记分区。普通 `search` 永远拿不到这些行。 */
+  searchDiary?: (query: string, topK?: number, persona?: string) => Promise<MemorySearchHit[]>
+  /**
    * Structured facts for the same query.
    *
    * A fact is one line ("user · name · 小托"), so the search tool prints the close ones beside
@@ -260,6 +271,20 @@ export interface MemoryRemotePort { /** Every entry the remote holds. Replaces t
   emotion?: (vad: MemoryVAD, reason: string, persona?: string, eventId?: string) => Promise<MemoryEmotionResult>
 }
 
+/** One remembered day: what the diary page shows, and what only a diary lookup can read. */
+export interface MemoryDiaryDay {
+  /** Local day, `YYYY-MM-DD`. Remembering the same day again replaces the row. */
+  date: string
+  description: string
+  body: string
+  persona?: string
+}
+
+export interface MemoryDiaryResult {
+  ok: boolean
+  reason?: string
+}
+
 /** One emotion the model judged: three dimensions, each between -1 and 1. */
 export interface MemoryVAD {
   valence: number
@@ -279,6 +304,8 @@ export interface MemoryIngestTurn {
   sessionId?: string
   /** The card this turn belongs to; the backend falls back to its configured character. */
   persona?: string
+  /** A verdict the model already gave for this turn: the row lands analyzed and never queues. */
+  affect?: { vad: MemoryVAD, reason?: string }
 }
 
 export interface MemoryIngestResult {
@@ -477,6 +504,12 @@ export const useMemoryStore = defineStore('memory', () => {
 
   /** True once a remote answered, so a host can show where memories live. */
   const remoteAttached = ref(false)
+  /**
+   * Whether the attached port can read the diary partition.
+   *
+   * The model is offered no diary tool without it, so an empty read never passes for an empty diary.
+   */
+  const diarySupported = ref(false)
   let remote: MemoryRemotePort | undefined
 
   const sorted = computed(() => [...entries.value].sort((left, right) => left.name.localeCompare(right.name)))
@@ -610,6 +643,7 @@ export const useMemoryStore = defineStore('memory', () => {
   function attachRemote(port: MemoryRemotePort | undefined) {
     remote = port
     remoteAttached.value = Boolean(port)
+    diarySupported.value = Boolean(port?.searchDiary)
     remoteHealth.value = { ...remoteHealth.value, attached: Boolean(port) }
   }
 
@@ -718,6 +752,10 @@ export const useMemoryStore = defineStore('memory', () => {
    * deletion or an edit the durable store did not accept.
    */
   function write(entry: Pick<MemoryEntry, 'name' | 'description' | 'body'>, personaId: string): MemoryWriteResult {
+    // The switch gates writes the way it already gates read, recall and ingest. A programmatic
+    // writer (a watched clip, a remembered day) used to land rows with the module off.
+    if (!enabled.value)
+      return { persisted: Promise.resolve({ ok: false, reason: 'disabled' }) }
     const name = memoryName(entry.name)
     if (!name || !entry.body.trim())
       return { persisted: Promise.resolve({ ok: false, reason: 'invalid' }) }
@@ -740,6 +778,37 @@ export const useMemoryStore = defineStore('memory', () => {
       }
     })()
     return { entry: next, persisted }
+  }
+
+  /**
+   * Remembers one day in the diary partition.
+   *
+   * Not `write`: a remembered day is not a fact about the owner, so it must not sit in the prompt
+   * index or answer an ordinary search. Only `searchDiary` and the diary page read it.
+   */
+  async function rememberDay(day: MemoryDiaryDay): Promise<MemoryDiaryResult> {
+    if (!enabled.value)
+      return { ok: false, reason: 'disabled' }
+    if (!remote?.rememberDay)
+      return { ok: false, reason: 'unsupported' }
+    try {
+      return await remote.rememberDay(day)
+    }
+    catch (error) {
+      return { ok: false, reason: String((error as Error)?.message ?? error) }
+    }
+  }
+
+  /** Reads the diary partition only. An ordinary search never returns these rows. */
+  async function searchDiary(query: string, topK = 5, personaId?: string): Promise<MemorySearchHit[]> {
+    if (!enabled.value || !remote?.searchDiary)
+      return []
+    try {
+      return await remote.searchDiary(query, topK, personaId)
+    }
+    catch {
+      return []
+    }
   }
 
   /** Makes a card's memory general, so every card reads it. A general memory with the same name gives way. */
@@ -910,7 +979,7 @@ export const useMemoryStore = defineStore('memory', () => {
     if (!user || !assistant)
       return { ok: false, error: 'empty turn' }
     try {
-      const result = await remote.ingest({ user, assistant, ...(turn.sessionId ? { sessionId: turn.sessionId } : {}), ...(turn.persona ? { persona: turn.persona } : {}) })
+      const result = await remote.ingest({ user, assistant, ...(turn.sessionId ? { sessionId: turn.sessionId } : {}), ...(turn.persona ? { persona: turn.persona } : {}), ...(turn.affect ? { affect: turn.affect } : {}) })
       if (result.ok) {
         markRemoteOk()
         // The turn the backend just wrote is not in the local cache, so `read` and the prompt
@@ -950,6 +1019,7 @@ export const useMemoryStore = defineStore('memory', () => {
     backendNote,
     recordEmotion,
     remoteAttached,
+    diarySupported,
     remoteHealth,
     remoteDegraded,
     attachRemote,
@@ -960,6 +1030,8 @@ export const useMemoryStore = defineStore('memory', () => {
     read,
     lookup,
     write,
+    rememberDay,
+    searchDiary,
     makeGeneral,
     forget,
     remove,

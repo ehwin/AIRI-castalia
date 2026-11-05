@@ -298,7 +298,16 @@ export const useSelfInitiatedSpeechStore = defineStore('self-initiated-speech', 
 
 ${context}`
           : SELF_INITIATED_NOTICE
-        return chat.notifyConversation(sessionId, { source: SELF_INITIATED_SOURCE, text })
+        const sent = await chat.notifyConversation(sessionId, { source: SELF_INITIATED_SOURCE, text })
+        // Only a delivered line counts. A gated or failed send says nothing, and a line that does
+        // not repeat a thought leaves every thought private.
+        if (!sent?.ok || !sent.text)
+          return
+        mind.markSaidOutLoud(sent.text)
+        // Reaching out and getting an answer is an event in her state, not only a log line. A
+        // shared video's answer lands the same way (`feedbackEffect`); this is the speech half:
+        // one mood entry where the prompt and the panel both read it.
+        castalia.recordMood(1, '我主动跟主人开口了', currentPersona)
       },
     })
 

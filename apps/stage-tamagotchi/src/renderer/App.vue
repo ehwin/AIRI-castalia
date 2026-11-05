@@ -48,7 +48,7 @@ import {
   i18nGetLocale,
   i18nSetLocale,
 } from '../shared/eventa'
-import { castaliaMemoryApplyEmotion, castaliaMemoryFacts, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySelfCycle, castaliaMemorySetEnabled, castaliaMemorySetEnergy, castaliaMemoryStatus } from '../shared/eventa/castalia-memory'
+import { castaliaMemoryApplyEmotion, castaliaMemoryFacts, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemoryRememberDay, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySearchDiary, castaliaMemorySelfCycle, castaliaMemorySetEnabled, castaliaMemorySetEnergy, castaliaMemoryStatus } from '../shared/eventa/castalia-memory'
 import { electronModelAssetCancel, electronModelAssetEnsure, electronModelAssetRemove, electronModelAssetsClear, electronModelAssetsList, electronModelAssetStatusChanged } from '../shared/eventa/model-assets'
 import {
   electronPluginUpdateCapability,
@@ -97,6 +97,8 @@ const saveCastaliaMemory = useElectronEventaInvoke(castaliaMemorySave)
 const forgetCastaliaMemory = useElectronEventaInvoke(castaliaMemoryForget)
 const recallCastaliaMemory = useElectronEventaInvoke(castaliaMemoryRecall)
 const searchCastaliaMemory = useElectronEventaInvoke(castaliaMemorySearch)
+const rememberCastaliaDay = useElectronEventaInvoke(castaliaMemoryRememberDay)
+const searchCastaliaDiary = useElectronEventaInvoke(castaliaMemorySearchDiary)
 const factsCastaliaMemory = useElectronEventaInvoke(castaliaMemoryFacts)
 const ingestCastaliaMemory = useElectronEventaInvoke(castaliaMemoryIngest)
 const statusCastaliaMemory = useElectronEventaInvoke(castaliaMemoryStatus)
@@ -113,6 +115,10 @@ memoryStore.attachRemote({
   recall: (query, persona) => recallCastaliaMemory({ query, persona }),
   // 模型主动查记忆的检索通道：让她真的能"翻记忆体"，而不是只能按索引名逐条读。
   search: (query, topK, persona) => searchCastaliaMemory({ query, topK, persona }),
+  // 「记住这一天」写的是日记分区：普通 search/注入/索引都看不到它。
+  rememberDay: day => rememberCastaliaDay(day),
+  // 只有明确翻日记时才走这条路。
+  searchDiary: (query, topK, persona) => searchCastaliaDiary({ query, topK, persona }),
   // 同一句查询顺带取结构化事实：一行事实常是记忆行只隐含的答案（她是谁、小托是谁）。
   facts: (query, topK, persona) => factsCastaliaMemory({ query, topK, persona }),
   // 每轮对话的写回入口：没有它，她只说、不记。
@@ -533,8 +539,12 @@ onMounted(async () => {
       const psyche = await invokePsyche({ characterId: resolvedPersona() })
       // Every answer counts, including the one that says the evidence expired: the store needs that
       // signal to drop a mirror the engine no longer stands behind.
-      if (psyche)
-        castaliaStore.syncPsyche({ vad: psyche.vad, mood: psyche.mood, band: psyche.band, at: psyche.updatedAt, hasEvidence: psyche.hasEvidence }, psyche.characterId)
+      if (psyche) {
+        // `updatedAt` follows reads (decay), so it only says when this poll happened. The mirror
+        // must age with the observation, not reset on every poll.
+        const evidenceAt = psyche.lastEvidenceAt >= 0 ? psyche.lastEvidenceAt : psyche.updatedAt
+        castaliaStore.syncPsyche({ vad: psyche.vad, mood: psyche.mood, band: psyche.band, at: evidenceAt, hasEvidence: psyche.hasEvidence }, psyche.characterId)
+      }
     }
     catch { /* the mirror is best-effort; the engine keeps the truth */ }
     finally {
@@ -606,10 +616,10 @@ onMounted(async () => {
   )
 
   mindStore.attachSleep(async () => {
-    // Nothing to maintain while the module is off; the night becomes a plain sleep rather than a
-    // maintenance that reports success without running (F14).
-    if (!castaliaStore.enabled) {
-      console.info('[castalia] maintain skipped: module is off')
+    // Maintenance writes the memory bank, so it needs both switches: with memory off the night
+    // stays a plain sleep instead of three LLM stages whose output nothing will read (F14 class).
+    if (!castaliaStore.enabled || !memoryStore.enabled) {
+      console.info(`[castalia] maintain skipped: ${!castaliaStore.enabled ? 'module is off' : 'memory module is off'}`)
       return undefined
     }
     try {

@@ -47,6 +47,23 @@ export function record(stream: InnerStream, thought: Thought): InnerStream {
   return { ...stream, entries: overflow > 0 ? entries.slice(overflow) : entries }
 }
 
+/**
+ * Marks one thought as said out loud.
+ *
+ * A thought is private until she repeats it in a delivered line. Nothing else may change its
+ * visibility, so the diary's "said out loud" column has exactly one producer.
+ *
+ * Returns the same stream when the id is unknown or the thought is already shared.
+ */
+export function markShared(stream: InnerStream, id: string): InnerStream {
+  const index = stream.entries.findIndex(entry => entry.id === id)
+  if (index < 0 || stream.entries[index].visibility === 'shared')
+    return stream
+  const entries = stream.entries.slice()
+  entries[index] = { ...entries[index], visibility: 'shared' }
+  return { ...stream, entries }
+}
+
 export function recent(stream: InnerStream, count: number): Thought[] {
   return stream.entries.slice(-Math.max(0, count))
 }

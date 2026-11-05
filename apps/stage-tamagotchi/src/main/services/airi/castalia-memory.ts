@@ -13,7 +13,7 @@ import { defineInvokeHandler } from '@moeru/eventa'
 import { createCastaliaMemoryRepository } from '@proj-airi/castalia-plugin/memory'
 import { app } from 'electron'
 
-import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryApplyEmotion, castaliaMemoryFacts, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySelfCycle, castaliaMemorySetEnabled, castaliaMemorySetEnergy, castaliaMemoryStatus, castaliaOpenConsole, castaliaTuningGet, castaliaTuningSave } from '../../../shared/eventa/castalia-memory'
+import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryApplyEmotion, castaliaMemoryFacts, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemoryRememberDay, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySearchDiary, castaliaMemorySelfCycle, castaliaMemorySetEnabled, castaliaMemorySetEnergy, castaliaMemoryStatus, castaliaOpenConsole, castaliaTuningGet, castaliaTuningSave } from '../../../shared/eventa/castalia-memory'
 import { openCastaliaConsole } from './castalia-console'
 import { createCastaliaEngineMemory, describeCastaliaEngineConfig, resolveCastaliaEngineOptions } from './castalia-engine'
 import { createCastaliaFullClient, resolveCastaliaFullUrl } from './castalia-full'
@@ -136,6 +136,19 @@ export async function runMaintenance(
 ): Promise<CastaliaMaintainReport> {
   if (maintenanceInFlight)
     return maintenanceInFlight
+
+  // The timers check the switch before they call; the sleep path and the manual button did not,
+  // so a closed memory module could still run three LLM stages and write a bank nothing reads.
+  if (!moduleEnabled.memory) {
+    return {
+      ok: false,
+      skipped: true,
+      skippedReason: 'memory-module-off',
+      startedAt: new Date().toISOString(),
+      ms: 0,
+      reflectConfigured: false,
+    } as CastaliaMaintainReport
+  }
 
   const now = Date.now()
   const ledger = readMaintenanceLedger()
@@ -374,11 +387,10 @@ export function setupCastaliaMemoryService(params: {
       // The panel switch scopes the loop it names, and this write is part of it (audit A06/A14).
       if (!moduleEnabled.castalia)
         return { applied: false, reason: 'disabled' as const, version: 0 }
-      // One writer owns psyche. Under `PSYCHE_FROM_VAD=on` the automatic chain already judges this
-      // turn; letting the explicit write land too counted one moment twice (measured: +5% valence
-      // per turn on top of the first appraisal, and it compounds over a conversation).
-      if (process.env.PSYCHE_FROM_VAD === 'on')
-        return { applied: false, reason: 'estimator_active' as const, version: 0 }
+      // One writer per turn, not one writer per switch. The explicit verdict lands here, and the
+      // turn carries it back to `ingestTurn`, which stores the row as already analyzed and keeps it
+      // out of the VAD queue. Refusing the write while the estimator was on left both paths idle:
+      // the lexicon abstains on most turns (8.6% judged), so psyche never moved.
       return engine.applyEmotion
         ? await engine.applyEmotion({ ...input })
         : { applied: false, reason: 'unsupported' as const, version: 0 }
@@ -423,8 +435,8 @@ export function setupCastaliaMemoryService(params: {
               ? 'PSYCHE_FROM_VAD 未开启：对话不会自动推进 psyche，但 recordEmotion 会把模型判断的情绪写进引擎'
               : 'PSYCHE_FROM_VAD 未开启：对话不会推进 psyche，recordEmotion 只写提示词'
           : estimator === 'lexicon'
-            ? '自动情感已开启，但只有本地词表可用：它会对模糊句子主动放弃判断，psyche 多数时候不动（模型显式记录的情绪不再重复写入）'
-            : '自动情感已开启，分析来自模型端点（模型显式记录的情绪不再写入，避免同一轮算两次）'
+            ? '自动情感已开启，但只有本地词表可用：它会对模糊句子主动放弃判断，psyche 多数时候不动（模型显式记录的情绪照常写入，该轮不再进自动队列）'
+            : '自动情感已开启，分析来自模型端点（模型显式记录的情绪照常写入，该轮不再进自动队列，不会算两次）'
         return { autoFromVad, explicit, estimator, note }
       })(),
       checkedAt: Date.now(),
@@ -436,6 +448,14 @@ export function setupCastaliaMemoryService(params: {
     // 显式检索（模型主动查记忆）：与 recall 不同，不过相似度门槛、不渲染注入块。
     defineInvokeHandler(params.context, castaliaMemorySearch, input => engine.search
       ? engine.search(String(input?.query ?? ''), input?.topK, input?.persona)
+      : Promise.resolve([]))
+    // 「记住这一天」:落在日记分区,普通检索看不到。
+    defineInvokeHandler(params.context, castaliaMemoryRememberDay, input => engine.rememberDay
+      ? engine.rememberDay(input)
+      : Promise.resolve({ ok: false, reason: 'transport has no diary store' }))
+    // 只有明确翻日记时才走这条路。
+    defineInvokeHandler(params.context, castaliaMemorySearchDiary, input => engine.searchDiary
+      ? engine.searchDiary(String(input?.query ?? ''), input?.topK, input?.persona)
       : Promise.resolve([]))
     defineInvokeHandler(params.context, castaliaMemoryFacts, input => engine.facts
       ? engine.facts(String(input?.query ?? ''), input?.topK, input?.persona)

@@ -20,6 +20,7 @@ import {
   digestSense,
   evaluateRefusal,
   inferRequestTraits,
+  markShared,
   NAP_BOREDOM_RELIEF_PER_MINUTE,
   NAP_QUALITY,
   NAP_WAKE_GAP,
@@ -673,6 +674,37 @@ export const useMindStore = defineStore('mind', () => {
   }
 
   /**
+   * Marks the thought she actually repeated out loud.
+   *
+   * The diary's "said out loud" column had no producer at all: every thought was written as
+   * private and nothing ever flipped it, so the column could only ever read zero. The utterance
+   * is generated rather than copied, so the link is textual: a thought counts as said when the
+   * delivered line repeats it. No match means nothing was said aloud, which is the normal case.
+   */
+  function markSaidOutLoud(said: string): Thought | undefined {
+    const spoken = String(said ?? '').replace(/\s+/gu, '')
+    if (spoken.length < 6)
+      return undefined
+    const entries = stream.value.entries ?? []
+    const match = [...entries].reverse().find((thought) => {
+      if (thought.visibility !== 'private')
+        return false
+      if (thought.topic !== 'self-cycle' && thought.topic !== 'held-back')
+        return false
+      const core = String(thought.text ?? '')
+        .replace(/^noticed:\s*/iu, '')
+        .replace(/[。！？…\s「」『』"'“”]/gu, '')
+      return core.length >= 6 && spoken.includes(core)
+    })
+    if (!match)
+      return undefined
+    stream.value = markShared(stream.value, match.id)
+    const updated: Thought = { ...match, visibility: 'shared' }
+    void innerThoughtsRepo.append(updated).catch(() => {})
+    return updated
+  }
+
+  /**
    * 状态机自己的上下文：她在想什么、看到了什么、现在是什么状态。
    *
    * 这是「自言自语」这一层的自述，和聊天记录是两条线。出声时把它带上去，她开口才是接着
@@ -988,6 +1020,7 @@ export const useMindStore = defineStore('mind', () => {
     lastDiaryText,
     lastSenseDiagnostics,
     innerContextLine,
+    markSaidOutLoud,
     thinkWired,
     thinkInFlight,
     lastThinkText,

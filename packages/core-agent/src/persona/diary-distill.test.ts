@@ -51,6 +51,15 @@ describe('distillDay', () => {
     expect(entry?.body).toContain('evening')
   })
 
+  it('never repeats a line to fill the slots', () => {
+    const one = distillDay([thought(9, 'noticed: only line')], { date: '2026-10-25' })
+    expect(one?.body.split('\n')).toHaveLength(1)
+
+    const two = distillDay([thought(9, 'noticed: a'), thought(18, 'noticed: b')], { date: '2026-10-25' })
+    expect(two?.body.split('\n')).toHaveLength(2)
+    expect(new Set(two?.body.split('\n')).size).toBe(2)
+  })
+
   it('truncates a long description', () => {
     const entry = distillDay([thought(9, `noticed: ${'x'.repeat(200)}`)], { date: '2026-10-25' })
     expect(entry?.description.length).toBe(80)

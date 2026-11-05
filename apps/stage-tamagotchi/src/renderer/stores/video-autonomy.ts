@@ -25,8 +25,9 @@ import { electronVideoProbe, electronVideoSheet, electronVideoText } from '../..
  * tick is hers — idle chat, outside quiet hours, under the daily cap, and with odds that rise with
  * how long the clip waited and how curious she is right now (her own mood and arousal).
  *
- * What she watches is recorded as a digest in her long-term memory, so she can bring it up later
- * with timecodes instead of a vague "我好像看过".
+ * What she watches lands in two places: a digest with timecodes in her long-term memory, and an
+ * entry in the watch queue the diary page joins on by day. The memory answers "我好像看过"; the
+ * queue answers "那天下午". Neither is copied into her thought stream.
  */
 
 /** How often the policy is asked. A minute keeps the app cheap and the decision timely enough. */
@@ -112,21 +113,25 @@ export const useVideoAutonomyStore = defineStore('tamagotchi-video-autonomy', ()
       }
 
       watchlist.markWatched(item.id, note)
+      const title = share.headlineFor(note).split('（')[0] || item.title || item.source
       // A watched clip goes up on the panel: sharing is what makes watching worth doing, and the
       // owner's answer is what teaches her which clips to pick next.
       share.publish({
         source: item.source,
-        title: share.headlineFor(note).split('（')[0] || item.title,
+        title,
         headline: item.why || '刚看完，想给你看这一段',
         why: item.why,
         note,
       })
-      const persona = cardStore.activeCardId
+      // The bank keys rows by persona: a card id and a bank name are two names for one character.
+      const persona = memory.enabled ? memory.resolvePersona(cardStore.activeCardId) : cardStore.activeCardId
       memory.write({
         name: `看过的片子 ${note.split('\n')[0]!.slice(0, 40)}`,
         description: `她自己决定看的一条视频（${new Date().toLocaleDateString('sv-SE')}）`,
         body: note,
       }, persona)
+      // The watch queue keeps the clip and its note; the diary page joins on it by day. Nothing is
+      // copied into the thought stream: her notes and her viewing stay two datasets.
       return item.id
     }
     finally {

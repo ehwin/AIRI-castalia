@@ -11,7 +11,11 @@ const cards = useAiriCardStore()
 const { enabled, currentMood, currentDesire, currentEnergy, activeCharacterId, moodHistory } = storeToRefs(castalia)
 const { t } = useI18n()
 // The newest five events are the short-term memory the next prompt carries.
-const recentMoodEvents = computed(() => moodHistory.value.slice(-5).reverse())
+// `psyche` is the mirror's own marker, not an event she lived through.
+const recentMoodEvents = computed(() => moodHistory.value.filter(event => event.reason !== 'psyche').slice(-5).reverse())
+// Zero is "steady". Having no reading is a different answer, and the panel used to print both as 0.
+const moodKnown = computed(() =>
+  Boolean(castalia.snapshotFor(activeCharacterId.value).vad) || moodHistory.value.length > 0)
 watch(() => cards.activeCardId, characterId => castalia.setCharacter(characterId), { immediate: true })
 </script>
 
@@ -38,7 +42,12 @@ watch(() => cards.activeCardId, characterId => castalia.setCharacter(characterId
             {{ t('settings.pages.modules.castalia.mood') }}
           </div>
           <div class="text-xl font-medium">
-            {{ currentMood }}
+            <template v-if="moodKnown">
+              {{ currentMood }}
+            </template>
+            <span v-else class="text-base text-neutral-400 font-normal">
+              {{ t('settings.pages.modules.castalia.no-mood-evidence') }}
+            </span>
           </div>
         </div>
         <div class="rounded-lg bg-neutral-50 p-3 dark:bg-neutral-800">

@@ -139,3 +139,88 @@ describe('video engine', () => {
     expect(movable.capabilities().ffmpegPath).not.toBe('C:/tools/ffmpeg/bin/ffmpeg.exe')
   })
 })
+
+/**
+ * The caption path, against a fake bilibili.
+ *
+ * Measured 2026-11-03: the unsigned `x/player/v2` answered one clip with another video's captions,
+ * so these tests pin the signed request and the refusal that keeps a foreign transcript out of a
+ * reply.
+ */
+describe('video engine captions', () => {
+  const clip = { bvid: 'BV1a5sZ6LEN3', cid: 431_460_198_18, title: '大肥鱼怎么知道第37分钟发生了什么？', duration: 349 }
+  const wbi = {
+    wbi_img: {
+      img_url: 'https://i0.hdslb.com/bfs/wbi/7cd084941338484aae1ad9425b84077c.png',
+      sub_url: 'https://i0.hdslb.com/bfs/wbi/4932caff0ff746eab6f01bf08b70ac45.png',
+    },
+  }
+
+  function fakeBilibili(cues: Array<{ from: number, content: string, to?: number }>) {
+    const requests: string[] = []
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      const url = String(input)
+      requests.push(url)
+      const json = (body: unknown) => ({ ok: true, json: async () => body })
+      if (url.includes('/x/web-interface/nav'))
+        return json({ code: 0, data: wbi })
+      if (url.includes('/x/web-interface/view'))
+        return json({ code: 0, data: { ...clip, dimension: { width: 1920, height: 1080 } } })
+      if (url.includes('/x/player/'))
+        return json({ code: 0, data: { subtitle: { subtitles: [{ subtitle_url: '//aisubtitle.example/zh.json' }] } } })
+      if (url.includes('aisubtitle.example'))
+        return json({ body: cues })
+      throw new Error(`unexpected request ${url}`)
+    }) as unknown as typeof fetch
+    return { fetchImpl, requests }
+  }
+
+  const engineWith = (fetchImpl: typeof fetch) => createVideoEngine({ cacheDir: 'test-cache', ffmpegPath: 'ffmpeg-not-installed', fetchImpl })
+
+  it('signs the caption request, because the unsigned endpoint answers with another clip', async () => {
+    const { fetchImpl, requests } = fakeBilibili([{ from: 0, content: '一部90分钟的片子', to: 12 }])
+    const result = await engineWith(fetchImpl).text(clip.bvid)
+
+    expect('error' in result).toBe(false)
+    if ('error' in result)
+      return
+    expect(result.lines).toBe(1)
+    expect(result.origin).toBe('platform')
+
+    const player = requests.find(url => url.includes('/x/player/'))
+    expect(player).toContain('/x/player/wbi/v2?')
+    expect(player).toContain('w_rid=')
+    expect(player).toContain('wts=')
+    expect(player).not.toContain('/x/player/v2?')
+  })
+
+  it('refuses captions that run past the clip instead of quoting another video', async () => {
+    const { fetchImpl } = fakeBilibili([{ from: 0, content: '呵呵哈哈喽哈喽', to: 836 }])
+    const result = await engineWith(fetchImpl).text(clip.bvid)
+
+    expect('error' in result).toBe(true)
+    if (!('error' in result))
+      return
+    expect(result.error).toContain('another clip')
+    expect(result.error).toContain('349')
+  })
+
+  it('does not blame a missing cookie when the cookie was sent', async () => {
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const json = (body: unknown) => ({ ok: true, json: async () => body })
+      if (url.includes('/x/web-interface/nav'))
+        return json({ code: 0, data: wbi })
+      if (url.includes('/x/web-interface/view'))
+        return json({ code: 0, data: { ...clip, dimension: { width: 1920, height: 1080 } } })
+      return json({ code: 0, data: { subtitle: { subtitles: [] } } })
+    }) as unknown as typeof fetch
+
+    const result = await engineWith(fetchImpl).text(clip.bvid, { cookie: 'SESSDATA=abc' })
+    expect('error' in result).toBe(true)
+    if (!('error' in result))
+      return
+    expect(result.error).toContain('even with the cookie')
+    expect(result.error).not.toContain('Fill the bilibili cookie')
+  })
+})

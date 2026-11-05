@@ -88,6 +88,58 @@ describe('castalia agent state', () => {
     const state = new AgentState('castalia')
     expect(formatAgentStatePrompt(state.getSnapshot())).toBe('')
   })
+  it('does not claim a feeling when the engine has no reading', () => {
+    const snapshot = {
+      characterId: 'castalia',
+      currentMood: 0,
+      currentDesire: null,
+      energy: 90,
+      tsundereLevel: 0,
+      lastUpdated: new Date(0).toISOString(),
+      moodHistory: [],
+    }
+    const prompt = formatSelfStatePrompt(snapshot, { drivesLine: 'a little bored' })
+
+    expect(prompt).not.toContain('Right now you feel')
+    expect(prompt).toContain('Meanwhile you are a little bored.')
+  })
+
+  it('does not let one repeated event fill both slots', () => {
+    // She records "spoke" every time she reaches out. The prompt must say what happened, not how
+    // often it happened, or a chatty afternoon reads as two identical lines.
+    const prompt = formatSelfStatePrompt({
+      characterId: 'castalia',
+      currentMood: 4,
+      currentDesire: null,
+      energy: 90,
+      tsundereLevel: 0,
+      lastUpdated: new Date(0).toISOString(),
+      moodHistory: [
+        { value: 1, reason: '我主动跟主人开口了', timestamp: 1 },
+        { value: 2, reason: '主人点开了我分享的视频', timestamp: 2 },
+        { value: 1, reason: '我主动跟主人开口了', timestamp: 3 },
+      ],
+    })
+
+    expect(prompt.match(/我主动跟主人开口了/g)).toHaveLength(1)
+    expect(prompt).toContain('主人点开了我分享的视频')
+  })
+
+  it('does not print the mirror marker as something that happened', () => {
+    const prompt = formatSelfStatePrompt({
+      characterId: 'castalia',
+      currentMood: 4,
+      currentDesire: null,
+      energy: 90,
+      tsundereLevel: 0,
+      lastUpdated: new Date(0).toISOString(),
+      moodHistory: [{ value: 4, reason: 'psyche', timestamp: 1 }],
+      vad: { valence: 0.4, arousal: 0.3, dominance: 0.2 },
+    })
+
+    expect(prompt).not.toContain('- psyche')
+    expect(prompt).toContain('Right now you feel')
+  })
 })
 
 describe('self-state slow layer sentence', () => {

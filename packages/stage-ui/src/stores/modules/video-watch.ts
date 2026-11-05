@@ -54,6 +54,23 @@ export const useVideoWatchStore = defineStore('video-watch', () => {
     .filter(item => item.state === 'watched' && item.note)
     .sort((a, b) => (b.watchedAt ?? 0) - (a.watchedAt ?? 0)))
 
+  /**
+   * What she watched, grouped by local day (`YYYY-MM-DD`).
+   *
+   * The diary page joins on this instead of copying a watched clip into the thought stream: her
+   * notes and her viewing stay two datasets, and a day is assembled at read time.
+   */
+  const watchedByDay = computed<Record<string, VideoWatchItem[]>>(() => {
+    const days: Record<string, VideoWatchItem[]> = {}
+    for (const item of watched.value) {
+      if (!item.watchedAt)
+        continue
+      const day = localDay(item.watchedAt)
+      ;(days[day] ??= []).push(item)
+    }
+    return days
+  })
+
   const lastWatchedAt = computed(() => items.value
     .filter(item => item.state === 'watched' && typeof item.watchedAt === 'number')
     .reduce<number | null>((latest, item) => Math.max(latest ?? 0, item.watchedAt!), null))
@@ -144,6 +161,7 @@ export const useVideoWatchStore = defineStore('video-watch', () => {
     items,
     pending,
     watched,
+    watchedByDay,
     lastWatchedAt,
     enqueue,
     markWatched,

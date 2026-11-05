@@ -109,6 +109,8 @@ function formatFact(fact: MemoryFact) {
  */
 function describeRefusal(result: MemoryPersistResult) {
   const detail = result.error ? ` (${result.error})` : ''
+  if (result.reason === 'disabled')
+    return `the memory module is off, so nothing changed${detail}`
   if (result.reason === 'invalid')
     return `it needs a name and a body${detail}`
   if (result.reason === 'refused')

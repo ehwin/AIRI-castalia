@@ -4,9 +4,19 @@ import localforage from 'localforage'
 
 import { afterEach, expect, it } from 'vitest'
 
-import { sha256Hex } from '../../libs/file-transfer/transfer'
 import { DisplayModelFormat } from '../../stores/display-models'
 import { createDisplayModelsRepo } from './display-models.repo'
+
+/**
+ * Digests one blob, so a round trip can be compared byte for byte.
+ *
+ * The transfer helper that this test used went with the hosted model store; Web Crypto keeps the
+ * check meaningful.
+ */
+async function sha256Hex(blob: Blob) {
+  const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())
+  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('')
+}
 
 // Browser test files share one origin and one IndexedDB. Remove only the keys that this test writes.
 const store = localforage.createInstance({ name: 'airi-display-models-browser-test' })

@@ -41,6 +41,22 @@ describe('video watch queue', () => {
     expect(store.lastWatchedAt).toBeTypeOf('number')
   })
 
+  it('groups what she watched by day without touching the thought stream', () => {
+    const store = useVideoWatchStore()
+    const first = store.enqueue({ source: 'BV1', why: 'a' })!
+    const second = store.enqueue({ source: 'BV2', why: 'b' })!
+    store.markWatched(first.id, 'note one')
+    store.markWatched(second.id, 'note two')
+    // Pin one of them to the previous day.
+    store.items[0]!.watchedAt = new Date('2026-11-04T12:00:00').getTime()
+    store.items[1]!.watchedAt = new Date('2026-11-05T12:00:00').getTime()
+
+    const days = store.watchedByDay
+    expect(Object.keys(days).sort()).toEqual(['2026-11-04', '2026-11-05'])
+    expect(days['2026-11-04']?.map(item => item.source)).toEqual(['BV1'])
+    expect(days['2026-11-05']?.map(item => item.source)).toEqual(['BV2'])
+  })
+
   it('answers a recall with the note and the reason she queued it', () => {
     const store = useVideoWatchStore()
     const item = store.enqueue({ source: 'BV1', why: '因为好奇' })!

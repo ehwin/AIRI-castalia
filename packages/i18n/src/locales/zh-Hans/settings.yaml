@@ -1060,10 +1060,13 @@ pages:
       hidden: '{count} 条她留着没说'
       distill: 记住这一天
       distilled: 已记住
+      distill-failed: 没记住：记忆库没有接收这次写入
       reveal:
         label: 显示她写过的全部
         description: 默认关闭。藏起来，日记才是她的。
         warning: 打开后你会读到她没有选择说出口的内容。它就不再是日记了。
+      watched:
+        title: 看过的片子
       shared:
         title: 她说出口的
         empty: 还没有。几乎所有事她都自己留着。

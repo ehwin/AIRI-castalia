@@ -92,9 +92,10 @@ describe('screenSummary', () => {
 })
 
 describe('composeInnerVoice', () => {
-  it('says the diary title back to herself, in first person', () => {
+  it('names the owner as the subject, not herself', () => {
     const line = composeInnerVoice({ diary: DIARY, drives: idle, now: 0 })
-    expect(line).toContain('疲惫到不想做任何事')
+    expect(line).toContain('主人疲惫到不想做任何事')
+    expect(line).not.toContain('她疲惫')
     expect(line).not.toContain('情感记忆')
     expect(line).not.toContain('摘录')
   })

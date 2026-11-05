@@ -101,9 +101,16 @@ export const useDiaryStore = defineStore('diary', () => {
     loading.value = true
     try {
       adoptLegacyDays()
-      // A thought without a persona predates the split; the character reading the diary claims it.
-      thoughts.value = (await innerThoughtsRepo.readAll(limit))
-        .filter(thought => !thought.persona || thought.persona === scope.value)
+      // A thought written before the split has no persona. Adopt it for the card that reads the
+      // diary first, the same way `switchCharacter` does, so one character's day never shows up
+      // in another's diary.
+      const all = await innerThoughtsRepo.readAll(limit)
+      const legacy = all.filter(thought => !thought.persona)
+      for (const thought of legacy)
+        thought.persona = scope.value
+      if (legacy.length)
+        await Promise.all(legacy.map(thought => innerThoughtsRepo.append(thought)))
+      thoughts.value = all.filter(thought => thought.persona === scope.value)
       loadedAt.value = Date.now()
     }
     finally {
@@ -112,12 +119,12 @@ export const useDiaryStore = defineStore('diary', () => {
   }
 
   /**
-   * Turns one day into a single general memory.
+   * Turns one day into a single diary row.
    *
-   * The raw lines stay in the diary. Only the distilled entry reaches long-term
-   * memory, so a day costs one index line instead of a transcript.
+   * The raw lines stay in the diary. Only the distilled day reaches memory, and it lands in the
+   * diary partition, so the prompt index and an ordinary search never read it.
    */
-  function distill(date: string) {
+  async function distill(date: string) {
     const day = byDay.value.find(item => item.date === date)
     if (!day)
       return undefined
@@ -126,9 +133,17 @@ export const useDiaryStore = defineStore('diary', () => {
     if (!entry)
       return undefined
 
-    // Her day becomes her memory, under the persona that chats. It is never shared with another character.
-    const { entry: stored } = memory.write(entry, memory.resolvePersona(scope.value))
-    if (!stored)
+    // Her day becomes her memory in the diary partition: one row per day, readable only when
+    // someone asks the diary. It stays out of the prompt index, the ordinary search and the graph.
+    const written = await memory.rememberDay({
+      date,
+      description: entry.description,
+      body: entry.body,
+      persona: memory.resolvePersona(scope.value),
+    })
+    // The backend answer is what decides. Marking the day before it lands left "已记住" on a memory
+    // the bank rolled back (and never retried).
+    if (!written.ok)
       return undefined
     if (!hasDistilled(date))
       distilledDays.value = [...distilledDays.value, date]

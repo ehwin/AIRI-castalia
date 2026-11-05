@@ -26,7 +26,10 @@ export const useFeatureFlagsStore = defineStore('feature-flags', () => {
   })
 
   function decision(feature: FeatureFlag) {
-    return resolveFeatureFlag(feature, preferences.value[feature.key])
+    // This fork has no account and no server policy: a flag is a device choice, so the policy and
+    // the sign-in state are always the fork's defaults (none, signed out). Every offered flag is
+    // `availability: 'local'`, so that reaches only the local branch of the resolver.
+    return resolveFeatureFlag(feature, preferences.value[feature.key], undefined, false)
   }
 
   /** The variant of a feature: the saved one while the feature still offers it, otherwise the first one. */

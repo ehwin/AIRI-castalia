@@ -29,7 +29,7 @@ import { chatAssetIdFrom, inlineConversationAssets, storeChatAttachments } from 
 import { extractMessageText } from '../libs/chat-sync'
 import { syncedRoles } from '../libs/pinia/synced-context'
 import { getSpeechBusContext, voiceGenerationEnded } from '../services/speech/bus'
-import { createCastaliaStateTools } from '../tools/castalia'
+import { createCastaliaDiaryTools, createCastaliaStateTools } from '../tools/castalia'
 import { composeDrawCardPrompt, createDrawCardTool, DRAW_CARD_TOOL_NAME, drawCardContent } from '../tools/draw-card'
 import { createJudgeRecipeTool, judgmentSkillText } from '../tools/judge-recipe'
 import { composeMemoryPrompt, createMemoryTools } from '../tools/memory'
@@ -312,6 +312,14 @@ export const useChatStore = defineStore('chat', () => {
   }
   // The runtime ingests context before it stores the user turn, so the policy reads the pending text.
   const pendingUserTurns = new Map<string, { id: string, text: string }>()
+  /**
+   * The verdict the model gave for the turn still being written.
+   *
+   * `recordEmotion` runs while the reply streams; `ingestTurn` runs after it. Keeping the verdict
+   * here lets the conversation row land already analyzed, so the VAD sweep never appraises the
+   * same turn twice. Cleared when the turn's ingest runs, skipped or not.
+   */
+  const explicitAffect = new Map<string, { vad: { valence: number, arousal: number, dominance: number }, reason: string }>()
 
   /** The last user turn of a session. The policy reads only that turn. */
   function lastUserTurn(sessionId: string) {
@@ -478,12 +486,18 @@ export const useChatStore = defineStore('chat', () => {
    */
   async function notifyConversation(sessionId: string, notice: { source: string, text: string }) {
     if (!isOwnerSession(sessionId))
-      return
+      return undefined
     try {
-      await executeSend({ sessionId, text: notice.text }, { notice: { source: notice.source } })
+      const result = await executeSend({ sessionId, text: notice.text }, { notice: { source: notice.source } })
+      // The reply is what she said out loud. The caller hands it to `markSaidOutLoud`, so a
+      // thought she repeated leaves the diary instead of sitting there forever.
+      const reply = result.messages.findLast(message => message.role === 'assistant')
+      const text = typeof reply?.content === 'string' ? stripAssistantMarkers(reply.content).slice(0, 8_000) : ''
+      return { ok: true as const, text }
     }
     catch (error) {
       console.warn('[chat] Failed to deliver a notice:', errorMessageFrom(error))
+      return { ok: false as const, text: '' }
     }
   }
 
@@ -692,19 +706,28 @@ export const useChatStore = defineStore('chat', () => {
       ...memory.enabled ? await createMemoryTools({ read: name => memory.read(name, persona), lookup: query => memory.lookup(query, 5, persona), write: entry => memory.write(entry, persona), forget: name => memory.forget(name, persona) }) : [],
       ...castalia.enabled
         ? await createCastaliaStateTools({
-            recordEmotion: (vad, reason) => {
-              // The prompt copy and the engine copy are two stores: this one is only read by the
-              // prompt and the panel, and the engine keeps its own psyche.
+            recordEmotion: async (vad, reason) => {
+              // Psyche belongs to the Castalia module, so `memory.enabled` does not gate it.
+              // The turn id makes a retry idempotent instead of a second appraisal.
+              const verdict = await memory.recordEmotion(vad, reason, persona, `emotion:turn:${correlation.conversationId}:${correlation.turnId}`)
+              // A port without an engine has no psyche to disagree with, so the prompt copy is the
+              // only copy. Every other refusal means the engine did not take it: do not mirror.
+              const landed = verdict.applied || verdict.reason === 'neutral' || verdict.reason === 'unsupported'
+              if (!landed)
+                return false
+              // Mirror only after the engine accepted the write. Writing the panel first left one
+              // moment in two states when the engine refused (the brain split).
               castalia.recordEmotion(vad, reason, persona)
-              // No gate on the memory module here: the psyche belongs to the Castalia module, and the
-              // main process refuses the write when that switch is off. Gating on `memory.enabled`
-              // meant a card could claim "情感经显式写入" while every write was skipped.
-              // The turn id is the idempotency key: a retried turn lands on the same event and the
-              // engine drops the repeat instead of counting the same sentence twice.
-              void memory.recordEmotion(vad, reason, persona, `emotion:turn:${correlation.conversationId}:${correlation.turnId}`)
+              explicitAffect.set(sessionId, { vad, reason })
+              return true
             },
             setDesire: desire => castalia.setDesire(desire, persona),
           })
+        : [],
+      // The diary is read only on request. Off without a diary port, so an empty read never
+      // passes for an empty diary.
+      ...castalia.enabled && memory.enabled && memory.diarySupported
+        ? await createCastaliaDiaryTools({ searchDiary: query => memory.searchDiary(query, 5, persona) })
         : [],
     ]
     // A recipe's own session runs only that recipe. It cannot start recipes, save them, or choose silence.
@@ -1134,6 +1157,10 @@ export const useChatStore = defineStore('chat', () => {
         void artistryAutonomousStore.runArtistTask(messageText, toProviderHistory(sessionMessages))
     },
     onAssistantTurnReady: ({ sessionId, messageText, sessionMessages }) => {
+      // A verdict belongs to one turn. Read and clear it here, so a skipped or task turn cannot
+      // hand its verdict to the next one.
+      const affect = explicitAffect.get(sessionId)
+      explicitAffect.delete(sessionId)
       if (!isOwnerTurn(sessionId, sessionMessages))
         return
       // 自回归结束 → 写回记忆体。这一轮说过的话就是她日后"记得"的唯一来源；
@@ -1149,7 +1176,7 @@ export const useChatStore = defineStore('chat', () => {
       else {
         // The turn is written under the card that said it, not under the configured character.
         const persona = memory.enabled ? memory.resolvePersona(personaOf(sessionId)) : personaOf(sessionId)
-        void memory.ingestTurn({ user: userText, assistant: assistantText, sessionId, persona })
+        void memory.ingestTurn({ user: userText, assistant: assistantText, sessionId, persona, ...(affect ? { affect } : {}) })
       }
       const artistry = sessionCard(sessionId)?.extensions?.airi?.modules?.artistry
       if (artistry?.autonomousEnabled && artistry?.autonomousTarget === 'assistant')

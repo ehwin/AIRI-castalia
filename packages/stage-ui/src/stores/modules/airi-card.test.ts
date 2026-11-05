@@ -4,7 +4,6 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { toRaw } from 'vue'
 
-import { splitCard } from '../../libs/character-card-sync'
 import { useDisplayModelsStore } from '../display-models'
 import { useProviderStore } from '../providers/provider'
 import { useSettingsStageModel } from '../settings/stage-model'
@@ -373,7 +372,7 @@ describe('airi-card store', () => {
       name: 'New Character',
       version: '1.0.0',
       description: '',
-    }, 'scratch', 'preset-vrm-1')
+    }, 'preset-vrm-1')
 
     const card = cardStore.getCard(cardId)
     expect(card?.extensions.airi.avatarModels).toHaveLength(1)
@@ -534,7 +533,7 @@ describe('airi-card store', () => {
           agents: {},
         },
       },
-    }, 'import')
+    })
     const inactiveCardId = await cardStore.addCard(cardStore.getCard(cardId)!, 'duplicate')
     await cardStore.activateCard(cardId)
     expect(cardStore.selectedAvatarModel?.displayModelId).toBe('display-model-imported')
@@ -594,7 +593,7 @@ describe('airi-card store', () => {
           agents: {},
         },
       },
-    }, 'import')
+    })
     await cardStore.activateCard(cardId)
 
     expect(cardStore.selectedAvatarModel?.displayModelId).toBe('display-model-on-other-device')
@@ -608,7 +607,7 @@ describe('airi-card store', () => {
     expect(useSettingsStageModel().stageModelSelected).toBe('display-model-on-other-device')
   })
 
-  it('removes the references to a model only when the model is gone from the account', async () => {
+  it('removes the reference to a model that this device no longer stores', async () => {
     const cardStore = useAiriCardStore()
     await cardStore.initialize()
     const displayModelsStore = useDisplayModelsStore()
@@ -632,27 +631,16 @@ describe('airi-card store', () => {
           agents: {},
         },
       },
-    }, 'import')
+    })
     const referencedModels = () => cardStore.getCard(cardId)?.extensions.airi.avatarModels.map(model => model.displayModelId)
-    displayModelsStore.cloudModels = [{
-      id: 'display-model-cloud',
-      format: 'vrm',
-      name: 'Cloud model',
-      originalFilename: 'cloud.vrm',
-      byteSize: 5,
-      sha256: 'checksum',
-      revision: 1,
-      createdAt: '2026-10-14T00:00:00.000Z',
-      updatedAt: '2026-10-14T00:00:00.000Z',
-      deletedAt: null,
-    }]
 
-    // Removing the local copy frees space. The account keeps the model, so it can download again.
+    // This fork has no account that could download a removed file back, so a model that leaves
+    // the device takes its references with it.
     await displayModelsStore.removeDisplayModel('display-model-cloud')
-    expect(referencedModels()).toEqual(['display-model-cloud', 'display-model-local'])
+    expect(referencedModels()).toEqual(['display-model-local'])
 
     await displayModelsStore.removeDisplayModel('display-model-local')
-    expect(referencedModels()).toEqual(['display-model-cloud'])
+    expect(referencedModels()).toEqual([])
   })
 
   it('does not infer a default Avatar Model from other available references', async () => {
@@ -1049,178 +1037,5 @@ describe('airi-card store', () => {
 
     expect(cardStore.activeCardId).toBe('default')
     expect(cardStore.activeCard?.name).toBe('ReLU')
-  })
-
-  describe('applySynchronizedCards', () => {
-    const noChanges = { upserts: {}, removals: [], conflictCopies: [] }
-
-    it('stores a card from another device without a local change to its parts', async () => {
-      const cardStore = useAiriCardStore()
-      await cardStore.initialize()
-      const remoteParts = splitCard({ ...cardStore.builtInCard, name: 'Luna' })
-
-      const { activeCardChanged, rejected } = cardStore.applySynchronizedCards({ ...noChanges, upserts: { luna: remoteParts } })
-
-      expect(activeCardChanged).toBe(false)
-      expect(rejected).toEqual([])
-      expect(splitCard(cardStore.cards.get('luna')!)).toEqual(remoteParts)
-    })
-
-    it('reports a change to the content of the selected card', async () => {
-      const cardStore = useAiriCardStore()
-      await cardStore.initialize()
-      const parts = splitCard({ ...cardStore.builtInCard, name: 'Luna' })
-
-      const { activeCardChanged } = cardStore.applySynchronizedCards({ ...noChanges, upserts: { default: parts } })
-
-      expect(activeCardChanged).toBe(true)
-      expect(cardStore.activeCardId).toBe('default')
-    })
-
-    it('selects the built-in card when another device deleted the selected card', async () => {
-      const cardStore = useAiriCardStore()
-      await cardStore.initialize()
-      const cardId = await cardStore.addCard({ name: 'Luna', version: '1.0.0' }, 'scratch')
-      await cardStore.activateCard(cardId)
-
-      const { activeCardChanged } = cardStore.applySynchronizedCards({ ...noChanges, removals: [cardId, 'default'] })
-
-      expect(activeCardChanged).toBe(true)
-      expect(cardStore.cards.has(cardId)).toBe(false)
-      expect(cardStore.cards.has('default')).toBe(true)
-      expect(cardStore.activeCardId).toBe('default')
-    })
-
-    it('keeps a conflict copy as a new card', async () => {
-      const cardStore = useAiriCardStore()
-      await cardStore.initialize()
-      const fields = splitCard({ ...cardStore.builtInCard, name: 'Luna', description: 'Local version' })
-
-      cardStore.applySynchronizedCards({ ...noChanges, conflictCopies: [{ documentId: 'luna', fields }] })
-
-      const copies = [...cardStore.cards].filter(([id]) => id !== 'default')
-      expect(copies).toHaveLength(1)
-      expect(copies[0][1].description).toBe('Local version')
-      expect(copies[0][1].name).toBe('settings.pages.card.sync.conflict_copy_name')
-    })
-
-    // A card from another device can break the parser of this device. The run
-    // must go on with the other cards and report the card as rejected.
-    it.each([
-      ['has no name', { '/description': 'No name' }],
-      ['has wake words that are not a list', { '/name': 'Luna', '/version': '1.0.0', '/extensions/airi/wakeWords': 'not a list' }],
-    ])('rejects a card from another device that %s and applies the others', async (_, brokenFields) => {
-      const cardStore = useAiriCardStore()
-      await cardStore.initialize()
-      const goodFields = splitCard({ ...cardStore.builtInCard, name: 'Luna' })
-
-      const { rejected } = cardStore.applySynchronizedCards({ ...noChanges, upserts: { broken: brokenFields, luna: goodFields } })
-
-      expect(rejected).toEqual(['broken'])
-      expect(cardStore.cards.has('broken')).toBe(false)
-      expect(cardStore.cards.get('luna')?.name).toBe('Luna')
-    })
-
-    // Found in the review of https://github.com/moeru-ai/airi/pull/2817
-    // ROOT CAUSE:
-    //
-    // The store rejected an unreadable remote card but still made its conflict
-    // copy. The sync state did not change, so each round made one more copy.
-    //
-    // We fixed this by making copies only for cards that were not rejected.
-    it('creates no conflict copy for a card that it rejects', async () => {
-      const cardStore = useAiriCardStore()
-      await cardStore.initialize()
-      const cardId = await cardStore.addCard({ name: 'Luna', version: '1.0.0', description: 'Local version' }, 'scratch')
-      const localFields = splitCard(cardStore.cards.get(cardId)!)
-
-      const { rejected } = cardStore.applySynchronizedCards({
-        upserts: { [cardId]: { '/description': 'No name' } },
-        removals: [],
-        conflictCopies: [{ documentId: cardId, fields: localFields }],
-      })
-
-      expect(rejected).toEqual([cardId])
-      expect([...cardStore.cards.keys()]).toEqual(['default', cardId])
-      expect(cardStore.cards.get(cardId)?.description).toBe('Local version')
-    })
-
-    // Found in the review of https://github.com/moeru-ai/airi/pull/2817
-    // ROOT CAUSE:
-    //
-    // An unreadable copy threw after the upsert replaced the local card. The
-    // next run found no conflict, so the local edit was lost.
-    //
-    // We fixed this by reading every card before the first write.
-    it('keeps the local card when its conflict copy cannot be read', async () => {
-      const cardStore = useAiriCardStore()
-      await cardStore.initialize()
-      const cardId = await cardStore.addCard({ name: 'Luna', version: '1.0.0', description: 'Local version' }, 'scratch')
-      const remoteFields = splitCard({ ...cardStore.cards.get(cardId)!, description: 'Remote version' })
-
-      const { rejected } = cardStore.applySynchronizedCards({
-        upserts: { [cardId]: remoteFields },
-        removals: [],
-        conflictCopies: [{ documentId: cardId, fields: { '/description': 'No name' } }],
-      })
-
-      expect(rejected).toEqual([cardId])
-      expect([...cardStore.cards.keys()]).toEqual(['default', cardId])
-      expect(cardStore.cards.get(cardId)?.description).toBe('Local version')
-    })
-
-    // Each device creates the built-in card in its own language. Only the edits travel between devices.
-    describe('the built-in card', () => {
-      it('shows the built-in parts that the remote edits do not replace', async () => {
-        const cardStore = useAiriCardStore()
-        await cardStore.initialize()
-        const builtInDescription = cardStore.cards.get('default')?.description
-
-        const { rejected } = cardStore.applySynchronizedCards({ ...noChanges, upserts: { default: { '/systemPrompt': 'Be kind' } } })
-
-        expect(rejected).toEqual([])
-        expect(cardStore.cards.get('default')).toMatchObject({ name: 'ReLU', description: builtInDescription, systemPrompt: 'Be kind' })
-      })
-
-      // Every device ships the preset Avatar Model. Its reference is built-in content, not an edit.
-      it('sends no parts for the preset Avatar Model of an unedited built-in card', async () => {
-        const cardStore = useAiriCardStore()
-        await cardStore.initialize()
-
-        expect(splitCard(cardStore.cards.get('default')!, [cardStore.builtInCard])).toEqual({})
-      })
-
-      it('keeps the preset Avatar Model when the remote edits do not replace it', async () => {
-        const cardStore = useAiriCardStore()
-        await cardStore.initialize()
-
-        cardStore.applySynchronizedCards({ ...noChanges, upserts: { default: { '/systemPrompt': 'Be kind' } } })
-
-        expect(cardStore.cards.get('default')?.extensions.airi.defaultAvatarModelId).toBe('default-live2d-avatar-model')
-        expect(cardStore.cards.get('default')?.extensions.airi.avatarModels).toEqual([
-          expect.objectContaining({ id: 'default-live2d-avatar-model', displayModelId: 'preset-live2d-1' }),
-        ])
-      })
-
-      it('goes back to the built-in part when the remote edit is gone', async () => {
-        const cardStore = useAiriCardStore()
-        await cardStore.initialize()
-        cardStore.applySynchronizedCards({ ...noChanges, upserts: { default: { '/systemPrompt': 'Be kind' } } })
-
-        cardStore.applySynchronizedCards({ ...noChanges, upserts: { default: {} } })
-
-        expect(cardStore.cards.get('default')?.systemPrompt).toBeUndefined()
-      })
-
-      it('keeps the edits of the built-in card as a complete conflict copy', async () => {
-        const cardStore = useAiriCardStore()
-        await cardStore.initialize()
-
-        cardStore.applySynchronizedCards({ ...noChanges, conflictCopies: [{ documentId: 'default', fields: { '/systemPrompt': 'Mine' } }] })
-
-        const [copy] = [...cardStore.cards].filter(([id]) => id !== 'default')
-        expect(copy[1]).toMatchObject({ description: cardStore.cards.get('default')?.description, systemPrompt: 'Mine' })
-      })
-    })
   })
 })
