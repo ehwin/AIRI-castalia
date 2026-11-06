@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { describeCastaliaEngineConfig } from './castalia-engine'
+import { describeCastaliaEngineConfig, resolveCastaliaEngineOptions } from './castalia-engine'
 
 const dirs: string[] = []
 
@@ -64,6 +64,27 @@ describe('describeCastaliaEngineConfig', () => {
     const described = describeCastaliaEngineConfig(dir)
     expect(described.ok).toBe(false)
     expect(described.reason).toContain(bankDir)
+  })
+
+  // 全新安装：没有 castalia-engine.json 也不该退回「只有条目仓储」。引擎代码在包里，
+  // 缺的只是库目录 —— 这里给出 userData 下的默认库，并允许无 config 打开（固定 FTS）。
+  it('hands a fresh profile its own bank under userData', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'castalia-config-'))
+    dirs.push(dir)
+
+    const described = describeCastaliaEngineConfig(dir)
+
+    expect(described).toMatchObject({ ok: true, source: 'default', project: 'airi', character: 'default' })
+    expect(described.bankDir).toBe(join(dir, 'memory-banks'))
+    expect(existsSync(described.bankDir!)).toBe(true)
+    expect(resolveCastaliaEngineOptions(dir)?.allowNoConfig).toBe(true)
+  })
+
+  it('does not fall back to the default when a config file exists but its bank is missing', () => {
+    const { dir } = scratch({}, { bank: false })
+
+    expect(describeCastaliaEngineConfig(dir).ok).toBe(false)
+    expect(resolveCastaliaEngineOptions(dir)).toBeUndefined()
   })
 
   it('reports an explicitly disabled config', () => {

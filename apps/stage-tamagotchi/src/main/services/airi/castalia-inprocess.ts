@@ -76,6 +76,8 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
       bankDir: options.bankDir,
       project: options.project,
       charId: character,
+      // 内置默认库没有 config.json：允许无配置打开（固定 FTS），否则全新安装一开库就抛错。
+      ...(options.allowNoConfig ? { allowNoConfig: true } : {}),
     }).catch((error) => {
       if (banks.get(character) === guarded)
         banks.delete(character)

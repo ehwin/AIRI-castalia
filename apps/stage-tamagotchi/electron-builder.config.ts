@@ -129,6 +129,12 @@ export default {
       to: 'godot-stage',
       filter: ['**/*'],
     },
+    {
+      // 记忆库的向量扩展。不随包走的话，换台机器就只剩 FTS：`sqlite-shim.ts` 只在
+      // resourcesPath 下和本机运行库里找这个 dll。
+      from: 'node_modules/sqlite-vec-windows-x64/vec0.dll',
+      to: 'castalia/vec0.dll',
+    },
   ],
   extraMetadata: {
     // CI names each build in `ERGOSPHERE_IT_VERSION`, for example `0.13.1-nightly.45.1bf946f`. The installer and its

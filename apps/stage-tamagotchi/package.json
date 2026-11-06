@@ -49,6 +49,7 @@
     "@xsai-apple-vision/vision-native": "catalog:",
     "electron-click-drag-plugin": "catalog:",
     "electron-updater": "^6.8.9",
+    "sqlite-vec-windows-x64": "catalog:",
     "uiohook-napi": "catalog:"
   },
   "optionalDependencies": {

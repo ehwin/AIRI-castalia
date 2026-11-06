@@ -118,7 +118,8 @@ export const useDiaryStore = defineStore('diary', () => {
   /** True while a day is being remembered, so a slow write does not start twice. */
   const remembering = ref(false)
 
-  async function load(limit = 200) {
+  // 页面的读窗口要和补记对齐：200 条念头只够六天，再往前她在页面里就像没写过。
+  async function load(limit = CATCH_UP_THOUGHTS) {
     loading.value = true
     try {
       adoptLegacyDays()

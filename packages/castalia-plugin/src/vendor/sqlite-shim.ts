@@ -7,10 +7,25 @@
 //          close · loadExtension · 命名参数 @name）。多了会假装支持，少了会静默出错。
 // 移除条件: better-sqlite3 换成 Node-API 版本，或 Electron 侧不再需要进程内嵌入。
 import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+
+/**
+ * 打包后的 `vec0.dll` 随 app 走（`resources/castalia/vec0.dll`）。
+ *
+ * `process.resourcesPath` 只有 Electron 主进程里有；在纯 Node 下跑（测试、引擎命令行）就是
+ * undefined，这里只是少一个候选，不影响后面的枚举。
+ */
+// `resourcesPath` 是 Electron 塞进 process 的，@types/node 里没有这个字段。
+const ELECTRON_RESOURCES = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath
+const BUNDLED_VEC = ELECTRON_RESOURCES
+  ? join(ELECTRON_RESOURCES, 'castalia', 'vec0.dll')
+  : undefined
 
 const VEC_CANDIDATES = [
   process.env.CASTALIA_VEC_EXT,
+  // 随包分发的那份优先：换机器、换目录它都在，不依赖运行库装在哪。
+  BUNDLED_VEC,
   // 运行库优先：AIRI 只依赖 D:/castalia/run（/d/system/AIRI/castalia 是指向它的 junction）。
   // 2026-11-02: 删掉 D:/AI/castalia（源码仓）兜底 —— 那条路会让 AIRI 在运行库缺件时
   // 静默回落到源码层，等于把源码树变成隐式依赖。

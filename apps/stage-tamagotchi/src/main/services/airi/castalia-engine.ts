@@ -4,7 +4,7 @@ import type { CastaliaRecalledMemory, CastaliaSearchedFact, CastaliaSearchedMemo
 
 import process from 'node:process'
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { parseBankTime } from '@proj-airi/castalia-plugin/bank/time'
@@ -31,6 +31,14 @@ export interface CastaliaEngineOptions {
   character: string
   /** Node runtime for the engine. Must match the ABI the engine's native modules were built for. */
   nodeBinary: string
+  /**
+   * 这台机器上还没有 `config.json`（走内置默认库）。
+   *
+   * 引擎以写模式打开库时会用 config.json 里的嵌入设置对比嵌入空间哈希；没有配置时它不敢开，
+   * 怕被当成「换了嵌入模型」而清空派生索引。全新安装的库本来就是空的，允许无配置打开，
+   * 并且固定走 FTS，直到用户自己放进一份 config.json。
+   */
+  allowNoConfig?: boolean
 }
 
 interface CastaliaEngineConfigFile {
@@ -43,9 +51,12 @@ interface CastaliaEngineConfigFile {
 }
 
 /**
- * The engine and the bank live outside AIRI, so their paths come from
- * `<userData>/castalia-engine.json` or the environment. There is no built-in
- * default: a path from one machine must never ship in the bundle.
+ * Paths come from `<userData>/castalia-engine.json` or the environment.
+ *
+ * 有一条内置默认:配置不存在时，AIRI 用自己 userData 下的 `memory-banks`。引擎代码本来就在
+ * 包里（`vendor/engine` 的进程内镜像），缺的只是一个库目录 —— 没有默认值的时候，全新安装
+ * 只能落在「只有条目仓储」，日记和念头永远不出现，等于这套东西只在开发机上存在。
+ * 配置一旦存在就完全按配置来，不会拿默认值盖掉坏路径（`enabled=false`、写错目录都照报）。
  */
 
 /** Reads `<userData>/castalia-engine.json`; a missing or malformed file counts as empty. */
@@ -75,18 +86,41 @@ export function readCastaliaEngineConfig(userDataDir: string): CastaliaEngineCon
 export function describeCastaliaEngineConfig(userDataDir: string): {
   ok: boolean
   reason?: string
+  /** `default` = 没有配置文件，用 AIRI 自己在 userData 下的库。 */
+  source?: 'config' | 'default'
   engineEntry?: string
   bankDir?: string
   project?: string
   character?: string
   nodeBinary?: string
 } {
+  const configFile = join(userDataDir, 'castalia-engine.json')
+  const configured = existsSync(configFile)
   const config = readCastaliaEngineConfig(userDataDir)
   const inProcess = process.env.CASTALIA_MEMORY_TRANSPORT !== 'stdio'
   if (config.enabled === false)
     return { ok: false, reason: 'castalia-engine.json 写了 enabled=false' }
   const engineEntry = process.env.CASTALIA_ENGINE_ENTRY || config.engineEntry
-  const bankDir = process.env.CASTALIA_BANK_DIR || config.bankDir
+  const configuredBank = process.env.CASTALIA_BANK_DIR || config.bankDir
+  // 没有配置文件 = 全新安装：库放在这台机器的 userData 下，目录自己建。
+  if (!configuredBank && !configured) {
+    const own = join(userDataDir, 'memory-banks')
+    try {
+      mkdirSync(own, { recursive: true })
+    }
+    catch (error) {
+      return { ok: false, reason: `默认记忆库建不出来：${own}（${(error as Error).message}）` }
+    }
+    return {
+      ok: true,
+      source: 'default',
+      bankDir: own,
+      project: 'airi',
+      character: 'default',
+      nodeBinary: 'node',
+    }
+  }
+  const bankDir = configuredBank
   if (!bankDir)
     return { ok: false, reason: 'castalia-engine.json 缺少 bankDir' }
   if (!existsSync(bankDir))
@@ -100,6 +134,7 @@ export function describeCastaliaEngineConfig(userDataDir: string): {
   }
   return {
     ok: true,
+    source: 'config',
     ...(engineEntry ? { engineEntry } : {}),
     bankDir,
     project: process.env.CASTALIA_PROJECT || config.project || 'airi',
@@ -118,6 +153,7 @@ export function resolveCastaliaEngineOptions(userDataDir: string): CastaliaEngin
     project: described.project ?? 'airi',
     character: described.character ?? 'airi',
     nodeBinary: described.nodeBinary ?? 'node',
+    allowNoConfig: described.source === 'default',
   }
 }
 

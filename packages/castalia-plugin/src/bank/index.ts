@@ -6,7 +6,27 @@
 //      下面的 openBank 因此强制校验 config，缺失直接抛错，不给静默清库的机会。
 // 移除条件: 引擎提供稳定的、无环境变量耦合的工厂 API 后，这层可以退化成薄包装。
 import { existsSync } from 'node:fs'
+import process from 'node:process'
 import { join } from 'node:path'
+
+/**
+ * 这台机器上到底有没有可用的嵌入后端。
+ *
+ * `isEmbedEnabled()` 只回答「模式不是 none」；默认模式是 ollama，全新安装既没有 Ollama 也没有
+ * key，于是每次 `saveMemory` 都静默落一条无向量行。日记写完自检时把这条当成「嵌入端点故障」，
+ * 就会每小时拒收并重试，永远记不上一天。只有真的配了后端才要求向量；没配就按 FTS 走，
+ * 等用户接上嵌入后端，`batchEmbedPending` 会把日记补上。
+ */
+function embeddingsConfigured(env: { isEmbedEnabled: () => boolean }): boolean {
+  if (!env.isEmbedEnabled())
+    return false
+  const mode = (process.env.EMBED_MODE || 'ollama').toLowerCase().trim()
+  if (mode === 'api')
+    return Boolean((process.env.EMBEDDING_API_KEY || '').trim())
+  if (mode === 'ollama')
+    return Boolean((process.env.OLLAMA_URL || '').trim())
+  return true
+}
 
 interface SelfCycleOptions {
   project?: string
@@ -370,7 +390,10 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
           conn.prepare('UPDATE memory SET is_active = 0, updated_at = ? WHERE id = ?').run(new Date().toISOString(), row.id)
           // 引擎自己的约定是「删行先删向量」。软删留着向量时，每次重记都多一条高相似死向量，
           // 几十次之后 KNN 的 40 个候选位会先被同一天的旧版本占满，真正的日记反而挤不进去。
-          try { conn.prepare('DELETE FROM vec_memory WHERE rowid = (SELECT rowid FROM memory WHERE id = ?)').run(row.id) } catch { /* 无 vec 表 */ }
+          try {
+            conn.prepare('DELETE FROM vec_memory WHERE rowid = (SELECT rowid FROM memory WHERE id = ?)').run(row.id)
+          }
+          catch { /* 无 vec 表 */ }
         }
         const record = await store.saveMemory({
           text,
@@ -389,7 +412,7 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
         ).run(new Date().toISOString(), record.id, project, persona, `# ${name}%`)
         // 嵌入端点故障时 saveMemory 会静默落一条无向量行：这一天被标成「已记住」，却永远搜不到。
         // 补嵌入的 sweep 只走 5 个 memType 目录，日记不在其中，所以只能在这里发现并拒收，让它下次再记。
-        if (engineEnv.isEmbedEnabled()) {
+        if (embeddingsConfigured(engineEnv)) {
           let missing = false
           try {
             missing = !conn.prepare('SELECT 1 FROM vec_memory WHERE rowid = (SELECT rowid FROM memory WHERE id = ?)').get(record.id)
@@ -472,11 +495,14 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
         `SELECT id, text, created_at, metadata FROM memory
          WHERE is_active = 1 AND project = ? AND character_id IS ?
          ORDER BY created_at DESC LIMIT ?`,
-      ).all(project, persona, options.limit ?? 2000) as any[]
+      ).all(project, persona, options.limit ?? 6000) as any[]
       return rows.map((row) => {
         const { name, body } = parseStoreText(String(row.text ?? ''))
         let meta: any = {}
-        try { meta = JSON.parse(String(row.metadata ?? '{}')) } catch { /* 旧行没有 metadata */ }
+        try {
+          meta = JSON.parse(String(row.metadata ?? '{}'))
+        }
+        catch { /* 旧行没有 metadata */ }
         const stamp = String(name ?? '').replace(/^thought-/, '')
         return {
           id: stamp || String(row.id),

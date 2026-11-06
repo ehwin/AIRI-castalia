@@ -64,7 +64,7 @@ export const useThoughtsStore = defineStore('thoughts', () => {
 
   const total = computed(() => thoughts.value.length)
 
-  async function load(limit = 2000) {
+  async function load(limit = 6000) {
     loading.value = true
     error.value = ''
     try {
