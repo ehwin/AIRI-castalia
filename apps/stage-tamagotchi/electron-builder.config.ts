@@ -135,6 +135,35 @@ export default {
       from: 'node_modules/sqlite-vec-windows-x64/vec0.dll',
       to: 'castalia/vec0.dll',
     },
+    {
+      // 记忆体控制台（星图 / 总成 / 库管理）。以子进程跑在 `ELECTRON_RUN_AS_NODE` 下，
+      // 由主进程拉起后丢进 iframe；不再是「装个 Node、再开个浏览器」。
+      // better-sqlite3 排除：那份原生模块是给本机 Node 编的，在 Electron 的 ABI 下装得上、
+      // 一用就炸；`routes/sqlite-compat.js` 会自动退到 `node:sqlite`。
+      from: '../../viz',
+      to: 'castalia-console',
+      filter: [
+        '**/*',
+        '!node_modules/**',
+        '!**/*.bak-*',
+        '!logs/**',
+        '!package-lock.json',
+        '!viz-launch.log',
+      ],
+    },
+    {
+      // 控制台自己的依赖（express 及其传递依赖）。extraResources 不递归 node_modules，
+      // 所以单列一条：少了这份，子进程一起就 `Cannot find package 'express'`。
+      // better-sqlite3 排除在外——它是给本机 Node 编的，Electron 的 ABI 下用不了，
+      // `routes/sqlite-compat.js` 会退到 `node:sqlite`。
+      from: '../../viz/node_modules',
+      to: 'castalia-console/node_modules',
+      filter: [
+        '**/*',
+        '!better-sqlite3/**',
+        '!.bin/**',
+      ],
+    },
   ],
   extraMetadata: {
     // CI names each build in `ERGOSPHERE_IT_VERSION`, for example `0.13.1-nightly.45.1bf946f`. The installer and its

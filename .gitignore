@@ -168,7 +168,14 @@ apps/*/src/renderer/public/sherpaw/
 /lobehub/
 /_legacy-0.11/
 /AIRI/
-/viz/
+# 控制台（星图 / 总成 / 库管理）随公开版一起发，源码要能复现构建；
+# 只忽略它自己的依赖、日志和编辑器残留。
+/viz/node_modules/
+/viz/logs/
+/viz/*.log
+/viz/*.log.*
+/viz/**/*.bak-*
+/viz/package-lock.json
 /Uninstall*
 /scripts/castalia.config.json.bak-*
 *.bak-20261029-migrate

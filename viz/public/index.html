@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Castalia · 分区星图</title>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+<div id="loading">Castalia 正在展开星图</div>
+<div id="loadprog" hidden>
+  <div class="lp-track"><div class="lp-fill"></div></div>
+  <div class="lp-row"><span class="lp-stage">读取记忆库</span><span class="lp-time">0.0s</span></div>
+</div>
+<div id="graph"></div>
+<div id="vignette"></div>
+
+<aside id="rail">
+  <a class="mark" href="http://127.0.0.1:3348/?scope=federation" data-tip="Castalia"><img src="/castalia-mark.png" alt="Castalia"></a>
+  <a class="rail-btn" id="rail-fed" href="http://127.0.0.1:3348/?scope=federation" data-tip="联邦总图"><i class="rail-dot" style="color:var(--fed);background:var(--fed)"></i></a>
+  <a class="rail-btn" id="rail-hermes" href="http://127.0.0.1:3345/?scope=local" data-tip="Hermes"><i class="rail-dot" style="color:var(--hermes);background:var(--hermes)"></i></a>
+  <a class="rail-btn" id="rail-lobehub" href="http://127.0.0.1:3346/?scope=local" data-tip="LobeHub"><i class="rail-dot" style="color:var(--lobehub);background:var(--lobehub)"></i></a>
+  <a class="rail-btn" id="rail-airi" href="http://127.0.0.1:3344/?scope=local" data-tip="AIRI"><i class="rail-dot" style="color:var(--airi);background:var(--airi)"></i></a>
+  <a class="rail-btn" id="rail-dsh" href="http://127.0.0.1:3347/?scope=local" data-tip="DeepSeek Harness"><i class="rail-dot" style="color:#56b4ff;background:#56b4ff"></i></a>
+  <div class="rail-sep"></div>
+  <a class="rail-btn" href="/aggregate.html" data-tip="记忆总成">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>
+  </a>
+  <a class="rail-btn" href="/manage.html" data-tip="库管理">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.66 3.13 3 7 3s7-1.34 7-3V6M5 12v6c0 1.66 3.13 3 7 3s7-1.34 7-3v-6"/></svg>
+  </a>
+  <div class="rail-spacer"></div>
+  <button class="rail-btn" id="admin-btn" onclick="toggleAdmin()" data-tip="设置" type="button">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M3 12h2M19 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+  </button>
+</aside>
+
+<div id="top-bar">
+  <span class="logo" id="app-logo">Castalia <em id="app-sub">星图</em></span>
+  <span class="stat-pill">记忆 <b id="stat-nodes">—</b></span>
+  <span class="stat-pill">连线 <b id="stat-links">—</b></span>
+  <nav id="map-tabs">
+    <a class="map-tab" id="tab-federation" href="http://127.0.0.1:3348/?scope=federation"><i style="background:var(--fed)"></i>联邦</a>
+    <a class="map-tab" id="tab-hermes" href="http://127.0.0.1:3345/?scope=local"><i style="background:var(--hermes)"></i>Hermes</a>
+    <a class="map-tab" id="tab-lobehub" href="http://127.0.0.1:3346/?scope=local"><i style="background:var(--lobehub)"></i>LobeHub</a>
+    <a class="map-tab" id="tab-airi" href="http://127.0.0.1:3344/?scope=local"><i style="background:var(--airi)"></i>AIRI</a>
+    <a class="map-tab" id="tab-dsh" href="http://127.0.0.1:3347/?scope=local"><i style="background:#56b4ff"></i>DSH</a>
+  </nav>
+  <div id="view-mode">
+    <button class="view-tab" id="view-star" type="button" onclick="setView('galaxy')">星系</button>
+    <button class="view-tab active" id="view-universe" type="button" onclick="setView('nebula')">星云</button>
+  </div>
+  <div id="search-bar">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+    <input type="text" id="search-input" placeholder="搜索记忆" />
+  </div>
+  <button id="tour-btn" class="tool-btn" onclick="toggleTour()" disabled title="导览" type="button">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z"/></svg>
+  </button>
+  <button id="fs-btn" class="tool-btn" onclick="toggleFullscreen()" title="全屏" type="button">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M21 16v5h-5"/></svg>
+  </button>
+</div>
+
+<div id="stats-bar">
+  <div id="stats-grid"></div>
+  <button id="stats-toggle" onclick="toggleStats()" title="折叠/展开统计">▾</button>
+</div>
+
+<div id="tour-indicator"><span class="dot"></span><span class="label" id="tour-indicator-label">AUTO-TOUR</span></div>
+
+<div id="legend">
+  <div class="legend-title" id="legend-struct-title">结构</div>
+  <div id="legend-struct"></div>
+  <div class="legend-divider"></div>
+  <div class="legend-link">点星系看分类 · 点分类看记忆</div>
+</div>
+
+<div id="controls-hint">星域→星座→星系 · 色系=星域 · 色阶=星座 · 点=星座色</div>
+
+<div id="side-panel">
+  <div class="panel-header">
+    <span class="panel-dot" id="panel-dot"></span>
+    <span class="panel-badge" id="panel-badge"></span>
+    <div class="panel-actions">
+      <button id="panel-back-btn" onclick="panelGoBack()" title="返回">←</button>
+      <button id="panel-star-btn" onclick="toggleStar()" title="星标">⭐</button>
+      <button id="panel-del-btn" onclick="deletePanelNode()" title="删除">🗑</button>
+      <button class="close-btn" onclick="closePanel()">×</button>
+    </div>
+  </div>
+  <div class="panel-text" id="panel-text"></div>
+  <div class="panel-section" id="panel-tree-section" style="display:none">
+    <div id="panel-tree"></div>
+  </div>
+  <div class="panel-section">
+    <div class="panel-section-label">时间</div>
+    <div class="panel-value" id="panel-time"></div>
+  </div>
+  <div class="panel-section">
+    <div class="panel-section-label">来源</div>
+    <div class="panel-value" id="panel-source"></div>
+  </div>
+  <div class="panel-section">
+    <div class="panel-section-label">重要度</div>
+    <div class="importance-bar"><div class="importance-fill" id="panel-importance"></div></div>
+    <div class="panel-importance-val" id="panel-importance-val"></div>
+  </div>
+  <div class="panel-section" id="panel-tags-section">
+    <div class="panel-section-label">标签</div>
+    <div id="panel-tags"></div>
+  </div>
+  <div class="panel-section" id="panel-rel-section">
+    <div class="panel-section-label">相连记忆</div>
+    <div id="panel-rel"></div>
+  </div>
+</div>
+
+<!-- ═══ 管理抽屉(副界面) ═══ -->
+<div id="admin-drawer">
+  <div class="adm-header">
+    <h2>记忆设置</h2>
+    <button class="adm-close" onclick="toggleAdmin()">×</button>
+  </div>
+
+  <div class="card">
+    <h3>全部 MCP</h3>
+    <p class="note">一份设置同时写入 Hermes / LobeHub / AIRI 的 <code>memory/config.json</code>。密钥留空则保留各端已有值。</p>
+    <div class="cfg-instances" id="cfgInstances"></div>
+    <div class="row" style="margin-top:8px">
+      <label>写入范围</label>
+      <select id="cfgApplyTo">
+        <option value="all" selected>全部实例</option>
+        <option value="local">仅当前实例</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>反思整理</h3>
+    <p class="note" style="margin-bottom:8px">把记忆发给大模型判断合并/拆分/关联/重分类（用当前实例的 MCP）</p>
+    <div class="btn-group">
+      <button class="btn btn-primary" id="btnRun" onclick="runReflect('auto')">▶ 日常反思</button>
+      <button class="btn btn-orange" id="btnDeep" onclick="runReflect('deep')">🔬 深度校准</button>
+    </div>
+    <div class="status-bar"><span id="lastRun">上次运行: 从未</span></div>
+  </div>
+
+  <div class="card">
+    <h3>🧬 嵌入模型</h3>
+    <div class="row">
+      <label>来源</label>
+      <select id="embedMode" onchange="toggleEmbedMode()">
+        <option value="ollama">Ollama（本地）</option>
+        <option value="api">API（云端）</option>
+        <option value="none">关闭（只用文本检索）</option>
+      </select>
+    </div>
+    <div id="embedOllamaFields">
+      <div class="row"><label>Ollama URL</label><input id="embOllamaUrl" placeholder="http://127.0.0.1:11436"></div>
+      <div class="row"><label>模型</label><input id="embOllamaModel" placeholder="yuan-embedding-2.0-zh"></div>
+    </div>
+    <div id="embedApiFields" style="display:none">
+      <div class="row"><label>API 地址</label><input id="embApiUrl" placeholder="https://api.siliconflow.cn/v1"></div>
+      <div class="row"><label>API Key</label><input id="embApiKey" type="password" placeholder="sk-..."></div>
+      <div class="row"><label>模型</label><input id="embApiModel" placeholder="BAAI/bge-m3"></div>
+    </div>
+    <div class="row"><label>维度 dim</label><input id="embDim" type="number" min="1" max="65536" placeholder="1024"></div>
+    <p class="note">⚠️ 维度取自本设置(config.json 的 embedding.dim,或环境变量 EMBEDDING_DIM),默认 1024。改维度后重启 MCP server:引擎会按新维度重建该 bank 的 vec_memory/vec_facts 索引(memory 正文与 facts 不受影响),向量按需重新嵌入。保存后重启 MCP server 生效</p>
+  </div>
+
+  <div class="card">
+    <h3>⚙️ 反思 LLM</h3>
+    <div class="row"><label>API 地址</label><input id="refUrl" placeholder="https://api.deepseek.com/v1"></div>
+    <div class="row"><label>API Key</label><input id="refKey" type="password" placeholder="sk-..."></div>
+    <div class="row"><label>模型</label><input id="refModel" placeholder="deepseek-chat"></div>
+    <div class="row"><label>事实提取</label>
+      <select id="refFactExtract">
+        <option value="auto">auto(反思时提取 facts)</option>
+        <option value="off">off(只整理 actions)</option>
+      </select>
+    </div>
+    <div class="row"><label>单轮上限</label><input id="refMaxFacts" type="number" min="1" max="100" placeholder="15"></div>
+    <div class="row"><label>启动间隔</label><input id="refMinGap" type="number" min="0" max="720" placeholder="24"> <span class="note" style="margin:0">小时</span></div>
+    <div class="row"><label>未分析条数</label><input id="refMinUnan" type="number" min="0" max="500" placeholder="5"></div>
+    <div class="row"><label>周期反思</label><input id="refInterval" type="number" min="0" max="720" step="0.5" placeholder="0"> <span class="note" style="margin:0">小时，0=关闭</span></div>
+    <p class="note">启动时：距上次反思 ≥ 间隔 且 未分析对话 ≥ 条数才自动跑。周期反思 &gt;0 则按小时循环。保存后重启 MCP 生效</p>
+  </div>
+
+  <div class="card">
+    <h3>分拣与会话缓冲</h3>
+    <p class="note" style="margin-bottom:8px">入站分拣通道。不填 API 则回退用反思 LLM。缓冲满了会后台做临时反思。</p>
+    <div class="row"><label>API 地址</label><input id="triUrl" placeholder="https://api.deepseek.com/v1"></div>
+    <div class="row"><label>API Key</label><input id="triKey" type="password" placeholder="sk-..."></div>
+    <div class="row"><label>模型</label><input id="triModel" placeholder="deepseek-chat"></div>
+    <div class="row"><label>缓冲轮次</label><input id="triBuffer" type="number" min="1" max="50" placeholder="5"></div>
+    <div class="row"><label>缓冲 Token</label><input id="triBufTok" type="number" min="500" max="32000" placeholder="4000"></div>
+    <div class="row"><label>会话 TTL</label><input id="triTtl" type="number" min="1" max="90" placeholder="7"> <span class="note" style="margin:0">天</span></div>
+  </div>
+
+  <div class="card">
+    <h3>记忆整合</h3>
+    <p class="note" style="margin-bottom:8px">条数过多时，启动后用向量预筛 + 反思 LLM 去重合并。源库只读。</p>
+    <div class="row"><label>触发条数</label><input id="consMin" type="number" min="0" max="5000" placeholder="15"></div>
+    <div class="row"><label>相似阈值</label><input id="consSim" type="number" min="0.5" max="0.99" step="0.01" placeholder="0.88"></div>
+    <div class="row"><label>启动时跑</label>
+      <select id="consAuto">
+        <option value="1">是</option>
+        <option value="0">否（只手动）</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="btn-group" style="margin-bottom:12px">
+    <button class="btn btn-primary" onclick="saveAllConfig()">保存到所选范围</button>
+    <span id="configStatus"></span>
+  </div>
+
+  <div class="card">
+    <h3>📝 记忆管理</h3>
+    <div class="row">
+      <input id="memFilter" placeholder="搜索记忆..." oninput="filterMems()">
+      <button class="btn btn-gray" onclick="loadMems()">↻</button>
+    </div>
+    <div id="memList"></div>
+  </div>
+
+  <div class="card">
+    <h3>📋 运行日志</h3>
+    <div id="log"></div>
+    <div class="btn-group"><button class="btn btn-gray" onclick="clearLog()">🗑 清日志</button></div>
+  </div>
+</div>
+
+<script type="module" src="/assets/boot.js"></script>
+<script src="/assets/diag.js"></script>
+<script src="/assets/app-01-config.js"></script>
+<script src="/assets/app-02-visual.js"></script>
+<script src="/assets/app-03-labels.js"></script>
+<script src="/assets/app-04-scene.js"></script>
+<script src="/assets/app-05-star.js"></script>
+<script src="/assets/app-06-nebula.js"></script>
+<script src="/assets/app-07-panels.js"></script>
+<script src="/assets/members.js"></script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+/*
+ * embed.css — 只在被 app 的 iframe 嵌进来时生效（`?embed=1`）。
+ *
+ * 换色和去壳都放在这里，不改控制台自己的样式：
+ * 1. 底色跟 app 走，别在设置页里突然出现一块纯黑方块；
+ * 2. 字体跟 app 一致，看起来是同一个应用；
+ * 3. 藏掉跨库跳转（rail 上的 3344-3348 和顶栏的库标签）——推广版只有本机这一个库，
+ *    那些链接在别人的机器上点开是空的；
+ * 4. 左侧竖条和顶栏留一点透明，让 app 的边距看起来连成一片。
+ */
+
+body {
+  background: #0b0d12 !important;
+  font-family: ui-sans-serif, system-ui, "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", sans-serif !important;
+}
+
+/* 跨库跳转：别人的机器上没有这些端口 */
+#rail a.rail-btn[id],
+#map-tabs a.map-tab[id] {
+  display: none !important;
+}
+
+#rail {
+  background: transparent !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+
+#top-bar {
+  background: transparent !important;
+}
+
+/* 设置页自己已经有标题了，嵌进来时不再重复一遍产品名 */
+#app-logo {
+  display: none !important;
+}
+
+#loading {
+  font-family: inherit !important;
+}

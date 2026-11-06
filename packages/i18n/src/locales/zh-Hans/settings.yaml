@@ -922,28 +922,12 @@ pages:
       noise: 动作变化幅度
       noise-description: 调整采样动作的噪声强度；数值越低越平稳，越高越多变。
       activation: 这些设置在 Live2D 动作驱动器选择 MAGIC 时生效。
-    memory-banks:
-      title: 记忆库
-      description: 看她库里到底存了什么：浏览、搜索、改、删
-      edition-private: 这一页只在公开版里出现；自己的构建用 3348 控制台。
-      lead: 直接读这台机器记忆目录下每个库的每个分区。改一行会顺手删掉它的向量，下一轮补嵌会重新算。
-      bank: 库
-      project: 项目
-      partition: 分区
-      all: 全部分区
-      search: 搜索
-      searching: 正在搜索…
-      search-placeholder: 你记得她说过的那句话
-      count: '{count} 行'
-      save: 保存
-      cancel: 取消
-      edit: 编辑
-      delete: 删除
-      updated: 已保存
-      deleted: 已删除
-      write-failed: 记忆库拒绝了这次写入
-      empty: 没有匹配。清空搜索框会列出最新的行。
-      no-vector: 还没有向量
+    memory-console:
+      title: 记忆体
+      description: 星图、记忆总成、库管理，全在 app 里
+      loading: 正在启动记忆体控制台…
+      failed: 记忆体控制台没起来
+      failed-hint: 它作为这个 app 的子进程运行。反复出现的话，看 app 数据目录里的日志。
 
     memory-api:
       title: 记忆服务

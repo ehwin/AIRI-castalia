@@ -227,11 +227,11 @@ export function useModulesList() {
     // 这两页只在公开版出现：自己的非公开版有 3348 控制台，不需要它们。
     ...(PUBLIC_EDITION
       ? [{
-          id: 'memory-banks',
-          name: t('settings.pages.modules.memory-banks.title'),
-          description: t('settings.pages.modules.memory-banks.description'),
-          icon: 'i-solar:database-bold-duotone',
-          to: '/settings/modules/memory-banks',
+          id: 'memory-console',
+          name: t('settings.pages.modules.memory-console.title'),
+          description: t('settings.pages.modules.memory-console.description'),
+          icon: 'i-solar:planet-3-bold-duotone',
+          to: '/settings/modules/memory-console',
           configured: memoryStore.enabled,
           category: 'essential' as const,
         }, {
