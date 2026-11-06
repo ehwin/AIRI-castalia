@@ -111,7 +111,14 @@ export async function createCastaliaDiaryTools(options: {
         if (!parsed.success)
           return 'Give one short phrase from the day you are looking for.'
         const query = parsed.output.query.trim()
-        const hits = await options.searchDiary(query)
+        let hits: MemorySearchHit[]
+        try {
+          hits = await options.searchDiary(query)
+        }
+        catch {
+          // 打不开 ≠ 没写过。把失败说成「日记里没有」，她会对着主人否认自己写过的一天。
+          return 'The diary could not be opened just now. Say that it failed to open, and do not say the day is missing.'
+        }
         if (!hits.length)
           return `Her diary holds nothing about "${query}". Say so plainly, and do not invent a day.`
         return hits.slice(0, DIARY_DAY_LIMIT).map(formatDiaryDay).join('\n')

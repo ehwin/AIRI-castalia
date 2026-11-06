@@ -799,16 +799,16 @@ export const useMemoryStore = defineStore('memory', () => {
     }
   }
 
-  /** Reads the diary partition only. An ordinary search never returns these rows. */
+  /**
+   * Reads the diary partition only. An ordinary search never returns these rows.
+   *
+   * A failed read is thrown, not turned into `[]`: an empty list reads as "she never wrote about
+   * that day", and the model then tells the owner a day she did write never happened.
+   */
   async function searchDiary(query: string, topK = 5, personaId?: string): Promise<MemorySearchHit[]> {
     if (!enabled.value || !remote?.searchDiary)
       return []
-    try {
-      return await remote.searchDiary(query, topK, personaId)
-    }
-    catch {
-      return []
-    }
+    return await remote.searchDiary(query, topK, personaId)
   }
 
   /** Makes a card's memory general, so every card reads it. A general memory with the same name gives way. */

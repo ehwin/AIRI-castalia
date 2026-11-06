@@ -73,6 +73,18 @@ describe('castalia diary tool', () => {
     expect(reply).toContain('holds nothing')
   })
 
+  it('says the diary could not be read instead of saying the day is missing', async () => {
+    // 打不开时返回空列表，模型会把失败当「她没写过」，然后对主人否认那一天。
+    const bankDown = async (): Promise<never> => {
+      throw new Error('bank down')
+    }
+    const tools = await createCastaliaDiaryTools({ searchDiary: bankDown })
+    const reply = await tools[0]!.execute({ query: '昨天' }, { messages: [], toolCallId: 'castalia-diary' })
+
+    expect(reply).toContain('could not be opened')
+    expect(reply).not.toContain('holds nothing')
+  })
+
   it('rejects an empty query before it calls the bank', async () => {
     const searchDiary = vi.fn(async () => [])
     const tools = await createCastaliaDiaryTools({ searchDiary })

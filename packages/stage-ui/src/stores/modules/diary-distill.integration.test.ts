@@ -20,9 +20,12 @@ const thoughts: Thought[] = [
   { id: 't3', at: new Date('2026-11-01T19:30:00').getTime(), text: '他说今天累死了，我记着了', visibility: 'shared', topic: 'self-cycle' } as Thought,
 ]
 
+/** The stream the repo hands out. `readAll` keeps the newest N, exactly like the real repo. */
+const stream = vi.hoisted(() => ({ current: [] as Thought[] }))
+
 vi.mock('../../database/repos/inner-thoughts.repo', () => ({
   innerThoughtsRepo: {
-    readAll: vi.fn(async () => thoughts),
+    readAll: vi.fn(async (limit = 200) => stream.current.slice(-limit)),
     append: vi.fn(),
     readLastSeenAt: vi.fn(async () => undefined),
     saveLastSeenAt: vi.fn(),
@@ -56,6 +59,7 @@ function attachDiaryPort(rememberDay: (day: DiaryDayInput) => Promise<{ ok: bool
 describe('diary → memory', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    stream.current = thoughts
   })
 
   it('reads the day from the thought stream and groups it by date', async () => {
@@ -126,6 +130,33 @@ describe('diary → memory', () => {
     expect(rememberDay).toHaveBeenCalledTimes(1)
     expect(rememberDay.mock.calls[0]![0].date).toBe('2026-11-01')
     expect(diary.hasDistilled('2026-11-01')).toBe(true)
+  })
+
+  it('catches up on days older than the page window', async () => {
+    // 脑内一天约三十条。关机一周再打开时，200 条的默认窗口只剩最近六天，
+    // 更早的那几天永远不会被记 —— 页面会说「没有可记的一天」，其实那天有一整天。
+    const many: Thought[] = []
+    for (let day = 1; day <= 8; day++) {
+      for (let line = 0; line < 40; line++) {
+        many.push({
+          id: `d${day}-${line}`,
+          at: new Date(`2026-10-${String(day).padStart(2, '0')}T${String(8 + (line % 12)).padStart(2, '0')}:00:00`).getTime(),
+          text: `noticed: day ${day} line ${line}`,
+          visibility: 'private',
+          topic: 'self-cycle',
+        } as Thought)
+      }
+    }
+    stream.current = many
+    const rememberDay = vi.fn(async (_day: DiaryDayInput) => ({ ok: true }))
+    attachDiaryPort(rememberDay)
+    const diary = useDiaryStore()
+
+    const remembered = await diary.rememberFinishedDays(new Date('2026-10-09T00:05:00').getTime())
+
+    const dates = new Set(rememberDay.mock.calls.map(([day]) => day.date))
+    expect(dates.size).toBe(8)
+    expect(remembered).toBe(8)
   })
 
   it('leaves today alone until it is over', async () => {

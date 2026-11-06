@@ -19,6 +19,15 @@ export interface DiaryDay {
 }
 
 /**
+ * How much of the thought stream a catch-up reads.
+ *
+ * `readAll` keeps the newest N and the mind writes about thirty lines a day, so the page's
+ * 200-record default covers six days. A catch-up that used the same number silently dropped every
+ * day older than that: the app came back from a week away and remembered nothing of the first days.
+ */
+const CATCH_UP_THOUGHTS = 5000
+
+/**
  * The diary, read from the same stream the mind writes.
  *
  * This store never writes to the diary. The background lane owns the stream.
@@ -180,7 +189,7 @@ export const useDiaryStore = defineStore('diary', () => {
       return 0
     remembering.value = true
     try {
-      await load()
+      await load(CATCH_UP_THOUGHTS)
       const today = new Date(now).toLocaleDateString('sv-SE')
       const finished = byDay.value
         .filter(day => day.date < today && !hasDistilled(day.date))

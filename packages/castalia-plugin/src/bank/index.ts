@@ -289,6 +289,7 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
     import('../vendor/engine/version'),
   ])
   const db = await import('../vendor/engine/db')
+  const engineEnv = await import('../vendor/engine/env')
   const orphan = await import('../vendor/engine/orphan')
   // store 工具（memory_store_list/save/forget + memory_recall 的进程内版本）
   const { createStoreTools, loadEngineDeps, parseStoreText } = await import('./store-tools')
@@ -339,6 +340,9 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
         const replaced = stale.length > 0
         for (const row of stale) {
           conn.prepare('UPDATE memory SET is_active = 0, updated_at = ? WHERE id = ?').run(new Date().toISOString(), row.id)
+          // 引擎自己的约定是「删行先删向量」。软删留着向量时，每次重记都多一条高相似死向量，
+          // 几十次之后 KNN 的 40 个候选位会先被同一天的旧版本占满，真正的日记反而挤不进去。
+          try { conn.prepare('DELETE FROM vec_memory WHERE rowid = (SELECT rowid FROM memory WHERE id = ?)').run(row.id) } catch { /* 无 vec 表 */ }
         }
         const record = await store.saveMemory({
           text,
@@ -355,6 +359,19 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
         conn.prepare(
           'UPDATE memory SET is_active = 0, updated_at = ? WHERE id <> ? AND is_active = 1 AND project = ? AND character_id IS ? AND text LIKE ?',
         ).run(new Date().toISOString(), record.id, project, persona, `# ${name}%`)
+        // 嵌入端点故障时 saveMemory 会静默落一条无向量行：这一天被标成「已记住」，却永远搜不到。
+        // 补嵌入的 sweep 只走 5 个 memType 目录，日记不在其中，所以只能在这里发现并拒收，让它下次再记。
+        if (engineEnv.isEmbedEnabled()) {
+          let missing = false
+          try {
+            missing = !conn.prepare('SELECT 1 FROM vec_memory WHERE rowid = (SELECT rowid FROM memory WHERE id = ?)').get(record.id)
+          }
+          catch { /* 旧库没有 vec 表：不判定 */ }
+          if (missing) {
+            conn.prepare('UPDATE memory SET is_active = 0, updated_at = ? WHERE id = ?').run(new Date().toISOString(), record.id)
+            throw new Error('diary day stored without an embedding; refusing to mark it remembered')
+          }
+        }
         return { id: record.id, name, replaced }
       })
       const tail = run.catch(() => {})

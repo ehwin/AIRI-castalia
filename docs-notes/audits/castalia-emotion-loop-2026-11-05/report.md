@@ -613,7 +613,26 @@ canonical 提交里的 `dist/db.js`、`dist/psycheState.js` 落后于它们自�
 实机验证（换包后冷启动，40 秒内）：`diary/memory.sqlite` 自动出现 11-01…11-05 五行，`character_id = N_h4…`，11-06（今天）没有。
 **这一步抓到并修了一个真 bug**：第一次跑时 11-01 留下两条活行——两个窗口的 SELECT 都看不到对方尚未插入的行。排队 + 拆完软删后，`castalia-plugin` 新增的「两个窗口同时记一天只留一条活行」用例通过（23 passed）。
 
-### 15.13 遗留
+### 15.13 顺线复查（2026-11-06 11:10）：日记这条链上的四个真问题
+
+方法：真库数据（`airi/airi` 六个分区）+ 引擎源码路径 + 换包后实机点按钮。P1 = 会静默丢数据或让数据永远不可见。
+
+| # | 等级 | 位置 | 现象 | 证据 |
+| --- | --- | --- | --- | --- |
+| 1 | P1 | `diary.ts` `rememberFinishedDays` → `load()` 默认 200 | 补记吃的是「最近 200 条念头」窗口，而念头脑一天约 30 条（实测 28/50/57/13/13/13），窗口只覆盖 6 天。关机一周再开，最前面那几天永远补不上，页面还会说「没有可记的一天」 | 单测：8 天 × 40 条（320 条）时旧代码只认出 6 天，改后 8 天；红→绿都跑过 |
+| 2 | P1 | `bank/index.ts` `saveDiaryDay` | 嵌入端点故障时 `saveMemory` 静默落一条**没有向量**的行，`rememberDay` 返回 ok，日期被标成「已记住」，而 `searchDiary` 永远翻不到它。补嵌入的 sweep 只走 5 个 memType 目录，日记不在其中 | 代码：`store.ts` 里 `vector` 为 null 仍继续插入；`batchEmbedPending` 用 `listMemTypeDirs` |
+| 3 | P2 | `saveDiaryDay` 换行时只软删旧行，不清向量 | 每次重记多一条死向量，且和当天高度相似；KNN 候选窗口是 `min(topK*8,60)=40`，重记几十次后这 40 个位置先被同一天的旧版本占满，真日记挤不进去。引擎自己在硬删前都先删向量（`v1.28-fix` 注释） | 实机：改前 `vec_memory_rowids=10 / 活跃 5`；改后重记 11-05，行数 10→11、活跃仍 5、**向量仍是 10** |
+| 4 | P2 | `memory.ts` `searchDiary` + `tools/castalia.ts` | 读失败被吞成 `[]`，工具于是回「Her diary holds nothing about …」——打不开被说成没写过，她会对着主人否认自己记过的一天 | 单测：`searchDiary` 抛错时工具必须回 `could not be opened` 且不含 `holds nothing` |
+| 5 | P2 | 引擎 `batchEmbedPending` | 换嵌入模型会清空派生索引，其它分区靠这一步补回，日记不补 → 整本日记永久搜不到 | 改在引擎源码（`src/store.ts`），`sync-engine.mjs` 回灌 vendor，只有库文件已存在时才加日记目录 |
+
+修复都在同一批：`CATCH_UP_THOUGHTS = 5000`（单测红→绿）、写后自检向量并在缺失时软删+抛错让下轮重试、换行时删旧向量、`searchDiary` 抛错并在工具里单独措辞、引擎补嵌入加日记目录。
+
+没动、但要知道的：
+- `D:\castalia\run\Castalia\dist` 仍是 11-01 的构建，不含 `DIARY_MEM_TYPE`。app 走进程内引擎所以不受影响；5 条桥没有日记能力。要上线得重建并覆盖，但那份 dist 落后源码五天，覆盖前先看它的 diff。
+- 真库 `general/facts` 里有一条 `('user','test_likes','coffee')`，是早前探测留下的测试事实，仍在注入候选里。清不清由主人定。
+- 日记页稳定只看最近 200 条念头（约 6 天）；更早的天要等有人把页面也放宽，循环那边已经改成 5000。
+
+### 15.14 遗留
 
 - 独立引擎 `D:\castalia\run\Castalia\dist` **未重建**。那边的 `memType.js` 不认识 `diary`，所以日记分区只在 app 进程内可用，5 条桥（3310–3318）没有这个功能。要上线就 `npm run build` 后拷 `dist/memType.js`。
 - `listMemTypeDirs` 的 `base.includes(f)` 既是隔离的关键，也是陷阱：以后谁把 `diary` 加进 `base`，隔离立刻失效。
