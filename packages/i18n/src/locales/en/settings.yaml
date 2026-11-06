@@ -976,6 +976,7 @@ pages:
     memory-banks:
       title: Memory banks
       description: Browse, search, edit and delete what is actually stored on this machine
+      edition-private: This page ships with the public edition. Your own build keeps the 3348 console instead.
       lead: Reads every partition of every bank under this machine's memory directory, straight from sqlite. Editing a row drops its vector so the next sweep re-embeds it.
       bank: Bank
       project: Project
@@ -998,6 +999,7 @@ pages:
     memory-api:
       title: Memory APIs
       description: The embedding and reflection endpoints this machine's memory bank uses
+      edition-private: This page ships with the public edition. Your own build keeps the 3348 console instead.
       lead: These settings live in the bank's own config.json. Keys are written to keys.enc, never to config.json.
       config-exists: config.json found in the bank
       config-missing: no config.json yet — saving here creates one

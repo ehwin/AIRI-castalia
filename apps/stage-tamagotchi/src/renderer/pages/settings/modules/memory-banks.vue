@@ -11,6 +11,8 @@ import { castaliaBankDelete, castaliaBankEdit, castaliaBankSearch, castaliaBankT
 // 跨库浏览原来只有 3348 那个控制台（`viz/server.mjs` + 静态页），app 只会打开浏览器。
 // 推广版不该要求用户再跑一个 Node 服务，所以这里直接读写各分区的 memory.sqlite。
 const { t } = useI18n()
+/** 这两页只在公开版出现（构建时 `VITE_AIRI_EDITION=public`）；私有版用 3348 控制台。 */
+const PUBLIC_EDITION = (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_AIRI_EDITION === 'public'
 const invokeTree = useElectronEventaInvoke(castaliaBankTree)
 const invokeSearch = useElectronEventaInvoke(castaliaBankSearch)
 const invokeEdit = useElectronEventaInvoke(castaliaBankEdit)
@@ -152,13 +154,21 @@ const stamp = (iso: string) => {
 }
 
 onMounted(async () => {
+  if (!PUBLIC_EDITION)
+    return
   await loadTree()
   await search()
 })
 </script>
 
 <template>
-  <div :class="['flex flex-col', 'gap-4']">
+  <SettingsCard v-if="!PUBLIC_EDITION">
+    <p :class="['text-sm', 'text-neutral-500 dark:text-neutral-400']">
+      {{ t('settings.pages.modules.memory-banks.edition-private') }}
+    </p>
+  </SettingsCard>
+
+  <div v-else :class="['flex flex-col', 'gap-4']">
     <SettingsCard>
       <p :class="['text-sm', 'text-neutral-500 dark:text-neutral-400']">
         {{ t('settings.pages.modules.memory-banks.lead') }}

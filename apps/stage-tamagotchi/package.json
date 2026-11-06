@@ -22,6 +22,7 @@
     "dev": "install-electron && electron-vite dev",
     "dev:xwayland": "install-electron && electron-vite dev -- --ozone-platform=x11",
     "build": "pnpm --filter @proj-airi/provider-inference build && electron-vite build",
+    "build:public": "pnpm --filter @proj-airi/provider-inference build && electron-vite build --mode public",
     "test:run": "vitest run",
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "pnpm run build && electron-builder --dir",

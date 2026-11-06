@@ -277,3 +277,21 @@ sidrune + deepseek-v4-1-flash + 32768 / auto / 15），密钥框留空表示沿�
 实机：用 `CASTALIA_BANK_DIR` 指向临时库验证了浏览/搜索/改/删（改完 `updated_at` 变化、删完
 `is_active=0`、页面从 2 行变 1 行）；再换回真库，页面列出 `airi / airi` 的最新 100 行，
 搜「坦克世界」命中 5 行。
+
+## 14 两个版本：这两页只在公开版（2026-11-06 23:20）
+
+你说的口径改正了：**记忆库 / 记忆服务两页只进公开版；自己的非公开版不要它们**（私有版继续用
+3348 控制台）。
+
+- 开关：构建期 `VITE_AIRI_EDITION`。不设 = 私有版；`pnpm -F @proj-airi/stage-tamagotchi build:public`
+  （= `electron-vite build --mode public`，读 `apps/stage-tamagotchi/.env.public`） = 公开版。
+- 菜单：`use-modules-list.ts` 里两条目按 `PUBLIC_EDITION` 展开，私有版不出现。
+- 页面自身也挡住：直接输 URL 进去只显示「这一页只在公开版里出现」，不读也不写库。
+- 主进程的 IPC 保留（公开版要用；私有版只是没有入口）。
+
+实测：
+- 私有包（`verify-pack-20261106y`，默认构建）：模块菜单里没有「记忆库」「记忆服务」；
+  直接访问 `#/settings/modules/memory-banks` 显示「这一页只在公开版里出现；自己的构建用 3348 控制台」。
+- 公开包（`verify-pack-20261106-public2`，`build:public`）：两个条目都在，记忆库页正常列出真库。
+
+注意：i18n 文案在两种包里都在（打包按语言整份带入），区别只在渲染出来的入口和页面守卫。

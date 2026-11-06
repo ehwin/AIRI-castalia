@@ -42,6 +42,14 @@ export interface Module {
   degraded?: boolean
 }
 
+/**
+ * 公开版才带的两页（记忆库 / 记忆服务）。
+ *
+ * 自己的非公开版继续用 3348 控制台，不需要这两页；公开版没有控制台，界面上必须有。
+ * 构建时给 `VITE_AIRI_EDITION=public` 才会出现 —— 默认（不设）是私有版。
+ */
+const PUBLIC_EDITION = (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_AIRI_EDITION === 'public'
+
 export function useModulesList() {
   const { t } = useI18n()
 
@@ -216,25 +224,27 @@ export function useModulesList() {
           }
         : {}),
     },
-    {
-      id: 'memory-banks',
-      name: t('settings.pages.modules.memory-banks.title'),
-      description: t('settings.pages.modules.memory-banks.description'),
-      icon: 'i-solar:database-bold-duotone',
-      to: '/settings/modules/memory-banks',
-      configured: memoryStore.enabled,
-      category: 'essential',
-    },
-    {
-      id: 'memory-api',
-      name: t('settings.pages.modules.memory-api.title'),
-      description: t('settings.pages.modules.memory-api.description'),
-      icon: 'i-solar:key-square-bold-duotone',
-      to: '/settings/modules/memory-api',
-      // 有没有配置文件就是这件事的状态：没有就是还没接嵌入/反思后端。
-      configured: Boolean(memoryStore.backend?.capabilities.ingest || memoryStore.backend?.capabilities.search),
-      category: 'essential',
-    },
+    // 这两页只在公开版出现：自己的非公开版有 3348 控制台，不需要它们。
+    ...(PUBLIC_EDITION
+      ? [{
+          id: 'memory-banks',
+          name: t('settings.pages.modules.memory-banks.title'),
+          description: t('settings.pages.modules.memory-banks.description'),
+          icon: 'i-solar:database-bold-duotone',
+          to: '/settings/modules/memory-banks',
+          configured: memoryStore.enabled,
+          category: 'essential' as const,
+        }, {
+          id: 'memory-api',
+          name: t('settings.pages.modules.memory-api.title'),
+          description: t('settings.pages.modules.memory-api.description'),
+          icon: 'i-solar:key-square-bold-duotone',
+          to: '/settings/modules/memory-api',
+          // 有没有配置文件就是这件事的状态：没有就是还没接嵌入/反思后端。
+          configured: Boolean(memoryStore.backend?.capabilities.ingest || memoryStore.backend?.capabilities.search),
+          category: 'essential' as const,
+        }]
+      : []),
     {
       id: 'castalia',
       name: t('settings.pages.modules.castalia.title'),

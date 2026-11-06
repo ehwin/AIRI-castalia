@@ -11,6 +11,8 @@ import { castaliaSettingsGet, castaliaSettingsSave } from '../../../../shared/ev
 // 这份配置原来只能手改 <bankDir>/config.json：字段名还分模式（api 用 api_model / api_url，
 // ollama 用 model / ollama_url），写错不报错，只会静默退回默认模型。这里把它做成表单。
 const { t } = useI18n()
+/** 这两页只在公开版出现（构建时 `VITE_AIRI_EDITION=public`）；私有版用 3348 控制台。 */
+const PUBLIC_EDITION = (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_AIRI_EDITION === 'public'
 const invokeGet = useElectronEventaInvoke(castaliaSettingsGet)
 const invokeSave = useElectronEventaInvoke(castaliaSettingsSave)
 
@@ -161,12 +163,20 @@ async function clearKey(channel: 'embedding' | 'reflect' | 'triage') {
 }
 
 onMounted(() => {
+  if (!PUBLIC_EDITION)
+    return
   void load()
 })
 </script>
 
 <template>
-  <div :class="['flex flex-col', 'gap-4']">
+  <SettingsCard v-if="!PUBLIC_EDITION">
+    <p :class="['text-sm', 'text-neutral-500 dark:text-neutral-400']">
+      {{ t('settings.pages.modules.memory-api.edition-private') }}
+    </p>
+  </SettingsCard>
+
+  <div v-else :class="['flex flex-col', 'gap-4']">
     <SettingsCard>
       <p :class="['text-sm', 'text-neutral-500 dark:text-neutral-400']">
         {{ t('settings.pages.modules.memory-api.lead') }}

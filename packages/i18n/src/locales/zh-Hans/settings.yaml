@@ -925,6 +925,7 @@ pages:
     memory-banks:
       title: 记忆库
       description: 看她库里到底存了什么：浏览、搜索、改、删
+      edition-private: 这一页只在公开版里出现；自己的构建用 3348 控制台。
       lead: 直接读这台机器记忆目录下每个库的每个分区。改一行会顺手删掉它的向量，下一轮补嵌会重新算。
       bank: 库
       project: 项目
@@ -947,6 +948,7 @@ pages:
     memory-api:
       title: 记忆服务
       description: 这台机器上记忆库用的嵌入与反思接口
+      edition-private: 这一页只在公开版里出现；自己的构建用 3348 控制台。
       lead: 这些配置写入记忆库自己的 config.json；密钥写进 keys.enc，不会落到 config.json。
       config-exists: 库里已有 config.json
       config-missing: 还没有 config.json —— 在这里保存会自动创建
