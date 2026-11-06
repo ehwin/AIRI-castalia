@@ -1,7 +1,10 @@
 # 推广前深度全链路检测（2026-11-06）
 
 分支：`ehwin/feat/diary-partition`（AIRI 与 Castalia-Anima 同名）
-部署包：`dist/verify-pack-20261106p` → `D:\system\AIRI\apps\stage-tamagotchi\dist\win-unpacked`
+部署包：`dist/verify-pack-20261106q` → `D:\system\AIRI\apps\stage-tamagotchi\dist\win-unpacked`
+提交：`c489cdfe1`（fork/ehwin/feat/diary-partition）
+asar SHA-256：`144eba9e7dc1a5ceb7f6ef80d992af718131f8a5bd8d054e8cbc5bcccd600f56`（源包与部署一致）
+部署后实机：日记 6 天、念头 `6 天，180 行`、模块菜单无 autoregressive、启动日志 119 行 0 错误
 
 ## 1 结论
 
@@ -145,11 +148,11 @@ pnpm -F @proj-airi/core-agent exec vitest run
 # 打包
 pnpm -F @proj-airi/stage-tamagotchi build
 cd apps/stage-tamagotchi && pnpm exec electron-builder --dir \
-  --config.directories.output=dist/verify-pack-20261106p \
+  --config.directories.output=dist/verify-pack-20261106q \
   --config.electronDist=node_modules/electron/dist
 
 # 部署
-cp -a dist/verify-pack-20261106p/win-unpacked/. /d/system/AIRI/apps/stage-tamagotchi/dist/win-unpacked/
+cp -a dist/verify-pack-20261106q/win-unpacked/. /d/system/AIRI/apps/stage-tamagotchi/dist/win-unpacked/
 ```
 
 测试里带 `PSYCHE_BAND_*` 环境变量会让 `psyche-layered.test.ts` 假红（band 参数被外部覆盖），
