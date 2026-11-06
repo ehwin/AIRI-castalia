@@ -7,7 +7,6 @@ import { useI18n } from 'vue-i18n'
 
 import factorioIcon from '../assets/factorio-simple.png'
 
-import { useLive2DMotionMagicSettings } from '../features/motions/live2d'
 import { useLLM } from '../stores/ai/chat-llm/llm'
 import { useMemoryStore } from '../stores/memory'
 import { useArtistryStore } from '../stores/modules/artistry'
@@ -63,7 +62,6 @@ export function useModulesList() {
   const memoryStore = useMemoryStore()
   const castaliaStore = useCastaliaPluginStore()
   const llmStore = useLLM()
-  const autoregressiveSettings = useLive2DMotionMagicSettings()
   const perceptionStore = usePerceptionStore()
   const diaryStore = useDiaryStore()
   const toolCardsStore = useToolCardsStore()
@@ -187,15 +185,12 @@ export function useModulesList() {
       configured: artistryStore.configured,
       category: 'essential',
     },
-    {
-      id: 'autoregressive-motion',
-      name: t('settings.pages.modules.autoregressive-motion.title'),
-      description: t('settings.pages.modules.autoregressive-motion.description'),
-      icon: 'i-solar:graph-up-bold-duotone',
-      to: '/settings/modules/autoregressive-motion',
-      configured: autoregressiveSettings.method === 'ar-hmm',
-      category: 'essential',
-    },
+    // NOTICE:
+    // 这里原本有 autoregressive-motion（Live2D MAGIC 的方法选择：VAR / AR-HMM）。
+    // 上游 v0.13.1 的页面绑定在 settings store 的 method / arHmm* 上，而这一版 store 只有
+    // profileId / skipMouthOpen / forceViewTarget —— 点进去每个控件都绑在 undefined 上。
+    // 页面已随本次检测删除；等 store 补齐这三个字段，再把菜单项和页面一起加回来。
+
     {
       id: 'memory-short-term',
       name: t('settings.pages.modules.memory-short-term.title'),

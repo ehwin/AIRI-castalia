@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import type { ControlsIslandPlacement } from './use-controls-island-placement'
 
-import { describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, h, nextTick, ref, shallowRef } from 'vue'
 
 import ControlsIslandSpeechMute from './controls-island-speech-mute.vue'
@@ -37,6 +38,12 @@ vi.mock('vue-i18n', () => ({
 // https://github.com/moeru-ai/airi/pull/2536
 
 describe('controlsIslandSpeechMute', () => {
+  // ROOT CAUSE: the component reads the remote-stage store in setup, so a mount without an
+  // active pinia throws `getActivePinia()` before any assertion runs.
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
   function mountComponent() {
     const host = document.createElement('div')
     document.body.appendChild(host)

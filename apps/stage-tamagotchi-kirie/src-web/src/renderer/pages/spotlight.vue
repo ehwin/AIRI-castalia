@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { errorMessageFrom } from '@moeru/std'
 import { useHostSpotlightWindow } from '@proj-airi/stage-host-context'
-import { useAnalytics } from '@proj-airi/stage-ui/composables'
 import { extractMessageText } from '@proj-airi/stage-ui/libs/chat-sync'
 import { useChatStore } from '@proj-airi/stage-ui/stores/chat'
 import { useChatSessionStore } from '@proj-airi/stage-ui/stores/chat/session-store'
@@ -18,7 +17,6 @@ const inputRef = useTemplateRef<HTMLInputElement>('inputRef')
 
 const chatStore = useChatStore()
 const chatSession = useChatSessionStore()
-const { trackSpotlightUsed } = useAnalytics()
 const { hide: hideSpotlightWindow, showResultNotification } = useHostSpotlightWindow()
 const { t } = useI18n()
 
@@ -45,7 +43,6 @@ async function handleSend() {
 
   messageInput.value = ''
   sending.value = true
-  trackSpotlightUsed()
 
   try {
     await hideSpotlightWindow()

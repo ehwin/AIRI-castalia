@@ -196,7 +196,7 @@ export interface MemoryBackend {
   transport: 'in-process' | 'stdio' | 'entry-only' | 'none'
   project?: string
   character?: string
-  capabilities: { vadSweep: boolean, recall: boolean, search: boolean, facts: boolean, ingest: boolean, maintain: boolean, selfCycle: boolean, psyche: boolean }
+  capabilities: { vadSweep: boolean, recall: boolean, search: boolean, facts: boolean, ingest: boolean, maintain: boolean, selfCycle: boolean, psyche: boolean, diary?: boolean, thoughts?: boolean }
   /** 自动情感的实验门槛：模块开着也可能一步都不推进 psyche。 */
   emotion?: {
     autoFromVad: boolean
@@ -590,6 +590,10 @@ export const useMemoryStore = defineStore('memory', () => {
   /** Stores the backend report. The panel and the module list read this instead of guessing. */
   function setBackend(next: MemoryBackend | undefined) {
     backend.value = next
+    // 后端自己的答案优先于「端口有没有这个方法」：fresh 安装上两条 invoke 都在,
+    // 但后面没有库,页面不该说「她还没写」。
+    const caps = next?.capabilities as { diary?: boolean, thoughts?: boolean } | undefined
+    applyCapabilities({ diary: caps?.diary, thoughts: caps?.thoughts })
   }
 
   /**
@@ -678,9 +682,25 @@ export const useMemoryStore = defineStore('memory', () => {
   function attachRemote(port: MemoryRemotePort | undefined) {
     remote = port
     remoteAttached.value = Boolean(port)
+    // 端口在,不等于库在:后端只有条目仓储时这两个开关必须由 `applyCapabilities` 关掉,
+    // 否则页面会说「还没有」——她没写,和这台机器没有她的日记,不是一回事。
     diarySupported.value = Boolean(port?.searchDiary)
     thoughtsSupported.value = Boolean(port?.rememberThoughts && port?.listThoughts)
     remoteHealth.value = { ...remoteHealth.value, attached: Boolean(port) }
+  }
+
+  /**
+   * Takes the backend's own answer about what it can do.
+   *
+   * The port says which calls exist; the backend says whether there is a store behind them. On a
+   * client with no memory bank the calls exist and answer nothing, so the pages read as "she never
+   * wrote", which is not the same as "there is no diary here".
+   */
+  function applyCapabilities(capabilities?: { diary?: boolean, thoughts?: boolean }) {
+    if (typeof capabilities?.diary === 'boolean')
+      diarySupported.value = capabilities.diary
+    if (typeof capabilities?.thoughts === 'boolean')
+      thoughtsSupported.value = capabilities.thoughts
   }
 
   /** Replaces the local cache with the remote state. Keeps the cache when the remote fails. */
@@ -1097,6 +1117,7 @@ export const useMemoryStore = defineStore('memory', () => {
     rememberThoughts,
     listThoughts,
     thoughtsSupported,
+    applyCapabilities,
     makeGeneral,
     forget,
     remove,

@@ -393,7 +393,7 @@ pages:
       maintain_facts: 新增事实
       maintain_merged: 合并
       maintain_no_llm: 没配置反刍模型，只跑了 digest。
-      maintain_skipped: "这次没有执行：{reason}。上次结果：事实 +{facts}、合并 {merged}。"
+      maintain_skipped: '这次没有执行：{reason}。上次结果：事实 +{facts}、合并 {merged}。'
       maintain_failed: 整理失败
   data:
     title: 数据
@@ -1070,6 +1070,22 @@ pages:
       shared:
         title: 她说出口的
         empty: 还没有。几乎所有事她都自己留着。
+      unsupported: 没有配置记忆库，这里不写日记。
+    thoughts:
+      title: 念头
+      description: 她自己脑子里写下的那串东西，和日记放在一起
+      summary: '{days} 天，{lines} 行留着'
+      privacy: 这是原始的行，不是记忆。这里的内容不检索、不注入、不召回。
+      loading: 正在打开这串念头…
+      empty: 还没有。她按自己的节奏写。
+      unsupported: 没有配置记忆库，这里不存档。
+      unreadable: '打不开这份存档：{reason}'
+      day-count: '{count} 行'
+      hidden: '{count} 行她留着没说'
+      reveal:
+        label: 显示原始的行
+        description: 默认关闭。这是她还没对任何事情下定论之前的样子。
+        warning: 打开后你会读到她从没打算说出口的话。那不是对话。
     perception:
       title: 感知
       description: 她能看什么

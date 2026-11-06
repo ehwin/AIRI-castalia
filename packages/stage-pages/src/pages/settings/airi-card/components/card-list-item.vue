@@ -1,31 +1,18 @@
 <script setup lang="ts">
-import type { CardSyncState } from '@proj-airi/stage-ui/stores/modules/airi-card'
-
-import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 
 import CardModelPreview from './card-model-preview.vue'
 
-const props = defineProps<{
+defineProps<{
   id: string
   name: string
   isActive: boolean
   version: string
   modelId?: string
-  /** Absent when the user is not signed in, because nothing is uploaded then. */
-  syncState?: CardSyncState
 }>()
 
 const { t } = useI18n()
-
-const syncIcons = {
-  synced: 'i-solar:cloud-check-outline',
-  pending: 'i-solar:cloud-upload-outline',
-  refused: 'i-solar:cloud-cross-outline',
-} as const
-
-const syncIcon = computed(() => props.syncState ? syncIcons[props.syncState] : undefined)
 </script>
 
 <template>
@@ -66,18 +53,6 @@ const syncIcon = computed(() => props.syncState ? syncIcons[props.syncState] : u
       <div :class="['mt-1 flex items-center justify-between gap-2']">
         <span :class="['text-xs text-neutral-500 tabular-nums dark:text-neutral-400']">
           v{{ version }}
-        </span>
-        <span
-          v-if="syncState && syncIcon"
-          :class="[
-            'flex items-center text-sm',
-            syncState === 'refused' ? 'text-amber-500' : 'text-neutral-500 dark:text-neutral-400',
-          ]"
-          :title="t(`settings.pages.card.sync.state.${syncState}`)"
-          :aria-label="t(`settings.pages.card.sync.state.${syncState}`)"
-          :data-sync-state="syncState"
-        >
-          <span :class="syncIcon" aria-hidden="true" />
         </span>
       </div>
     </div>

@@ -157,7 +157,7 @@ export async function runMaintenance(
     const minutes = Math.round((gap / 60_000))
     console.info(`[castalia] maintenance skipped (${reason}): last ${ledger.lastOk === false ? 'failed' : 'succeeded'} ${Math.round((now - ledger.lastAttemptAt) / 60_000)} min ago, gap ${minutes} min`)
     return {
-      ...(ledger.lastReport ?? {}),
+      ...ledger.lastReport,
       ok: Boolean(ledger.lastOk),
       skipped: true,
       skippedReason: `cooldown:${minutes}min`,
@@ -395,7 +395,7 @@ export function setupCastaliaMemoryService(params: {
         ? await engine.applyEmotion({ ...input })
         : { applied: false, reason: 'unsupported' as const, version: 0 }
     })
-  defineInvokeHandler(params.context, castaliaMemoryStatus, () => ({
+    defineInvokeHandler(params.context, castaliaMemoryStatus, () => ({
       transport,
       project: engineOptions.project,
       character: engineOptions.character,
@@ -410,6 +410,9 @@ export function setupCastaliaMemoryService(params: {
         maintain: typeof engine.maintain === 'function',
         selfCycle: typeof engine.selfCycle === 'function',
         psyche: typeof engine.psycheState === 'function',
+        // 日记/念头是分区写入,不是普通条目:后端没有这两个通道时页面必须如实说「没有」。
+        diary: typeof engine.rememberDay === 'function' && typeof engine.searchDiary === 'function',
+        thoughts: typeof engine.rememberThoughts === 'function' && typeof engine.listThoughts === 'function',
       },
       ...(transport === 'stdio' && typeof engine.search !== 'function'
         ? { error: 'stdio 后端没有暴露 search/facts，检索会一直是空' }
@@ -431,12 +434,12 @@ export function setupCastaliaMemoryService(params: {
         const note = offByAlias
           ? `PSYCHE_FROM_VAD 的值是 "${raw}"，引擎只认小写 on，所以自动情感仍然关闭${explicit ? '（模型主动记录的情绪仍会写入 psyche）' : ''}`
           : !autoFromVad
-            ? explicit
-              ? 'PSYCHE_FROM_VAD 未开启：对话不会自动推进 psyche，但 recordEmotion 会把模型判断的情绪写进引擎'
-              : 'PSYCHE_FROM_VAD 未开启：对话不会推进 psyche，recordEmotion 只写提示词'
-          : estimator === 'lexicon'
-            ? '自动情感已开启，但只有本地词表可用：它会对模糊句子主动放弃判断，psyche 多数时候不动（模型显式记录的情绪照常写入，该轮不再进自动队列）'
-            : '自动情感已开启，分析来自模型端点（模型显式记录的情绪照常写入，该轮不再进自动队列，不会算两次）'
+              ? explicit
+                ? 'PSYCHE_FROM_VAD 未开启：对话不会自动推进 psyche，但 recordEmotion 会把模型判断的情绪写进引擎'
+                : 'PSYCHE_FROM_VAD 未开启：对话不会推进 psyche，recordEmotion 只写提示词'
+              : estimator === 'lexicon'
+                ? '自动情感已开启，但只有本地词表可用：它会对模糊句子主动放弃判断，psyche 多数时候不动（模型显式记录的情绪照常写入，该轮不再进自动队列）'
+                : '自动情感已开启，分析来自模型端点（模型显式记录的情绪照常写入，该轮不再进自动队列，不会算两次）'
         return { autoFromVad, explicit, estimator, note }
       })(),
       checkedAt: Date.now(),
@@ -519,6 +522,10 @@ export function setupCastaliaMemoryService(params: {
   defineInvokeHandler(params.context, castaliaMemorySearch, () => [])
   defineInvokeHandler(params.context, castaliaMemoryFacts, () => [])
   // 本地仓储只有条目:念头存档明确回不可用,页面上也就不会假装「她什么都没想」。
+  // 没有完整引擎时这两条通道也要回答:否则渲染层的 invoke 会撞上「No handler registered」,
+  // 页面上显示的是 Electron 的内部措辞,而不是「这台机器没有记忆库」。
+  defineInvokeHandler(params.context, castaliaMemoryRememberDay, () => ({ ok: false, reason: 'no castalia bank configured' }))
+  defineInvokeHandler(params.context, castaliaMemorySearchDiary, () => [])
   defineInvokeHandler(params.context, castaliaMemoryRememberThoughts, () => ({ ok: false, reason: 'no castalia bank configured' }))
   defineInvokeHandler(params.context, castaliaMemoryListThoughts, () => [])
   // 本地 sqlite 仓储只有条目、没有对话日志表，所以落库明确返回不可用。
@@ -540,7 +547,7 @@ export function setupCastaliaMemoryService(params: {
   const described = describeCastaliaEngineConfig(userDataDir)
   defineInvokeHandler(params.context, castaliaMemoryStatus, () => ({
     transport: 'entry-only' as const,
-    capabilities: { vadSweep: false, recall: false, search: false, facts: false, ingest: false, maintain: false, selfCycle: false, psyche: false },
+    capabilities: { vadSweep: false, recall: false, search: false, facts: false, ingest: false, maintain: false, selfCycle: false, psyche: false, diary: false, thoughts: false },
     error: `完整引擎没有启用，只有条目读写：${described.reason ?? '配置不可用'}`,
     checkedAt: Date.now(),
   }))

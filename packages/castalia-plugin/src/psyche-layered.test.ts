@@ -1,3 +1,5 @@
+import type { PsycheState } from './vendor/engine/psycheState'
+
 // 两层（快情绪 + 慢心境）的性质测试。
 //
 // 参数来源：E2 / R10 —— CoVidAffect 121 人的真实序列上，两层拟合得到
@@ -8,6 +10,7 @@
 //   3) 心境最后仍回到人格基线（不会永久漂移）；
 //   4) 关闭慢层时精确退化回单层（A/B 开关）。
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+
 import {
   createPsycheState,
   transitionPsycheState,
@@ -55,7 +58,7 @@ describe('band 中心：默认是旧语义（中心=人格基线），标定走�
     expect(s.band).toBe('neutral')
   })
 
-  it('CPED 那组标定（中心 −0.35、宽 0.12）下同一证据进入 positive', () => {
+  it('cPED 那组标定（中心 −0.35、宽 0.12）下同一证据进入 positive', () => {
     process.env.PSYCHE_BAND_CENTER_OFFSET = '-0.35'
     process.env.PSYCHE_BAND_ENTER = '0.12'
     process.env.PSYCHE_BAND_HOLD = '0.05'
@@ -122,7 +125,7 @@ describe('两层动力学：结构而不是常数', () => {
     const ratio = (s3.vad.valence - b) / dev0
     // E2 拟合的是 τ=2.85h；decay() 的 2^(−dt/H) 要的是 H=τ·ln2=1.97h。
     // 这一条守的就是「别再有人把 τ 直接填进 H」。
-    const expected = Math.pow(0.5, 3 / 1.97)
+    const expected = 0.5 ** (3 / 1.97)
     expect(ratio).toBeGreaterThan(expected - 0.03)
     expect(ratio).toBeLessThan(expected + 0.03)
   })
@@ -144,7 +147,6 @@ describe('两层动力学：结构而不是常数', () => {
     expect(Math.abs(fast.mood.valence - b)).toBeLessThan(Math.abs(slow.mood.valence - b) / 2)
   })
 })
-
 
 describe('the slow layer is off unless asked for', () => {
   it('keeps mood equal to the fast layer by default', () => {
@@ -220,7 +222,9 @@ describe('a trajectory that crosses the baseline', () => {
     ['rising through it', -0.1, 0.45],
   ] as const) {
     it(`lands in the same place for one and many reads (${label})`, () => {
-      const start = seeded(vad, mood, 1.6)
+      // `PsycheState` 的 valenceBias 是可选的（老状态没有这个字段），而 seeded() 返回的是
+      // 字面量类型；不标注的话 `many = transitionPsycheState(...)` 会因为缺字段报 TS2322。
+      const start: PsycheState = seeded(vad, mood, 1.6)
       const one = transitionPsycheState(start, { kind: 'no_event' }, t0 + 24 * HOUR)
       let many = start
       for (let i = 0; i < 288; i++)

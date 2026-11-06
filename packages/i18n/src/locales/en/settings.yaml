@@ -427,7 +427,7 @@ pages:
       maintain_facts: new facts
       maintain_merged: merged
       maintain_no_llm: No reflection model configured, so only the digest step ran.
-      maintain_skipped: "Nothing ran this time: {reason}. Last run: +{facts} facts, {merged} merged."
+      maintain_skipped: 'Nothing ran this time: {reason}. Last run: +{facts} facts, {merged} merged.'
       maintain_failed: Consolidation failed
   data:
     title: Data
@@ -987,12 +987,12 @@ pages:
       tsundere-level-description: A higher value makes her tone pricklier. It does not change how fast an emotion fades. The setting is saved for each character.
       status-description: The state updates after an AIRI conversation feeds an emotion or desire event. The plugin copy updates independently from the AIRI core.
       backend-title: What the backend can actually do
-      backend-tools-disabled: "Tools were switched off after a provider error: {models}"
+      backend-tools-disabled: 'Tools were switched off after a provider error: {models}'
       backend-retry-tools: Re-check tools
       self-initiated: Self-initiated speech
       self-initiated-empty: no attempt recorded yet
       self-initiated-last: last {reason} at {at}, held back {count} times
-      backend-truncated: "Only {listed} entries were read: the list hit its limit, so this is not the whole bank." 
+      backend-truncated: 'Only {listed} entries were read: the list hit its limit, so this is not the whole bank.'
       short-term-memory: Short-term memory
       short-term-memory-description: The recent mood events that the next turn carries.
       no-short-term-memory: No record yet.
@@ -1109,6 +1109,7 @@ pages:
       description: What she thought about while nobody asked
       summary: '{days} days, {said} of them said out loud'
       privacy: She writes here on her own. Nothing in it was said to you.
+      unsupported: No memory bank is configured, so she keeps no diary here.
       loading: Opening her diary...
       empty: Nothing yet. She writes when something is worth dwelling on.
       day-count: 'no entries | one entry | {count} entries'
@@ -1132,7 +1133,7 @@ pages:
       privacy: Raw lines, not memories. Nothing here is searched, injected, or recalled.
       loading: Opening the stream...
       empty: Nothing archived yet. She writes lines on her own tick.
-      unsupported: This client has no thought archive. Only the desktop app writes one.
+      unsupported: No memory bank is configured, so nothing is archived here.
       unreadable: 'Could not open the archive: {reason}'
       day-count: 'no lines | one line | {count} lines'
       hidden: '{count} lines kept to herself'

@@ -209,6 +209,10 @@ export interface CastaliaMemoryCapabilities {
   maintain: boolean
   selfCycle: boolean
   psyche: boolean
+  /** 后端有没有日记分区。开关开着、但只有条目仓储时这里是 false。 */
+  diary: boolean
+  /** 后端有没有念头存档。 */
+  thoughts: boolean
 }
 
 /** 自动情感那套实验门槛的实际状态：开关开着不等于它就在推动 psyche。 */

@@ -106,6 +106,31 @@ describe('thought archive', () => {
     expect(archive.thoughts).toHaveLength(0)
   })
 
+  it('turns the pages off when the backend has no store behind the calls', async () => {
+    // fresh 安装：两条 invoke 都在（端口齐），后面没有记忆库。页面不能把「没有库」说成「她没写」。
+    const memory = useMemoryStore()
+    memory.attachRemote({
+      list: async () => [],
+      save: async () => {},
+      forget: async () => true,
+      rememberDay: async () => ({ ok: false, reason: 'no castalia bank configured' }),
+      searchDiary: async () => [],
+      rememberThoughts: async () => ({ ok: false, reason: 'no castalia bank configured' }),
+      listThoughts: async () => [],
+    })
+    expect(memory.diarySupported).toBe(true)
+    expect(memory.thoughtsSupported).toBe(true)
+
+    memory.setBackend({
+      transport: 'entry-only',
+      capabilities: { vadSweep: false, recall: false, search: false, facts: false, ingest: false, maintain: false, selfCycle: false, psyche: false, diary: false, thoughts: false },
+      checkedAt: Date.now(),
+    })
+
+    expect(memory.diarySupported).toBe(false)
+    expect(memory.thoughtsSupported).toBe(false)
+  })
+
   it('groups the archive by local day', async () => {
     const memory = useMemoryStore()
     memory.attachRemote({

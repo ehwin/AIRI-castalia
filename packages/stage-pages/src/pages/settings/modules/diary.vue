@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useMemoryStore } from '@proj-airi/stage-ui/stores/memory'
 import { useDiaryStore } from '@proj-airi/stage-ui/stores/modules/diary'
 import { useVideoWatchStore } from '@proj-airi/stage-ui/stores/modules/video-watch'
 import { FieldCheckbox, GhostButton, SettingsCard } from '@proj-airi/ui'
@@ -8,6 +9,7 @@ import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
 const diary = useDiaryStore()
+const memory = useMemoryStore()
 // Watched clips are their own dataset; the page joins them onto the day it reads.
 const watchlist = useVideoWatchStore()
 const { byDay, loading, reveal, shared } = storeToRefs(diary)
@@ -35,6 +37,12 @@ async function remember(date: string) {
 
 <template>
   <div :class="['flex flex-col', 'gap-4']">
+    <SettingsCard v-if="!memory.diarySupported">
+      <p :class="['text-sm', 'text-neutral-500 dark:text-neutral-400']">
+        {{ t(`${KEY}.unsupported`) }}
+      </p>
+    </SettingsCard>
+
     <SettingsCard>
       <p :class="['text-sm', 'text-neutral-500 dark:text-neutral-400']">
         {{ t(`${KEY}.summary`, { days: byDay.length, said: shared.length }) }}
