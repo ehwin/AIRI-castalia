@@ -295,3 +295,38 @@ sidrune + deepseek-v4-1-flash + 32768 / auto / 15），密钥框留空表示沿�
 - 公开包（`verify-pack-20261106-public2`，`build:public`）：两个条目都在，记忆库页正常列出真库。
 
 注意：i18n 文案在两种包里都在（打包按语言整份带入），区别只在渲染出来的入口和页面守卫。
+
+## 15 星图搬进 app，不再开网页（2026-11-07 02:20）
+
+前面那条「只看/搜/改/删」的手写页撤了：你说的是把**全部**塞进 GUI。现在
+设置 → 模块 → 记忆体就是原来那个控制台（星图 / 记忆总成 / 库管理），一行界面没重写。
+
+怎么塞进去的：
+
+| 环节 | 做法 |
+| --- | --- |
+| 进程 | 主进程用 `ELECTRON_RUN_AS_NODE`（Electron 自带 Node）把 `server.mjs` 拉成子进程，挑一个空闲端口 |
+| 库 | `MEMORY_DB_DIR` = 当前库目录；`CASTALIA_VEC_DLL` = 随包的 `vec0.dll` |
+| 就绪 | 轮询 `/api/status`，20 秒不上就报错，并把子进程 stderr 的尾巴带出来 |
+| 界面 | 页面里一个 iframe，`?embed=1` 注入 `embed.css`：同底色、同字体、藏掉跨库跳转 |
+| 退出 | `before-quit` 关子进程（实测关掉 app 后端口已释放、无残留 server.mjs） |
+
+两个坑，都在实机上踩到了：
+
+1. **`extraResources` 不递归 node_modules**。第一版包里 `resources/castalia-console` 少了
+   `node_modules`，起来就 `Cannot find package 'express'`。现在单列一条，排除 `better-sqlite3`。
+2. **better-sqlite3 在 Electron 里装得上、一用就炸**（`compiled against a different Node.js version`）。
+   `routes/sqlite-compat.js` 改成先 `:memory:` 跑一条 `CREATE TABLE` 试，失败就退 `node:sqlite`；
+   并且必须显式 `allowExtension: true` —— 否则 `loadExtension` 静默失败，星图能画但向量全空，
+   报错只有一句 `no such module: vec0`。
+
+实测（公开包，库指向真库副本）：
+
+- 记忆体页：iframe 起来，星图 595 点 / 946 连线，底部 `布局:UMAP3D 5块 深度85%`，
+  五个星座（diary 6、general 335、project 51、reference 3、user 13）都在 → 向量确实挂上了。
+- 跨库竖条（3344-3348）在嵌入时隐藏，顶栏产品名隐藏。
+- 私有包（`verify-pack-20261107-private`，已部署）：模块菜单里没有这两页，也没有拉起控制台进程
+  （检查：0 个 `server.mjs`）。资源仍随包发（11 MB），因为 extraResources 不按版式分叉。
+
+`.gitignore` 里 `/viz/` 改成只忽略它的 node_modules / 日志 / `*.bak-*`：
+公开版要能在一台干净机器上复现构建，控制台源码得跟着仓库走。
