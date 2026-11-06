@@ -217,6 +217,15 @@ export function useModulesList() {
         : {}),
     },
     {
+      id: 'memory-banks',
+      name: t('settings.pages.modules.memory-banks.title'),
+      description: t('settings.pages.modules.memory-banks.description'),
+      icon: 'i-solar:database-bold-duotone',
+      to: '/settings/modules/memory-banks',
+      configured: memoryStore.enabled,
+      category: 'essential',
+    },
+    {
       id: 'memory-api',
       name: t('settings.pages.modules.memory-api.title'),
       description: t('settings.pages.modules.memory-api.description'),

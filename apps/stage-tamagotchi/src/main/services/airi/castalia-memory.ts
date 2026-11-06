@@ -13,11 +13,12 @@ import { defineInvokeHandler } from '@moeru/eventa'
 import { createCastaliaMemoryRepository } from '@proj-airi/castalia-plugin/memory'
 import { app } from 'electron'
 
-import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryApplyEmotion, castaliaMemoryFacts, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryListThoughts, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemoryRememberDay, castaliaMemoryRememberThoughts, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySearchDiary, castaliaMemorySelfCycle, castaliaMemorySetEnabled, castaliaMemorySetEnergy, castaliaMemoryStatus, castaliaOpenConsole, castaliaSettingsGet, castaliaSettingsSave, castaliaTuningGet, castaliaTuningSave } from '../../../shared/eventa/castalia-memory'
+import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryApplyEmotion, castaliaMemoryFacts, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryListThoughts, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemoryRememberDay, castaliaMemoryRememberThoughts, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySearchDiary, castaliaMemorySelfCycle, castaliaMemorySetEnabled, castaliaMemorySetEnergy, castaliaBankDelete, castaliaBankEdit, castaliaBankSearch, castaliaBankTree, castaliaMemoryStatus, castaliaOpenConsole, castaliaSettingsGet, castaliaSettingsSave, castaliaTuningGet, castaliaTuningSave } from '../../../shared/eventa/castalia-memory'
 import { openCastaliaConsole } from './castalia-console'
 import { createCastaliaEngineMemory, describeCastaliaEngineConfig, resolveCastaliaEngineOptions } from './castalia-engine'
 import { createCastaliaFullClient, resolveCastaliaFullUrl } from './castalia-full'
 import { createInProcessBankMemory } from './castalia-inprocess'
+import { deleteBankRow, listBankTree, searchBank, updateBankRow } from './castalia-bank-browser'
 import { readCastaliaSettings, writeCastaliaSettings } from './castalia-settings'
 import { applyStoredTuning, getTuningSnapshot, saveTuning } from './castalia-tuning'
 
@@ -380,6 +381,14 @@ export function setupCastaliaMemoryService(params: {
   }
   defineInvokeHandler(params.context, castaliaSettingsGet, () => readCastaliaSettings(settingsTarget()))
   defineInvokeHandler(params.context, castaliaSettingsSave, input => writeCastaliaSettings(settingsTarget(), input?.patch ?? {}))
+
+  // 记忆库浏览：库根 = bankDir 的上一级（默认库是 `<userData>/memory-banks`，配置库是
+  // `<banks>/<bank>`），两类都落在「上一级里放 bank 目录」这个形状上。
+  const banksRoot = () => join(settingsTarget().bankDir, '..')
+  defineInvokeHandler(params.context, castaliaBankTree, () => listBankTree(banksRoot()))
+  defineInvokeHandler(params.context, castaliaBankSearch, input => searchBank({ ...input, baseDir: banksRoot() }))
+  defineInvokeHandler(params.context, castaliaBankEdit, input => updateBankRow({ ...input, baseDir: banksRoot() }, input?.text ?? ''))
+  defineInvokeHandler(params.context, castaliaBankDelete, input => deleteBankRow({ ...input, baseDir: banksRoot() }))
 
   if (engineOptions) {
     // 默认在主进程内直连记忆库（不再 spawn 子进程、不走 MCP/HTTP）；

@@ -103,7 +103,8 @@ export interface CastaliaStoredThought {
 export const castaliaMemoryRememberThoughts = defineInvokeEventa<{ ok: boolean, saved?: number, reason?: string }, CastaliaThoughtInput[]>('eventa:invoke:castalia:memory:remember-thoughts')
 export const castaliaMemoryListThoughts = defineInvokeEventa<CastaliaStoredThought[], { limit?: number, persona?: string }>('eventa:invoke:castalia:memory:list-thoughts')
 
-/**
+/**
+
  * One structured fact (subject · predicate · object) found by the same lookup.
  *
  * Facts are the one-line answers the memory rows only imply, so the search tool prints them
@@ -367,6 +368,67 @@ export interface CastaliaSettingsSaveResult {
   restartRequired: boolean
   error?: string
 }
+
+// ── 记忆库浏览（设置 → 模块 → 记忆库；不再依赖 3348 控制台）──────────────────
+
+export interface CastaliaBankPartition {
+  partition: string
+  active: number
+  total: number
+}
+
+export interface CastaliaBankProject {
+  project: string
+  partitions: CastaliaBankPartition[]
+}
+
+export interface CastaliaBankTree {
+  bank: string
+  projects: CastaliaBankProject[]
+}
+
+export interface CastaliaBankRow {
+  bank: string
+  project: string
+  partition: string
+  id: string
+  text: string
+  memType: string
+  characterId: string
+  source: string
+  createdAt: string
+  updatedAt: string
+  importance: number
+  hasVector: boolean
+}
+
+export interface CastaliaBankScope {
+  bank?: string
+  project?: string
+  partition?: string
+}
+
+export interface CastaliaBankQuery extends CastaliaBankScope {
+  query?: string
+  limit?: number
+}
+
+export interface CastaliaBankRowTarget extends CastaliaBankScope {
+  bank: string
+  project: string
+  partition: string
+  id: string
+}
+
+export interface CastaliaBankWriteResult {
+  ok: boolean
+  error?: string
+}
+
+export const castaliaBankTree = defineInvokeEventa<CastaliaBankTree[]>('eventa:invoke:castalia:bank:tree')
+export const castaliaBankSearch = defineInvokeEventa<CastaliaBankRow[], CastaliaBankQuery>('eventa:invoke:castalia:bank:search')
+export const castaliaBankEdit = defineInvokeEventa<CastaliaBankWriteResult, CastaliaBankRowTarget & { text: string }>('eventa:invoke:castalia:bank:edit')
+export const castaliaBankDelete = defineInvokeEventa<CastaliaBankWriteResult, CastaliaBankRowTarget>('eventa:invoke:castalia:bank:delete')
 
 export const castaliaSettingsGet = defineInvokeEventa<CastaliaSettingsSnapshot>('eventa:invoke:castalia:settings:get')
 export const castaliaSettingsSave = defineInvokeEventa<

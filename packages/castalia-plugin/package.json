@@ -29,6 +29,10 @@
     "./tuning": {
       "types": "./src/tuning.ts",
       "default": "./src/tuning.ts"
+    },
+    "./vendor/sqlite-shim": {
+      "types": "./src/vendor/sqlite-shim.ts",
+      "default": "./src/vendor/sqlite-shim.ts"
     }
   },
   "scripts": {
