@@ -591,7 +591,17 @@ canonical 提交里的 `dist/db.js`、`dist/psycheState.js` 落后于它们自�
 - `eslint`：`memory.ts`、`modules/diary.ts`、`diary-distill.integration.test.ts`、`tools/castalia.ts`、`tools/castalia.test.ts` 0 error。
 - 「跑 `castalia-plugin` 全量前先清 `PSYCHE_BAND_ENTER` / `PSYCHE_BAND_HOLD` / `PSYCHE_BAND_CENTER_OFFSET`」：当前 shell 里带着这三个变量（并行会话留下的），会让 `psyche-layered.test` 的默认中心用例失败。清掉后全绿。
 
-### 15.11 遗留
+### 15.11 实机测试发现：日记页按窗口的 mind scope 取角色（2026-11-06 10:20 修）
+
+照 15.10 的参数打包换掉 `D:\system\AIRI` 后进设置 → 日记，页面只列出 4 天的旧念头（2026-11-03/04），点「记住这一天」写进去的 `character_id` 是 `default`。
+
+- 实测数据：`airi-mind/thoughts` 里 `N_h4lzzOfl0AYehOR171-` 有 173 条（2026-11-01 11:40 → 11-06 10:04），`default` 只有 4 条旧数据；银行 `general` 的 203 条对话也全在 `N_h4…` 下。
+- 根因：`diary.ts` 的角色来自 `mind.scope`。mind 有单窗口 owner 设计，没成为 owner 的窗口（设置窗）`mindScope` 停在初始值 `default`，于是页面读 `default` 的 4 条旧念头，写也写到 `default`。而聊天侧 `personaOf()` 取的是活动卡 id（`N_h4…`），所以模型调 `searchDiary(query, 5, persona)` 按 `N_h4…` 过滤，一条也搜不到——写进去的日记对模型不可见。
+- 修法：`diary.ts` 的角色改问活动卡 id，与聊天一致。新增 `activeCardIdFromStorage()`（`airi-card.ts` 里读持久化键的纯函数），因为 store 里直接 `useAiriCardStore()` 会拉进 `useI18n()`，node 测试里没有 setup 上下文。不用 `computed`，用 `persona()` 函数，避免缓存住过期角色。
+- 复测：同一个包换法重打包后，页面列出 11-01…11-06 六天（28/50/57/13/13/13 条），点 11-05 的按钮 → 银行 `diary/memory.sqlite` 新增 `# diary-2026-11-05`，`character_id = N_h4lzzOfl0AYehOR171-`，`mem_type = diary`，同一 id 在 `vec_memory` 里有向量；五个普通分区 `# diary-%` 计数仍为 0。
+- 测试同步改：`keeps persona-less thoughts with the card that read them` 不再靠 `mind.switchCharacter`，改为 stub `localStorage` 的 `airi-card-active-id` 再 `load()`；`persona` 断言改为 `memory.resolvePersona('default')`。`stage-ui` 三个文件 56 passed，`eslint` 0 error。
+
+### 15.12 遗留
 
 - 独立引擎 `D:\castalia\run\Castalia\dist` **未重建**。那边的 `memType.js` 不认识 `diary`，所以日记分区只在 app 进程内可用，5 条桥（3310–3318）没有这个功能。要上线就 `npm run build` 后拷 `dist/memType.js`。
 - `listMemTypeDirs` 的 `base.includes(f)` 既是隔离的关键，也是陷阱：以后谁把 `diary` 加进 `base`，隔离立刻失效。

@@ -5,7 +5,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useMemoryStore } from '../memory'
 import { useDiaryStore } from './diary'
-import { useMindStore } from './mind'
 
 /**
  * 日记是否真的接进了逻辑：思绪 → 日记 → 「记住这一天」 → 日记分区。
@@ -80,9 +79,9 @@ describe('diary → memory', () => {
     const entry = await diary.distill('2026-11-01')
     expect(entry?.name).toBe('diary-2026-11-01')
 
-    // Ask for the persona the diary actually writes to; the alias `default` -> `airi` only holds
-    // while `airi` owns rows, and a fresh store has none.
-    const persona = memory.resolvePersona(useMindStore().scope)
+    // Ask for the persona the diary actually writes to. The diary follows the active card, which
+    // this test never sets, so the persisted default stands.
+    const persona = memory.resolvePersona('default')
     expect(rememberDay).toHaveBeenCalledTimes(1)
     const [day] = rememberDay.mock.calls[0]!
     expect(day.date).toBe('2026-11-01')
@@ -148,14 +147,26 @@ describe('diary → memory', () => {
   it('keeps persona-less thoughts with the card that read them', async () => {
     // ROOT CAUSE: `load()` filtered `!thought.persona` for every card, so a thought written
     // before the per-card split showed up in every character's diary.
-    const mind = useMindStore()
+    //
+    // The diary follows the active card's id, which the card store persists. Switching the card
+    // is what moves the diary, not the mind's own scope.
     const diary = useDiaryStore()
     await diary.load()
     expect(diary.thoughts).toHaveLength(3)
 
-    await mind.switchCharacter('another-card')
-    await diary.load()
-    expect(diary.thoughts).toHaveLength(0)
+    // The node test environment has no storage, so the persisted card id stands in as a stub.
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => key === 'airi-card-active-id' ? 'another-card' : null,
+      setItem: () => {},
+      removeItem: () => {},
+    })
+    try {
+      await diary.load()
+      expect(diary.thoughts).toHaveLength(0)
+    }
+    finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('says nothing when the day holds no usable line', async () => {

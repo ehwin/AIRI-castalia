@@ -94,6 +94,16 @@ function readPersistedActiveCardId(): string {
   }
 }
 
+/**
+ * The active card id as every window stores it.
+ *
+ * A store that is not the card store still has to ask "whose data is this". The card store answers
+ * from a reactive ref that needs a Vue setup, so a plain store asks the persisted key instead.
+ */
+export function activeCardIdFromStorage(): string {
+  return readPersistedActiveCardId()
+}
+
 function persistActiveCardId(id: string): boolean {
   try {
     globalThis.localStorage?.setItem(ACTIVE_CARD_ID_STORAGE_KEY, id)

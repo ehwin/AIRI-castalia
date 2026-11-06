@@ -7,7 +7,7 @@ import { computed, ref } from 'vue'
 
 import { innerThoughtsRepo } from '../../database/repos/inner-thoughts.repo'
 import { useMemoryStore } from '../memory'
-import { useMindStore } from './mind'
+import { activeCardIdFromStorage } from './airi-card'
 
 /** One day of the diary. */
 export interface DiaryDay {
@@ -41,14 +41,25 @@ export const useDiaryStore = defineStore('diary', () => {
    */
   // Keyed by character: one character's remembered days are not another's. A plain array is the pre-split value.
   const distilledByPersona = useLocalStorageManualReset<Record<string, string[]>>('diary/distilled', {})
-  const mind = useMindStore()
-  const scope = computed(() => mind.scope)
+  const memory = useMemoryStore()
+  /**
+   * The character whose diary this is.
+   *
+   * Not `mind.scope`: the mind has one owner window, and a window that never became the owner kept
+   * its scope at the `default` start. The page then listed four legacy thoughts of a card nobody
+   * was using, and remembered those days. The chat resolves the same question from the active card,
+   * so the diary does too.
+   */
+  function persona() {
+    const card = activeCardIdFromStorage()
+    return memory.enabled ? memory.resolvePersona(card) : card
+  }
 
   /** This character's remembered days. The own slice of the per-character map. */
   const distilledDays = computed<string[]>({
-    get: () => distilledByPersona.value[scope.value] ?? [],
+    get: () => distilledByPersona.value[persona()] ?? [],
     set: (dates) => {
-      distilledByPersona.value = { ...distilledByPersona.value, [scope.value]: dates }
+      distilledByPersona.value = { ...distilledByPersona.value, [persona()]: dates }
     },
   })
 
@@ -64,10 +75,8 @@ export const useDiaryStore = defineStore('diary', () => {
     const saved = distilledByPersona.value as unknown
     if (!Array.isArray(saved))
       return
-    distilledByPersona.value = { [scope.value]: saved as string[] }
+    distilledByPersona.value = { [persona()]: saved as string[] }
   }
-
-  const memory = useMemoryStore()
 
   const byDay = computed<DiaryDay[]>(() => {
     const days = new Map<string, Thought[]>()
@@ -107,10 +116,10 @@ export const useDiaryStore = defineStore('diary', () => {
       const all = await innerThoughtsRepo.readAll(limit)
       const legacy = all.filter(thought => !thought.persona)
       for (const thought of legacy)
-        thought.persona = scope.value
+        thought.persona = persona()
       if (legacy.length)
         await Promise.all(legacy.map(thought => innerThoughtsRepo.append(thought)))
-      thoughts.value = all.filter(thought => thought.persona === scope.value)
+      thoughts.value = all.filter(thought => thought.persona === persona())
       loadedAt.value = Date.now()
     }
     finally {
@@ -139,7 +148,7 @@ export const useDiaryStore = defineStore('diary', () => {
       date,
       description: entry.description,
       body: entry.body,
-      persona: memory.resolvePersona(scope.value),
+      persona: memory.resolvePersona(persona()),
     })
     // The backend answer is what decides. Marking the day before it lands left "已记住" on a memory
     // the bank rolled back (and never retried).
