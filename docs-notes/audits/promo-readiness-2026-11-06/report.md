@@ -111,6 +111,9 @@ asar SHA-256：`144eba9e7dc1a5ceb7f6ef80d992af718131f8a5bd8d054e8cbc5bcccd600f56
 
 ## 8 遗留（推广前请决定）
 
+> 2026-11-06 晚更新：下面六条已按你的答复处理，逐条结果见第 11 节。仍然成立的只剩
+> 「别人的机器是 FTS-only」和「桥要重启」两条。
+
 1. **独立引擎落后**：`D:\castalia\run\Castalia\dist\memType.js` 里没有 `DIARY_MEM_TYPE` /
    `THOUGHTS_MEM_TYPE`。app 走进程内引擎不受影响，但 5 条桥（3310…3318）没有日记与念头。
    覆盖前要先看这五天的 diff。
@@ -157,3 +160,68 @@ cp -a dist/verify-pack-20261106q/win-unpacked/. /d/system/AIRI/apps/stage-tamago
 
 测试里带 `PSYCHE_BAND_*` 环境变量会让 `psyche-layered.test.ts` 假红（band 参数被外部覆盖），
 所以复现命令里用 `env -u` 清掉。
+
+## 11 第二轮：按你的六条答复落地（2026-11-06 晚）
+
+你逐条答复后改的东西，六条对应如下。
+
+### 11.1 独立引擎（第 1 条）
+
+- `Castalia-Anima`：源码仓重新构建，`dist/` 同步到 `D:/castalia/run/Castalia-Anima/dist`
+  （之前停在 11-01，没有日记/念头分区，也没有 psyche 那批修复）。
+- `Castalia`（5 条桥用的那份，1.27.0）：把 `DIARY_MEM_TYPE` / `THOUGHTS_MEM_TYPE` 与
+  `normalizeMemType` 的放行补进 `src/memType.ts`，`batchEmbedPending` 的遍历补上 `diary`
+  （它不在 `MEM_TYPES`，换嵌入模型后日记永远没有向量），`memDir()` 导出给 store 用。
+  重新构建后同步到 `D:/castalia/run/Castalia/dist`，提交 `94378dd`（本地，`origin` 是 ssh，
+  推不动；同一个提交已在 `https://github.com/ehwin/Castalia.git` 的 `sync/v1.28-dedupe` 分支上）。
+- 覆盖前先把两份旧 `dist` 打包到 `D:/castalia/run/_backup-dist-20261106/`。
+- 实测：两份 `memType.js` 载入后 `normalizeMemType('diary') === 'diary'`，且两者都**不在**
+  `MEM_TYPES` 里（隔离没有被顺手破掉）。
+- 正在跑的桥进程还是旧代码，重启后生效（Guard 任务会拉起）。
+
+### 11.2 日记与念头的反射（第 2 条）
+
+按你说的口径：**日记进库算一条记忆（`mem_type=diary`、`source=diary_day`），念头只记录不反思**，
+两者都不进 `MEM_TYPES`，所以反刍、跨库召回、衰减、星图都扫不到它们；只有提到日记/念头时，
+模型通过 `builtIn_castaliaSearchDiary` 或页面调出来。这条没有改动代码，是现状与你的描述一致。
+
+### 11.3 清数据（第 3、4 条）
+
+- `airi/airi/general` 的 `facts` 里 `('user','test_likes','coffee')` 已软删（`is_active=0`），
+  它是测试写进去的，不再进事实候选。
+- 失效向量：用 sqlite-vec 打开各分区，删掉 `is_active=0` 行对应的向量。
+  日记 11 → 6（正好等于 6 条活跃行），project 29 → 25，user/general 没有死向量。
+  复查：四个分区的「向量指向不存在的行」数量均为 0。
+- 注意：这一步必须加载 `vec0.dll` 才能删（`vec_memory` 是虚拟表，光有 shadow 表读得到、删不掉）。
+
+### 11.4 向量扩展路径（第 5 条，原话「没懂什么意思」）
+
+说的是这个：`sqlite-vec` 的 Windows 扩展 `vec0.dll` 不在包里，代码只在三个地方找它 ——
+环境变量 `CASTALIA_VEC_EXT`，和本机运行库里的两条 `D:/castalia/...`。别人的机器上这三条
+都不存在，于是向量检索整条链静默退化成 FTS（能搜到字面词，搜不到语义）。
+现在 `vec0.dll` 随包走（`resources/castalia/vec0.dll`），查找顺序是：环境变量 → 包内 →
+本机运行库。新增用例覆盖前两条。
+
+### 11.5 包内全量（第 6 条）
+
+原来「换台机器就只剩条目仓储」的根因不是缺引擎代码 —— 引擎的进程内镜像
+（`packages/castalia-plugin/src/vendor/engine`）本来就在包里。缺的是库目录：
+`castalia-engine.json` 不存在时，`describeCastaliaEngineConfig` 直接判定「没有引擎」。
+现在：
+
+- 没有配置文件 → 用 `<userData>/memory-banks`，目录自己建，`project=airi`、`character=default`；
+- 这种库没有 `config.json`，`openBank` 改成允许无配置打开（固定 `EMBED_MODE=none`），
+  否则引擎怕误清向量索引会拒绝开库；
+- 有配置文件时完全按配置来，坏路径照旧报错，不会被默认值盖掉（新增用例）。
+
+实测（全新 `--user-data-dir`）：启动后 `memory-banks/airi/{feedback,general,project,reference,thoughts,user}`
+全部建好，`global.sqlite` 在，日志 123 行 0 错误；日记页「0 天」、念头页「0 天，0 行留着」——
+不再是「没有配置记忆库」。你自己的 profile 不受影响，仍是 `D:/castalia/memory-banks/airi`，
+6 天日记、20/13/13/57/50/28 条的读数不变。
+
+### 11.6 还没解决的
+
+- 别人的机器上是 FTS-only：嵌入要 API key 或本地 Ollama，包里不带模型。接上之后
+  `batchEmbedPending` 会把日记补嵌（这条第一轮已经修过）。
+- 桥进程要重启才用上新 `dist`。
+- `Castalia` 仓库的 `origin` 是 ssh，当前 shell 没有可用 key；提交已推 https 分支。
