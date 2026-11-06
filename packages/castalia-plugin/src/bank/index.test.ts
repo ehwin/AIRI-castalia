@@ -79,6 +79,30 @@ describe('in-process bank', () => {
     expect(active).toHaveLength(1)
   })
 
+  it('keeps thoughts in their own file, out of every other partition', async () => {
+    const saved = await bank.saveThoughts([
+      { id: 't-1', at: Date.parse('2026-11-06T09:00:00'), text: 'noticed the build passed', visibility: 'private', persona: 'airi' },
+      { id: 't-2', at: Date.parse('2026-11-06T10:00:00'), text: 'said I am still here', visibility: 'shared', persona: 'airi' },
+    ])
+    expect(saved.saved).toBe(2)
+
+    const rows = bank.listThoughts({ characterId: 'airi' })
+    expect(rows).toHaveLength(2)
+    expect(rows.map(row => row.text)).toContain('noticed the build passed')
+
+    // 念头只在念头库：长期记忆列表、日记、普通检索都看不到
+    expect(bank.listMemories(500).some(row => String(row.text ?? '').includes('the build passed'))).toBe(false)
+    expect(bank.listDiaryDays({ characterId: 'airi' }).some(row => String(row.body ?? '').includes('the build passed'))).toBe(false)
+    const casual = await bank.search({ query: 'build', characterId: 'airi', topK: 5 })
+    expect(casual.some(row => String(row.text ?? '').includes('the build passed'))).toBe(false)
+
+    // 同一条念头再写一次是替换：visibility 从 private 变 shared，不追加一行
+    await bank.saveThoughts([{ id: 't-1', at: Date.parse('2026-11-06T09:00:00'), text: 'noticed the build passed', visibility: 'shared', persona: 'airi' }])
+    const after = bank.listThoughts({ characterId: 'airi' })
+    expect(after).toHaveLength(2)
+    expect(after.find(row => row.id === 't-1')?.visibility).toBe('shared')
+  })
+
   it('finds it back by lexical search', async () => {
     const hits = await bank.search({ query: '进程内跑引擎', project: 'testproj', characterId: 'airi', topK: 5, minScore: 0 })
     expect(hits.length).toBeGreaterThan(0)

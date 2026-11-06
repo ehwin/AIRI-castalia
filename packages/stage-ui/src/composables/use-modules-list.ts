@@ -133,6 +133,16 @@ export function useModulesList() {
       category: 'essential',
     },
     {
+      id: 'thoughts',
+      name: t('settings.pages.modules.thoughts.title'),
+      description: t('settings.pages.modules.thoughts.description'),
+      icon: 'i-solar:cloud-file-bold-duotone',
+      to: '/settings/modules/thoughts',
+      // The archive exists only when the bank keeps one; without it the page would say "nothing".
+      configured: memoryStore.thoughtsSupported,
+      category: 'essential',
+    },
+    {
       id: 'stickers',
       name: t('settings.pages.modules.stickers.title'),
       description: t('settings.pages.modules.stickers.description'),

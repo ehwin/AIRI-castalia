@@ -13,7 +13,7 @@ import { defineInvokeHandler } from '@moeru/eventa'
 import { createCastaliaMemoryRepository } from '@proj-airi/castalia-plugin/memory'
 import { app } from 'electron'
 
-import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryApplyEmotion, castaliaMemoryFacts, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemoryRememberDay, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySearchDiary, castaliaMemorySelfCycle, castaliaMemorySetEnabled, castaliaMemorySetEnergy, castaliaMemoryStatus, castaliaOpenConsole, castaliaTuningGet, castaliaTuningSave } from '../../../shared/eventa/castalia-memory'
+import { castaliaFullMembers, castaliaFullSearch, castaliaMemoryApplyEmotion, castaliaMemoryFacts, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryListThoughts, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemoryRememberDay, castaliaMemoryRememberThoughts, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySearchDiary, castaliaMemorySelfCycle, castaliaMemorySetEnabled, castaliaMemorySetEnergy, castaliaMemoryStatus, castaliaOpenConsole, castaliaTuningGet, castaliaTuningSave } from '../../../shared/eventa/castalia-memory'
 import { openCastaliaConsole } from './castalia-console'
 import { createCastaliaEngineMemory, describeCastaliaEngineConfig, resolveCastaliaEngineOptions } from './castalia-engine'
 import { createCastaliaFullClient, resolveCastaliaFullUrl } from './castalia-full'
@@ -457,6 +457,13 @@ export function setupCastaliaMemoryService(params: {
     defineInvokeHandler(params.context, castaliaMemorySearchDiary, input => engine.searchDiary
       ? engine.searchDiary(String(input?.query ?? ''), input?.topK, input?.persona)
       : Promise.resolve([]))
+    // 念头存档:和日记同一个 bank、另一个文件,不建向量(不是召回用的)。
+    defineInvokeHandler(params.context, castaliaMemoryRememberThoughts, rows => engine.rememberThoughts
+      ? engine.rememberThoughts(Array.isArray(rows) ? rows : [])
+      : Promise.resolve({ ok: false, reason: 'transport has no thought archive' }))
+    defineInvokeHandler(params.context, castaliaMemoryListThoughts, options => engine.listThoughts
+      ? engine.listThoughts(options)
+      : Promise.resolve([]))
     defineInvokeHandler(params.context, castaliaMemoryFacts, input => engine.facts
       ? engine.facts(String(input?.query ?? ''), input?.topK, input?.persona)
       : Promise.resolve([]))
@@ -511,6 +518,9 @@ export function setupCastaliaMemoryService(params: {
   // 本地仓储同样没有语义检索：明确返回空列表（模型会如实说"没找到"）。
   defineInvokeHandler(params.context, castaliaMemorySearch, () => [])
   defineInvokeHandler(params.context, castaliaMemoryFacts, () => [])
+  // 本地仓储只有条目:念头存档明确回不可用,页面上也就不会假装「她什么都没想」。
+  defineInvokeHandler(params.context, castaliaMemoryRememberThoughts, () => ({ ok: false, reason: 'no castalia bank configured' }))
+  defineInvokeHandler(params.context, castaliaMemoryListThoughts, () => [])
   // 本地 sqlite 仓储只有条目、没有对话日志表，所以落库明确返回不可用。
   defineInvokeHandler(params.context, castaliaMemoryIngest, () => ({ ok: false, error: 'no castalia bank configured' }))
   defineInvokeHandler(params.context, castaliaMemoryMaintain, () => ({ ok: false, startedAt: new Date().toISOString(), ms: 0, reflectConfigured: false, error: 'no castalia bank configured' }))

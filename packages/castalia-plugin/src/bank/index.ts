@@ -49,6 +49,31 @@ export interface DiaryDayInput {
   characterId?: string
 }
 
+/**
+ * 一行念头,写给 `thoughts/memory.sqlite`。
+ *
+ * 没有向量:`skipEmbed` 是有意的 —— 这不是用来召回的东西,存档而已。
+ */
+export interface ThoughtInput {
+  /** 念头在 IndexedDB 里的 id;同 id 再写一次是替换。 */
+  id: string
+  /** 写下那一刻(epoch ms)。 */
+  at: number
+  text: string
+  visibility?: 'private' | 'shared'
+  topic?: string
+  persona?: string
+}
+
+export interface StoredThought {
+  id: string
+  at: number
+  text: string
+  visibility: string
+  topic?: string
+}
+
+
 export interface BankHandle {
   bankDir: string
   project: string
@@ -80,6 +105,9 @@ export interface BankHandle {
   saveDiaryDay: (input: DiaryDayInput) => Promise<{ id: string, name: string, replaced: boolean }>
   searchDiary: (query: string, options?: { topK?: number, characterId?: string }) => Promise<any[]>
   listDiaryDays: (options?: { limit?: number, characterId?: string }) => Array<{ id: string, name: string | null, description: string, body: string, updatedAt?: string }>
+  /** 念头存档:按 id 替换,不建向量。 */
+  saveThoughts: (rows: ThoughtInput[]) => Promise<{ saved: number }>
+  listThoughts: (options?: { limit?: number, characterId?: string }) => StoredThought[]
   /** memory_store_list 的进程内版本（源 = 引擎的 store 工具实现） */
   listStore: (args?: Record<string, unknown>) => { records: any[] }
   saveStore: (args: Record<string, unknown>) => Promise<{ id: string, updated: boolean }>
@@ -246,8 +274,8 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
   const bankDir = options.bankDir.replace(/\\/g, '/')
   const project = options.project
   const charId = options.charId ?? 'airi'
-  /** 同一天的日记写入队列，键为 project + 角色 + 日期。跨窗口并发由它串行化。 */
-  const diaryWrites = new Map<string, Promise<unknown>>()
+  /** 同一天的日记 / 同一条念头的写入队列，键为 project + 角色 + 名字。跨窗口并发由它串行化。 */
+  const replaceWrites = new Map<string, Promise<unknown>>()
   const configPath = options.configPath ?? join(bankDir, 'config.json')
 
   if (!existsSync(bankDir)) throw new Error(`[castalia-bank] bank dir 不存在: ${bankDir}`)
@@ -293,7 +321,7 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
   const orphan = await import('../vendor/engine/orphan')
   // store 工具（memory_store_list/save/forget + memory_recall 的进程内版本）
   const { createStoreTools, loadEngineDeps, parseStoreText } = await import('./store-tools')
-  const { DIARY_MEM_TYPE } = await import('../vendor/engine/memType')
+  const { DIARY_MEM_TYPE, THOUGHTS_MEM_TYPE } = await import('../vendor/engine/memType')
   const storeTools = createStoreTools(await loadEngineDeps())
 
   const handle: BankHandle = {
@@ -330,7 +358,7 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
       const key = `${project}\u0000${persona}\u0000${name}`
       // 同一天的写入必须串行：两个窗口同时记一天时，各自的 SELECT 都看不到对方还没插的行，
       // 于是各插一条活行（2026-11-06 实测 11-01 一天两条）。排队后第二次能看见第一次的结果。
-      const run = (diaryWrites.get(key) ?? Promise.resolve()).then(async () => {
+      const run = (replaceWrites.get(key) ?? Promise.resolve()).then(async () => {
         const text = `# ${name}\n\n${description}\n\n${body}`
         const conn = (db as any).DatabaseManager.getInstance(project, DIARY_MEM_TYPE)
         // 同一天重记 = 替换，不追加：旧行连同向量一起软删，避免同一天在库里留下两版。
@@ -375,10 +403,10 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
         return { id: record.id, name, replaced }
       })
       const tail = run.catch(() => {})
-      diaryWrites.set(key, tail)
+      replaceWrites.set(key, tail)
       void tail.then(() => {
-        if (diaryWrites.get(key) === tail)
-          diaryWrites.delete(key)
+        if (replaceWrites.get(key) === tail)
+          replaceWrites.delete(key)
       })
       return run
     },
@@ -391,6 +419,73 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
         characterId: persona,
         topK: options.topK ?? 5,
       } as any)
+    },
+    saveThoughts: async (rows) => {
+      let saved = 0
+      const now = new Date().toISOString()
+      for (const row of Array.isArray(rows) ? rows : []) {
+        if (!row || typeof row.id !== 'string' || !row.id || typeof row.text !== 'string' || !row.text.trim())
+          continue
+        const persona = (row.persona ?? '').trim() || charId
+        const name = `thought-${row.id}`
+        const key = `${project}\u0000${persona}\u0000${name}`
+        // 和日记同一条规则:先排队再替换,否则两个窗口同时补同一段念头会各插一条。
+        const run = (replaceWrites.get(key) ?? Promise.resolve()).then(async () => {
+          const conn = (db as any).DatabaseManager.getInstance(project, THOUGHTS_MEM_TYPE)
+          // 同一条念头再写一次是替换(visibility 会从 private 变 shared),不追加。
+          conn.prepare(
+            'UPDATE memory SET is_active = 0, updated_at = ? WHERE is_active = 1 AND project = ? AND character_id IS ? AND text LIKE ?',
+          ).run(now, project, persona, `# ${name}%`)
+          await store.saveMemory({
+            text: `# ${name}\n\n${row.text}`,
+            project,
+            memType: THOUGHTS_MEM_TYPE,
+            type: 'episodic',
+            category: 'thought',
+            subject: 'self',
+            source: 'thought_stream',
+            characterId: persona,
+            importance: 0.2,
+            // 存档不是检索:不建向量,也就不占 KNN 候选、不花嵌入费。
+            skipEmbed: true,
+            metadata: { at: Number(row.at) || Date.now(), visibility: row.visibility ?? 'private', ...(row.topic ? { topic: row.topic } : {}) },
+          } as any)
+        })
+        const tail = run.catch(() => {})
+        replaceWrites.set(key, tail)
+        void tail.then(() => {
+          if (replaceWrites.get(key) === tail)
+            replaceWrites.delete(key)
+        })
+        try {
+          await run
+          saved++
+        }
+        catch { /* 单条失败不拖累整批:游标没走过的行下次还会送 */ }
+      }
+      return { saved }
+    },
+    listThoughts: (options = {}) => {
+      const persona = (options.characterId ?? '').trim() || charId
+      const conn = (db as any).DatabaseManager.getInstance(project, THOUGHTS_MEM_TYPE)
+      const rows = conn.prepare(
+        `SELECT id, text, created_at, metadata FROM memory
+         WHERE is_active = 1 AND project = ? AND character_id IS ?
+         ORDER BY created_at DESC LIMIT ?`,
+      ).all(project, persona, options.limit ?? 2000) as any[]
+      return rows.map((row) => {
+        const { name, body } = parseStoreText(String(row.text ?? ''))
+        let meta: any = {}
+        try { meta = JSON.parse(String(row.metadata ?? '{}')) } catch { /* 旧行没有 metadata */ }
+        const stamp = String(name ?? '').replace(/^thought-/, '')
+        return {
+          id: stamp || String(row.id),
+          at: Number(meta?.at) || Date.parse(String(row.created_at ?? '')) || 0,
+          text: body.trim() || String(row.text ?? ''),
+          visibility: typeof meta?.visibility === 'string' ? meta.visibility : 'private',
+          ...(typeof meta?.topic === 'string' ? { topic: meta.topic } : {}),
+        }
+      })
     },
     listDiaryDays: (options = {}) => {
       const persona = (options.characterId ?? '').trim() || charId

@@ -1125,6 +1125,21 @@ pages:
       shared:
         title: What she said out loud
         empty: Nothing yet. She keeps almost everything to herself.
+    thoughts:
+      title: Thoughts
+      description: The stream she writes in her own head, archived next to the diary
+      summary: '{days} days, {lines} lines kept'
+      privacy: Raw lines, not memories. Nothing here is searched, injected, or recalled.
+      loading: Opening the stream...
+      empty: Nothing archived yet. She writes lines on her own tick.
+      unsupported: This client has no thought archive. Only the desktop app writes one.
+      unreadable: 'Could not open the archive: {reason}'
+      day-count: 'no lines | one line | {count} lines'
+      hidden: '{count} lines kept to herself'
+      reveal:
+        label: Show the raw lines
+        description: Off by default. These are the thoughts before she decided anything about them.
+        warning: With this on you read what she never meant to say. It is not a conversation.
     perception:
       title: Perception
       description: What the companion may look at

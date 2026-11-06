@@ -165,6 +165,40 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
         }))
     },
 
+    async rememberThoughts(rows) {
+      if (closing)
+        return { ok: false, reason: 'closed' }
+      const list = Array.isArray(rows) ? rows : []
+      if (!list.length)
+        return { ok: true, saved: 0 }
+      try {
+        const persona = list.find(row => row.persona?.trim())?.persona?.trim() || undefined
+        const bank = await ensure(persona)
+        const result = await bank.saveThoughts(list.map(row => ({
+          id: String(row.id),
+          at: Number(row.at) || Date.now(),
+          text: String(row.text ?? ''),
+          visibility: row.visibility === 'shared' ? 'shared' as const : 'private' as const,
+          ...(row.topic ? { topic: String(row.topic) } : {}),
+          persona: row.persona?.trim() || options.character,
+        })))
+        return { ok: true, saved: result.saved }
+      }
+      catch (error) {
+        return { ok: false, reason: String((error as Error)?.message ?? error) }
+      }
+    },
+
+    async listThoughts(options_ = {}) {
+      if (closing)
+        return []
+      const bank = await ensure(options_.persona)
+      return bank.listThoughts({
+        limit: options_.limit,
+        characterId: options_.persona?.trim() || options.character,
+      })
+    },
+
     async forget(entry) {
       if (closing)
         return false

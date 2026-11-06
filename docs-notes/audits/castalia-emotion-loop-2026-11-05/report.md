@@ -632,7 +632,25 @@ canonical 提交里的 `dist/db.js`、`dist/psycheState.js` 落后于它们自�
 - 真库 `general/facts` 里有一条 `('user','test_likes','coffee')`，是早前探测留下的测试事实，仍在注入候选里。清不清由主人定。
 - 日记页稳定只看最近 200 条念头（约 6 天）；更早的天要等有人把页面也放宽，循环那边已经改成 5000。
 
-### 15.14 遗留
+### 15.14 念头存档（2026-11-06 11:40）
+
+用户的话：「念头可以放进记忆体，反正也就加开一页的事情，和日记放一起吧，但是分文件」+「就是日记页丢进记忆体，需要的时候再调出来，反正也不太需要召回」。
+
+- **文件**：`<bank>/<project>/thoughts/memory.sqlite`，和日记同 bank、同目录层级，独立文件。
+- **不进 MEM_TYPES**：目录枚举、跨库召回、反刍、衰减、星图、提示词索引都看不到它。和日记同一条隔离规则。
+- **没有向量**：写入显式 `skipEmbed: true`。这不是召回链路，是「需要时翻出来看」的存档，所以也不花嵌入费、不占 KNN 候选窗口。
+- **行形状**：`# thought-<id>` + 正文；`metadata` 里存 `{at, visibility, topic}`。同 id 再写 = 替换（`visibility` 从 private 变 shared 时更新，不追加）。
+- **谁写**：渲染层还是旧路径（`innerThoughtsRepo` → IndexedDB），另起一个镜像循环把银行没有的那一段推上去。`thoughts` store 的游标从银行最新一行的 `at` 起步，重启不会重传整年；失败不前进，下一轮重试同一段。
+- **谁读**：设置 → 模块 → 念头（`/settings/modules/thoughts`），按天分组；默认只给条数，勾「显示原始行」才给正文（和日记页同一套隐私默认值）。
+- **页面对两种「空」的区分**：端口不存在 → 「这个客户端没有念头存档」；读失败 → 「打不开：<原因>」；只有真的没有行才说空。
+
+落点：引擎 `memType.ts`（`THOUGHTS_MEM_TYPE`，同步进 vendor）、`bank/index.ts`（`saveThoughts` / `listThoughts`，排队 + 替换，和日记共用 `replaceWrites` 队列）、eventa 契约两条 invoke、主进程两条 handler（有库/无库各一）、`castalia-inprocess.ts`、`memory.ts` 端口（`thoughtsSupported` 闸门）、`stores/modules/thoughts.ts`、`App.vue`（2 分钟一次 + 启动补一次）、`stage-pages/.../thoughts.vue`、模块菜单、英文文案。
+
+验收：`castalia-plugin` 24 passed（新增「念头只在自己的文件里，列表/日记/普通检索都看不到；同 id 是替换」）；`stage-ui` 新增 5 条 store 用例（只补银行没有的那一段、失败不前进、打不开要说出来、按天分组、说出口后补发一次）全绿；tamagotchi typecheck 0。实机：冷启动把 180 条念头补进 `thoughts/memory.sqlite`（180 活行 / 180 distinct / **0 向量**），其余六个分区 `# thought-` 计数全 0；页面读到「6 days, 180 lines kept」，勾开「显示原始行」出正文。
+
+同一轮发现并修掉一个写放大：每个窗口都从同一个游标起步，冷启动时两个窗口同时补，178 条写成 360 行（内容仍正确）。现在只有持有 mind 租约的窗口做镜像；重启后 total 停在 360、活跃 180，没有重传。
+
+### 15.15 遗留
 
 - 独立引擎 `D:\castalia\run\Castalia\dist` **未重建**。那边的 `memType.js` 不认识 `diary`，所以日记分区只在 app 进程内可用，5 条桥（3310–3318）没有这个功能。要上线就 `npm run build` 后拷 `dist/memType.js`。
 - `listMemTypeDirs` 的 `base.includes(f)` 既是隔离的关键，也是陷阱：以后谁把 `diary` 加进 `base`，隔离立刻失效。

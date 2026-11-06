@@ -26,6 +26,7 @@ import { useMindStore } from '@proj-airi/stage-ui/stores/modules/mind'
 import { usePerceptionStore } from '@proj-airi/stage-ui/stores/modules/perception'
 import { useSelfInitiatedSpeechStore } from '@proj-airi/stage-ui/stores/modules/self-initiated-speech'
 import { useSpeechStore } from '@proj-airi/stage-ui/stores/modules/speech'
+import { useThoughtsStore } from '@proj-airi/stage-ui/stores/modules/thoughts'
 import { useVisionStore } from '@proj-airi/stage-ui/stores/modules/vision'
 import { usePerfTracerBridgeStore } from '@proj-airi/stage-ui/stores/perf-tracer-bridge'
 import { listProvidersForPluginHost, shouldPublishPluginHostCapabilities } from '@proj-airi/stage-ui/stores/plugin-host-capabilities'
@@ -49,7 +50,7 @@ import {
   i18nGetLocale,
   i18nSetLocale,
 } from '../shared/eventa'
-import { castaliaMemoryApplyEmotion, castaliaMemoryFacts, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemoryRememberDay, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySearchDiary, castaliaMemorySelfCycle, castaliaMemorySetEnabled, castaliaMemorySetEnergy, castaliaMemoryStatus } from '../shared/eventa/castalia-memory'
+import { castaliaMemoryApplyEmotion, castaliaMemoryFacts, castaliaMemoryForget, castaliaMemoryIngest, castaliaMemoryList, castaliaMemoryListThoughts, castaliaMemoryMaintain, castaliaMemoryPsyche, castaliaMemoryRecall, castaliaMemoryRememberDay, castaliaMemoryRememberThoughts, castaliaMemorySave, castaliaMemorySearch, castaliaMemorySearchDiary, castaliaMemorySelfCycle, castaliaMemorySetEnabled, castaliaMemorySetEnergy, castaliaMemoryStatus } from '../shared/eventa/castalia-memory'
 import { electronModelAssetCancel, electronModelAssetEnsure, electronModelAssetRemove, electronModelAssetsClear, electronModelAssetsList, electronModelAssetStatusChanged } from '../shared/eventa/model-assets'
 import {
   electronPluginUpdateCapability,
@@ -100,6 +101,8 @@ const recallCastaliaMemory = useElectronEventaInvoke(castaliaMemoryRecall)
 const searchCastaliaMemory = useElectronEventaInvoke(castaliaMemorySearch)
 const rememberCastaliaDay = useElectronEventaInvoke(castaliaMemoryRememberDay)
 const searchCastaliaDiary = useElectronEventaInvoke(castaliaMemorySearchDiary)
+const rememberCastaliaThoughts = useElectronEventaInvoke(castaliaMemoryRememberThoughts)
+const listCastaliaThoughts = useElectronEventaInvoke(castaliaMemoryListThoughts)
 const factsCastaliaMemory = useElectronEventaInvoke(castaliaMemoryFacts)
 const ingestCastaliaMemory = useElectronEventaInvoke(castaliaMemoryIngest)
 const statusCastaliaMemory = useElectronEventaInvoke(castaliaMemoryStatus)
@@ -120,6 +123,9 @@ memoryStore.attachRemote({
   rememberDay: day => rememberCastaliaDay(day),
   // 只有明确翻日记时才走这条路。
   searchDiary: (query, topK, persona) => searchCastaliaDiary({ query, topK, persona }),
+  // 念头存档:和日记同一个 bank、另一个文件。没有向量,不是召回,只是「需要时翻出来」。
+  rememberThoughts: rows => rememberCastaliaThoughts(rows),
+  listThoughts: options => listCastaliaThoughts(options ?? {}),
   // 同一句查询顺带取结构化事实：一行事实常是记忆行只隐含的答案（她是谁、小托是谁）。
   facts: (query, topK, persona) => factsCastaliaMemory({ query, topK, persona }),
   // 每轮对话的写回入口：没有它，她只说、不记。
@@ -164,6 +170,7 @@ const initialRoutePath = resolveInitialRendererRoutePath(route.path)
 const chatStore = useChatStore()
 const mindStore = useMindStore()
 const diaryStore = useDiaryStore()
+const thoughtsStore = useThoughtsStore()
 // The card store is module-scope here on purpose: the card watcher below runs in this scope, and
 // reaching for the one inside `createFullStageRuntime()` was a ReferenceError at startup.
 const airiCards = useAiriCardStore()
@@ -185,6 +192,9 @@ let lookAroundTimer: ReturnType<typeof setInterval> | null = null
 /** A finished day is remembered by her, not by the owner: the check is cheap and runs every few minutes. */
 const DIARY_REMEMBER_INTERVAL_MS = 5 * 60_000
 let diaryRememberTimer: ReturnType<typeof setInterval> | null = null
+/** The thought mirror is cheap to check and only flushes what the bank does not have yet. */
+const THOUGHT_ARCHIVE_INTERVAL_MS = 2 * 60_000
+let thoughtArchiveTimer: ReturnType<typeof setInterval> | null = null
 // The desktop shell starts the same autonomy ticker as the web app. Without this
 // line the policy layer runs (its tests pass) but nothing ever fires: she only
 // answers, never opens a conversation on her own.
@@ -534,6 +544,16 @@ onMounted(async () => {
     void diaryStore.rememberFinishedDays()
   }, DIARY_REMEMBER_INTERVAL_MS)
 
+  // 念头存档:脑内流照搬到记忆体的 thoughts 分区,不等召回、也不建向量。
+  // 只让持有 mind 租约的窗口做这件事:每个窗口都从同一个游标起步,同时补会把每条写两遍
+  // (实测冷启动 178 条写成 360 行,虽然最后是对的,但没关系要写双份)。
+  if (mindStore.isOwner)
+    void thoughtsStore.archive()
+  thoughtArchiveTimer = setInterval(() => {
+    if (mindStore.isOwner)
+      void thoughtsStore.archive()
+  }, THOUGHT_ARCHIVE_INTERVAL_MS)
+
   // Mirror the engine's psyche into her self-state. Without this the state line and the panel only move when the
   // model calls a tool, and she never does; the bank has the values all along.
   let psycheSyncInFlight = false
@@ -675,6 +695,9 @@ onUnmounted(() => {
   if (diaryRememberTimer)
     clearInterval(diaryRememberTimer)
   diaryRememberTimer = null
+  if (thoughtArchiveTimer)
+    clearInterval(thoughtArchiveTimer)
+  thoughtArchiveTimer = null
   if (psycheSyncTimer)
     clearInterval(psycheSyncTimer)
   psycheSyncTimer = null

@@ -77,6 +77,33 @@ export const castaliaMemoryRememberDay = defineInvokeEventa<{ ok: boolean, reaso
 export const castaliaMemorySearchDiary = defineInvokeEventa<CastaliaSearchedMemory[], CastaliaMemorySearchInput>('eventa:invoke:castalia:memory:search-diary')
 
 /**
+ * 念头存档:脑内每写一行就落一条,和日记同 bank、另一个文件。
+ *
+ * 不建向量 —— 这不是召回用的东西,而是「需要的时候翻出来看」的存档。
+ */
+export interface CastaliaThoughtInput {
+  /** 念头在渲染层(IndexedDB)的 id;同 id 再写一次是替换。 */
+  id: string
+  /** 写下那一刻(epoch ms)。 */
+  at: number
+  text: string
+  visibility?: 'private' | 'shared'
+  topic?: string
+  persona?: string
+}
+
+export interface CastaliaStoredThought {
+  id: string
+  at: number
+  text: string
+  visibility: string
+  topic?: string
+}
+
+export const castaliaMemoryRememberThoughts = defineInvokeEventa<{ ok: boolean, saved?: number, reason?: string }, CastaliaThoughtInput[]>('eventa:invoke:castalia:memory:remember-thoughts')
+export const castaliaMemoryListThoughts = defineInvokeEventa<CastaliaStoredThought[], { limit?: number, persona?: string }>('eventa:invoke:castalia:memory:list-thoughts')
+
+/**
  * One structured fact (subject · predicate · object) found by the same lookup.
  *
  * Facts are the one-line answers the memory rows only imply, so the search tool prints them
@@ -245,7 +272,6 @@ export const castaliaMemoryApplyEmotion = defineInvokeEventa<CastaliaEmotionResu
  * 它们不知道面板上那个开关（审计 A06）。开关关闭时，这些 tick 什么都不做。
  */
 export const castaliaMemorySetEnabled = defineInvokeEventa<{ ok: boolean }, { memory: boolean, castalia: boolean }>('eventa:invoke:castalia:memory:set-enabled')
-
 
 /**
  * 心智 / 检索参数（2026-10-31）。

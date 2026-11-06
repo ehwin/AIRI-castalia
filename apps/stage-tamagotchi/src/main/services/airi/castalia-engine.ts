@@ -191,6 +191,13 @@ export interface CastaliaEngineMemory {
   rememberDay?: (day: { date: string, description: string, body: string, persona?: string }) => Promise<{ ok: boolean, reason?: string }>
   /** 只读日记分区。普通 search 永远拿不到这些行。 */
   searchDiary?: (query: string, topK?: number, persona?: string) => Promise<CastaliaSearchedMemory[]>
+  /**
+   * 念头存档:和日记同一个 bank、另一个文件,不建向量。
+   *
+   * 不是 `save`:这些行不进索引、不进检索、也不该被反刍;只有那一页会读它们。
+   */
+  rememberThoughts?: (rows: { id: string, at: number, text: string, visibility?: string, topic?: string, persona?: string }[]) => Promise<{ ok: boolean, saved?: number, reason?: string }>
+  listThoughts?: (options?: { limit?: number, persona?: string }) => Promise<{ id: string, at: number, text: string, visibility: string, topic?: string }[]>
   /** Structured facts for the same query; `[]` when the backend has none or they are far off. */
   facts?: (query: string, topK?: number, persona?: string) => Promise<CastaliaSearchedFact[]>
   /**

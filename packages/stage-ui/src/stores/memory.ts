@@ -249,6 +249,15 @@ export interface MemoryRemotePort { /** Every entry the remote holds. Replaces t
   /** 只读日记分区。普通 `search` 永远拿不到这些行。 */
   searchDiary?: (query: string, topK?: number, persona?: string) => Promise<MemorySearchHit[]>
   /**
+   * 念头存档:和日记同一个 bank、另一个文件。
+   *
+   * A port without it has no archive at all, and the page says so instead of showing an empty
+   * stream that reads as "she never thought about anything".
+   */
+  rememberThoughts?: (rows: MemoryThoughtInput[]) => Promise<{ ok: boolean, saved?: number, reason?: string }>
+  /** Reads the archive back, newest first. Throws when the backend cannot answer. */
+  listThoughts?: (options?: { limit?: number, persona?: string }) => Promise<MemoryThought[]>
+  /**
    * Structured facts for the same query.
    *
    * A fact is one line ("user · name · 小托"), so the search tool prints the close ones beside
@@ -278,6 +287,30 @@ export interface MemoryDiaryDay {
   description: string
   body: string
   persona?: string
+}
+
+/**
+ * One line of the inner stream, archived.
+ *
+ * Not a memory: no vector, no index, no recall. It is the raw text the diary is distilled from,
+ * kept so the owner can read it back on its own page.
+ */
+export interface MemoryThoughtInput {
+  /** The thought's id in the renderer's own store; writing the same id again replaces the row. */
+  id: string
+  at: number
+  text: string
+  visibility?: 'private' | 'shared'
+  topic?: string
+  persona?: string
+}
+
+export interface MemoryThought {
+  id: string
+  at: number
+  text: string
+  visibility: string
+  topic?: string
 }
 
 export interface MemoryDiaryResult {
@@ -510,6 +543,8 @@ export const useMemoryStore = defineStore('memory', () => {
    * The model is offered no diary tool without it, so an empty read never passes for an empty diary.
    */
   const diarySupported = ref(false)
+  /** Whether the attached port keeps a thought archive at all. */
+  const thoughtsSupported = ref(false)
   let remote: MemoryRemotePort | undefined
 
   const sorted = computed(() => [...entries.value].sort((left, right) => left.name.localeCompare(right.name)))
@@ -644,6 +679,7 @@ export const useMemoryStore = defineStore('memory', () => {
     remote = port
     remoteAttached.value = Boolean(port)
     diarySupported.value = Boolean(port?.searchDiary)
+    thoughtsSupported.value = Boolean(port?.rememberThoughts && port?.listThoughts)
     remoteHealth.value = { ...remoteHealth.value, attached: Boolean(port) }
   }
 
@@ -809,6 +845,32 @@ export const useMemoryStore = defineStore('memory', () => {
     if (!enabled.value || !remote?.searchDiary)
       return []
     return await remote.searchDiary(query, topK, personaId)
+  }
+
+  /**
+   * Archives lines of the inner stream. No vector, so this never costs an embedding.
+   *
+   * A refusal is returned rather than thrown: the caller is a background flush, and the next one
+   * retries from the same cursor.
+   */
+  async function rememberThoughts(rows: MemoryThoughtInput[]): Promise<{ ok: boolean, saved?: number, reason?: string }> {
+    if (!enabled.value)
+      return { ok: false, reason: 'disabled' }
+    if (!remote?.rememberThoughts)
+      return { ok: false, reason: 'unsupported' }
+    try {
+      return await remote.rememberThoughts(rows)
+    }
+    catch (error) {
+      return { ok: false, reason: String((error as Error)?.message ?? error) }
+    }
+  }
+
+  /** Reads the archive back. Throws when the backend cannot answer, so the page can say so. */
+  async function listThoughts(options: { limit?: number, persona?: string } = {}): Promise<MemoryThought[]> {
+    if (!enabled.value || !remote?.listThoughts)
+      return []
+    return await remote.listThoughts(options)
   }
 
   /** Makes a card's memory general, so every card reads it. A general memory with the same name gives way. */
@@ -1032,6 +1094,9 @@ export const useMemoryStore = defineStore('memory', () => {
     write,
     rememberDay,
     searchDiary,
+    rememberThoughts,
+    listThoughts,
+    thoughtsSupported,
     makeGeneral,
     forget,
     remove,
