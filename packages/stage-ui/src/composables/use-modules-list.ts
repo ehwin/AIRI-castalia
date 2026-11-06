@@ -217,6 +217,16 @@ export function useModulesList() {
         : {}),
     },
     {
+      id: 'memory-api',
+      name: t('settings.pages.modules.memory-api.title'),
+      description: t('settings.pages.modules.memory-api.description'),
+      icon: 'i-solar:key-square-bold-duotone',
+      to: '/settings/modules/memory-api',
+      // 有没有配置文件就是这件事的状态：没有就是还没接嵌入/反思后端。
+      configured: Boolean(memoryStore.backend?.capabilities.ingest || memoryStore.backend?.capabilities.search),
+      category: 'essential',
+    },
+    {
       id: 'castalia',
       name: t('settings.pages.modules.castalia.title'),
       description: t('settings.pages.modules.castalia.description'),

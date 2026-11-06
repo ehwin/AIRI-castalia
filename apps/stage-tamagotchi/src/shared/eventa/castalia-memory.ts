@@ -298,6 +298,82 @@ export const castaliaTuningSave = defineInvokeEventa<
   { values: Record<string, string | number | boolean | null> }
 >('eventa:invoke:castalia:tuning:save')
 
+// ── 记忆库的 API 配置（设置页读写 <bankDir>/config.json 与 keys.enc）────────────
+
+export interface CastaliaSettingsSnapshot {
+  bankDir: string
+  configPath: string
+  configExists: boolean
+  keysFile: string
+  keysExists: boolean
+  project: string
+  character: string
+  embedding: {
+    mode: 'api' | 'ollama' | 'none'
+    apiUrl: string
+    apiModel: string
+    ollamaUrl: string
+    model: string
+    dim?: number
+    hasApiKey: boolean
+  }
+  reflect: {
+    llmUrl: string
+    model: string
+    maxTokens?: number
+    factExtraction: string
+    maxFacts?: number
+    hasApiKey: boolean
+  }
+  triage: {
+    llmUrl: string
+    model: string
+    hasApiKey: boolean
+  }
+}
+
+export interface CastaliaSettingsPatch {
+  embedding?: Partial<{
+    mode: 'api' | 'ollama' | 'none'
+    apiUrl: string
+    apiModel: string
+    ollamaUrl: string
+    model: string
+    dim: number | null
+    apiKey: string
+    clearApiKey: boolean
+  }>
+  reflect?: Partial<{
+    llmUrl: string
+    model: string
+    maxTokens: number | null
+    factExtraction: string
+    maxFacts: number | null
+    apiKey: string
+    clearApiKey: boolean
+  }>
+  triage?: Partial<{
+    llmUrl: string
+    model: string
+    apiKey: string
+    clearApiKey: boolean
+  }>
+}
+
+export interface CastaliaSettingsSaveResult {
+  ok: boolean
+  changed: string[]
+  keysUpdated: boolean
+  restartRequired: boolean
+  error?: string
+}
+
+export const castaliaSettingsGet = defineInvokeEventa<CastaliaSettingsSnapshot>('eventa:invoke:castalia:settings:get')
+export const castaliaSettingsSave = defineInvokeEventa<
+  CastaliaSettingsSaveResult,
+  { patch: CastaliaSettingsPatch }
+>('eventa:invoke:castalia:settings:save')
+
 // ── Full 总线（fedServer 3314）───────────────────────────────────────────────
 // 记忆体本体走进程内插件；这里只保留"跨库"那一层：总线能一次查所有库，
 // 面板「记忆体」页用它浏览，长期记忆页仍然只看 castalia 本库。

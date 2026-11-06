@@ -922,6 +922,55 @@ pages:
       noise: 动作变化幅度
       noise-description: 调整采样动作的噪声强度；数值越低越平稳，越高越多变。
       activation: 这些设置在 Live2D 动作驱动器选择 MAGIC 时生效。
+    memory-api:
+      title: 记忆服务
+      description: 这台机器上记忆库用的嵌入与反思接口
+      lead: 这些配置写入记忆库自己的 config.json；密钥写进 keys.enc，不会落到 config.json。
+      config-exists: 库里已有 config.json
+      config-missing: 还没有 config.json —— 在这里保存会自动创建
+      keys-exists: 已有 keys.enc
+      keys-missing: 还没有 keys.enc
+      save: 保存
+      saving: 正在保存…
+      save-failed: 记忆库拒绝了这次写入
+      saved: 已保存
+      saved-restart: '已保存 {count} 项。重启 AIRI 后记忆后端才会读到它们。'
+      key-set: 已设置密钥
+      key-unset: 未设置密钥
+      key-clear: 清除
+      key-cleared: 密钥已清除
+      restart-hint: 记忆后端在启动时读这些配置，保存后需要重启才生效。
+      embedding:
+        title: 嵌入
+        mode: 后端
+        mode-description: 云端 API、本机 Ollama，或完全关闭（只走关键词检索）
+        mode-api: 云端 API
+        mode-ollama: 本机 Ollama
+        mode-none: 关闭
+        api-url: API 地址
+        api-model: 嵌入模型
+        ollama-url: Ollama 地址
+        ollama-model: Ollama 模型
+        api-key: API 密钥
+        api-key-description: 加密存在 keys.enc 里。留空表示沿用已有密钥。
+        dim: 向量维度
+        dim-description: 必须和嵌入模型一致。改动会触发整库重嵌。
+      reflect:
+        title: 反思
+        description: 抽事实、整合记忆用的模型。没有它就只能写、不能整理。
+        url: API 地址
+        model: 模型
+        api-key: API 密钥
+        max-tokens: 输出预算
+        fact-extraction: 事实抽取
+        fact-extraction-description: auto 跟随模型门槛；on / off 强制开关。
+        max-facts: 每轮事实上限
+      triage:
+        title: 分拣
+        description: 反思之前先给入站内容分类的便宜模型。
+        url: API 地址
+        model: 模型
+        api-key: API 密钥
     castalia:
       title: Castalia 长期记忆与自我状态
       description: Castalia 长期记忆、情感与自我状态整合

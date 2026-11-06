@@ -973,6 +973,55 @@ pages:
       noise: Motion variation
       noise-description: The noise strength when sampling motion. A lower value is steadier. A higher value varies more.
       activation: These settings apply when the Live2D motion driver selects MAGIC.
+    memory-api:
+      title: Memory APIs
+      description: The embedding and reflection endpoints this machine's memory bank uses
+      lead: These settings live in the bank's own config.json. Keys are written to keys.enc, never to config.json.
+      config-exists: config.json found in the bank
+      config-missing: no config.json yet — saving here creates one
+      keys-exists: keys.enc present
+      keys-missing: no keys.enc yet
+      save: Save
+      saving: Saving...
+      save-failed: The bank refused the write
+      saved: Saved
+      saved-restart: 'Saved {count} change(s). Restart AIRI for the memory backend to read them.'
+      key-set: key set
+      key-unset: no key
+      key-clear: Clear
+      key-cleared: Key cleared
+      restart-hint: The memory backend reads these at startup, so a restart applies them.
+      embedding:
+        title: Embedding
+        mode: Backend
+        mode-description: Cloud API, a local Ollama, or none (keyword search only)
+        mode-api: Cloud API
+        mode-ollama: Local Ollama
+        mode-none: Off
+        api-url: API base URL
+        api-model: Embedding model
+        ollama-url: Ollama URL
+        ollama-model: Ollama model
+        api-key: API key
+        api-key-description: Stored encrypted in keys.enc. Leave empty to keep the current key.
+        dim: Vector size
+        dim-description: Must match the embedding model. Changing it re-embeds the bank.
+      reflect:
+        title: Reflection
+        description: The model that extracts facts and consolidates memories. Without it, only writes happen.
+        url: API base URL
+        model: Model
+        api-key: API key
+        max-tokens: Output budget
+        fact-extraction: Fact extraction
+        fact-extraction-description: auto follows the model gate; on or off forces it.
+        max-facts: Facts per run
+      triage:
+        title: Triage
+        description: The cheaper model that sorts incoming turns before reflection sees them.
+        url: API base URL
+        model: Model
+        api-key: API key
     castalia:
       title: Castalia Long-Term Memory and Self State
       description: Castalia long-term memory, emotion, and self state

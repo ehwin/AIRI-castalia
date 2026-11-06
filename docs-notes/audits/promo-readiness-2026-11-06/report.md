@@ -225,3 +225,26 @@ cp -a dist/verify-pack-20261106q/win-unpacked/. /d/system/AIRI/apps/stage-tamago
   `batchEmbedPending` 会把日记补嵌（这条第一轮已经修过）。
 - 桥进程要重启才用上新 `dist`。
 - `Castalia` 仓库的 `origin` 是 ssh，当前 shell 没有可用 key；提交已推 https 分支。
+
+## 12 记忆服务做成菜单（2026-11-06 21:00）
+
+原来接嵌入/反思只能手改 `<bankDir>/config.json`，字段名还分模式（`api` 用 `api_url`/`api_model`，
+`ollama` 用 `ollama_url`/`model`），写错不报错、只会静默退回默认模型。现在：
+
+- 设置 → 模块 → **记忆服务**（`/settings/modules/memory-api`）：嵌入（后端/地址/模型/维度/密钥）、
+  反思 LLM（地址/模型/输出预算/事实抽取/每轮事实上限/密钥）、分拣 LLM（地址/模型/密钥）。
+- 读的是记忆库自己的 `config.json`；**密钥只进 `keys.enc`**（AES-256-GCM，`keys.key` 32 字节 hex，
+  缺失时生成），页面只回「已设置/未设置」，永远不回明文；写密钥时会把 `config.json` 里的明文删掉
+  （引擎先读 keys.enc，留着只会误导）。
+- 合并写回：`db_dir`、`personas`、提示词路径这些不认识的键原样保留；写之前 `config.json.bak-<时间>`。
+  空输入不落 `""`，只动一个通道时不会生成空 section（实测：全新库保存后文件里只有
+  `embedding.mode` 和填过的 `ollama_url`）。
+- 生效方式：引擎在启动时把 config.json 注入环境变量，所以保存后页面明确提示「重启 AIRI 才读到」；
+  没有做热切换，因为换维度/换模型会让引擎按「嵌入空间变了」清派生索引，那是最不该在运行时发生的事。
+
+实测：全新 profile 打开页面显示「还没有 config.json」，保存后生成 config.json + keys.enc + keys.key，
+密钥不在 config.json；你自己的 profile 打开后各字段就是库里的真值（SiliconFlow + bge-m3 + 1024、
+sidrune + deepseek-v4-1-flash + 32768 / auto / 15），密钥框留空表示沿用。
+
+关于日记沉淀：**不进反刍**（你的判断对，沉淀成事实会直接进召回回路，正反馈会炸）。
+日记/念头都不在 `MEM_TYPES`，反刍、跨库召回、衰减、星图都扫不到；只有提到时才由工具或页面翻出来。
