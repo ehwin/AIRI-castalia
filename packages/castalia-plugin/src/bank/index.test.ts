@@ -60,6 +60,25 @@ describe('in-process bank', () => {
     expect(String(found[0]?.text ?? '').startsWith('# diary-2026-11-06')).toBe(true)
   })
 
+  it('keeps one active row when two windows remember the same day at once', async () => {
+    // 实机：两个窗口同时「自己记一天」，各自的 SELECT 都看不到对方还没插的行，11-01 留下两条活行。
+    const day = {
+      date: '2026-11-07',
+      description: 'Two windows wrote at once.',
+      body: 'slept late again.',
+      characterId: 'airi',
+    }
+    const [left, right] = await Promise.all([
+      bank.saveDiaryDay(day),
+      bank.saveDiaryDay({ ...day, description: 'Two windows wrote at once, second copy.' }),
+    ])
+    expect(left.name).toBe('diary-2026-11-07')
+    expect(right.name).toBe('diary-2026-11-07')
+
+    const active = bank.listDiaryDays({ characterId: 'airi' }).filter(row => row.name === 'diary-2026-11-07')
+    expect(active).toHaveLength(1)
+  })
+
   it('finds it back by lexical search', async () => {
     const hits = await bank.search({ query: '进程内跑引擎', project: 'testproj', characterId: 'airi', topK: 5, minScore: 0 })
     expect(hits.length).toBeGreaterThan(0)

@@ -601,7 +601,19 @@ canonical 提交里的 `dist/db.js`、`dist/psycheState.js` 落后于它们自�
 - 复测：同一个包换法重打包后，页面列出 11-01…11-06 六天（28/50/57/13/13/13 条），点 11-05 的按钮 → 银行 `diary/memory.sqlite` 新增 `# diary-2026-11-05`，`character_id = N_h4lzzOfl0AYehOR171-`，`mem_type = diary`，同一 id 在 `vec_memory` 里有向量；五个普通分区 `# diary-%` 计数仍为 0。
 - 测试同步改：`keeps persona-less thoughts with the card that read them` 不再靠 `mind.switchCharacter`，改为 stub `localStorage` 的 `airi-card-active-id` 再 `load()`；`persona` 断言改为 `memory.resolvePersona('default')`。`stage-ui` 三个文件 56 passed，`eslint` 0 error。
 
-### 15.12 遗留
+### 15.12 她自己记（2026-11-06 10:40）
+
+用户的话：「做成循环自己按，我来按毫无意义」。所以「记住这一天」不再是主路径：
+
+- `diary.rememberFinishedDays(now)`：取所有 `date < 今天` 且未记住的天，按时间从旧到新逐天写。今天不写——一天没过完，写的不是那天。
+- 藏在 `distill()` 里的措辞是本地规则（`distillDay`，不调模型），所以补记一周也只花每天一次嵌入，不是每天一次模型turn。
+- `App.vue` 里起 5 分钟一次的循环 + 启动时补一次；页面按钮留着，只当手动重记。
+- 并发：多个窗口都会跑这段（memroy 端口在每个窗口都挂着），银行侧 `saveDiaryDay` 现在按 `project + 角色 + 日期` 排队，插入后还会把同名的其它活行软删。
+
+实机验证（换包后冷启动，40 秒内）：`diary/memory.sqlite` 自动出现 11-01…11-05 五行，`character_id = N_h4…`，11-06（今天）没有。
+**这一步抓到并修了一个真 bug**：第一次跑时 11-01 留下两条活行——两个窗口的 SELECT 都看不到对方尚未插入的行。排队 + 拆完软删后，`castalia-plugin` 新增的「两个窗口同时记一天只留一条活行」用例通过（23 passed）。
+
+### 15.13 遗留
 
 - 独立引擎 `D:\castalia\run\Castalia\dist` **未重建**。那边的 `memType.js` 不认识 `diary`，所以日记分区只在 app 进程内可用，5 条桥（3310–3318）没有这个功能。要上线就 `npm run build` 后拷 `dist/memType.js`。
 - `listMemTypeDirs` 的 `base.includes(f)` 既是隔离的关键，也是陷阱：以后谁把 `diary` 加进 `base`，隔离立刻失效。

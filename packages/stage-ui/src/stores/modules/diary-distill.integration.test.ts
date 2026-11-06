@@ -114,6 +114,53 @@ describe('diary → memory', () => {
     expect(diary.hasDistilled('2026-10-31')).toBe(false)
   })
 
+  it('remembers a finished day on its own, without the owner pressing anything', async () => {
+    const rememberDay = vi.fn(async (_day: DiaryDayInput) => ({ ok: true }))
+    attachDiaryPort(rememberDay)
+    const diary = useDiaryStore()
+
+    // The loop's clock: the day after the thoughts were written.
+    const remembered = await diary.rememberFinishedDays(new Date('2026-11-02T00:05:00').getTime())
+
+    expect(remembered).toBe(1)
+    expect(rememberDay).toHaveBeenCalledTimes(1)
+    expect(rememberDay.mock.calls[0]![0].date).toBe('2026-11-01')
+    expect(diary.hasDistilled('2026-11-01')).toBe(true)
+  })
+
+  it('leaves today alone until it is over', async () => {
+    const rememberDay = vi.fn(async (_day: DiaryDayInput) => ({ ok: true }))
+    attachDiaryPort(rememberDay)
+    const diary = useDiaryStore()
+
+    const remembered = await diary.rememberFinishedDays(new Date('2026-11-01T23:59:00').getTime())
+
+    expect(remembered).toBe(0)
+    expect(rememberDay).not.toHaveBeenCalled()
+  })
+
+  it('remembers a day once, however often the loop ticks', async () => {
+    const rememberDay = vi.fn(async (_day: DiaryDayInput) => ({ ok: true }))
+    attachDiaryPort(rememberDay)
+    const diary = useDiaryStore()
+    const tomorrow = new Date('2026-11-02T00:05:00').getTime()
+
+    await diary.rememberFinishedDays(tomorrow)
+    await diary.rememberFinishedDays(tomorrow + 5 * 60_000)
+
+    expect(rememberDay).toHaveBeenCalledTimes(1)
+  })
+
+  it('stays quiet when the memory module is off', async () => {
+    const rememberDay = vi.fn(async (_day: DiaryDayInput) => ({ ok: true }))
+    const { memory } = attachDiaryPort(rememberDay)
+    const diary = useDiaryStore()
+    memory.enabled = false
+
+    expect(await diary.rememberFinishedDays(new Date('2026-11-02T00:05:00').getTime())).toBe(0)
+    expect(rememberDay).not.toHaveBeenCalled()
+  })
+
   it('keeps nothing when the memory module is off', async () => {
     const rememberDay = vi.fn(async (_day: DiaryDayInput) => ({ ok: true }))
     const { memory } = attachDiaryPort(rememberDay)

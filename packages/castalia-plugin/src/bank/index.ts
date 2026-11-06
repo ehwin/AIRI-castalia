@@ -246,6 +246,8 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
   const bankDir = options.bankDir.replace(/\\/g, '/')
   const project = options.project
   const charId = options.charId ?? 'airi'
+  /** 同一天的日记写入队列，键为 project + 角色 + 日期。跨窗口并发由它串行化。 */
+  const diaryWrites = new Map<string, Promise<unknown>>()
   const configPath = options.configPath ?? join(bankDir, 'config.json')
 
   if (!existsSync(bankDir)) throw new Error(`[castalia-bank] bank dir 不存在: ${bankDir}`)
@@ -321,31 +323,47 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
         memType: record.memType,
         updatedAt: record.updatedAt,
       })),
-    saveDiaryDay: async ({ date, description, body, characterId }) => {
+    saveDiaryDay: ({ date, description, body, characterId }) => {
       const persona = (characterId ?? '').trim() || charId
       const name = `diary-${date}`
-      const text = `# ${name}\n\n${description}\n\n${body}`
-      const conn = (db as any).DatabaseManager.getInstance(project, DIARY_MEM_TYPE)
-      // 同一天重记 = 替换，不追加：旧行连同向量一起软删，避免同一天在库里留下两版。
-      const stale = conn.prepare(
-        'SELECT id FROM memory WHERE is_active = 1 AND project = ? AND character_id IS ? AND text LIKE ?',
-      ).all(project, persona, `# ${name}%`) as Array<{ id: string }>
-      const replaced = stale.length > 0
-      for (const row of stale) {
-        conn.prepare('UPDATE memory SET is_active = 0, updated_at = ? WHERE id = ?').run(new Date().toISOString(), row.id)
-      }
-      const record = await store.saveMemory({
-        text,
-        project,
-        memType: DIARY_MEM_TYPE,
-        type: 'episodic',
-        category: 'diary',
-        subject: 'self',
-        source: 'diary_day',
-        characterId: persona,
-        importance: 0.6,
-      } as any)
-      return { id: record.id, name, replaced }
+      const key = `${project}\u0000${persona}\u0000${name}`
+      // 同一天的写入必须串行：两个窗口同时记一天时，各自的 SELECT 都看不到对方还没插的行，
+      // 于是各插一条活行（2026-11-06 实测 11-01 一天两条）。排队后第二次能看见第一次的结果。
+      const run = (diaryWrites.get(key) ?? Promise.resolve()).then(async () => {
+        const text = `# ${name}\n\n${description}\n\n${body}`
+        const conn = (db as any).DatabaseManager.getInstance(project, DIARY_MEM_TYPE)
+        // 同一天重记 = 替换，不追加：旧行连同向量一起软删，避免同一天在库里留下两版。
+        const stale = conn.prepare(
+          'SELECT id FROM memory WHERE is_active = 1 AND project = ? AND character_id IS ? AND text LIKE ?',
+        ).all(project, persona, `# ${name}%`) as Array<{ id: string }>
+        const replaced = stale.length > 0
+        for (const row of stale) {
+          conn.prepare('UPDATE memory SET is_active = 0, updated_at = ? WHERE id = ?').run(new Date().toISOString(), row.id)
+        }
+        const record = await store.saveMemory({
+          text,
+          project,
+          memType: DIARY_MEM_TYPE,
+          type: 'episodic',
+          category: 'diary',
+          subject: 'self',
+          source: 'diary_day',
+          characterId: persona,
+          importance: 0.6,
+        } as any)
+        // 另一个进程写同一天时的兜底：插入后把同名的其它活行软删，留最新这一条。
+        conn.prepare(
+          'UPDATE memory SET is_active = 0, updated_at = ? WHERE id <> ? AND is_active = 1 AND project = ? AND character_id IS ? AND text LIKE ?',
+        ).run(new Date().toISOString(), record.id, project, persona, `# ${name}%`)
+        return { id: record.id, name, replaced }
+      })
+      const tail = run.catch(() => {})
+      diaryWrites.set(key, tail)
+      void tail.then(() => {
+        if (diaryWrites.get(key) === tail)
+          diaryWrites.delete(key)
+      })
+      return run
     },
     searchDiary: async (query, options = {}) => {
       const persona = (options.characterId ?? '').trim() || charId

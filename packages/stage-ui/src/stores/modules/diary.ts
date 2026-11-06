@@ -106,6 +106,9 @@ export const useDiaryStore = defineStore('diary', () => {
 
   const total = computed(() => thoughts.value.length)
 
+  /** True while a day is being remembered, so a slow write does not start twice. */
+  const remembering = ref(false)
+
   async function load(limit = 200) {
     loading.value = true
     try {
@@ -159,6 +162,41 @@ export const useDiaryStore = defineStore('diary', () => {
     return entry
   }
 
+  /**
+   * Remembers every finished day that is not remembered yet, oldest first.
+   *
+   * A day is hers. A diary that only opens when the owner presses a button is a form, not a diary:
+   * the button stays as a manual retry, but the loop below carries the normal case. The wording is
+   * local (`distillDay`), so catching up after a week away costs one write per day, not one model
+   * turn per day.
+   *
+   * Safe to run from more than one window: the bank replaces the row of the same date, so two
+   * windows remembering the same day leave one row.
+   */
+  async function rememberFinishedDays(now = Date.now()): Promise<number> {
+    if (!memory.enabled || !memory.diarySupported)
+      return 0
+    if (remembering.value)
+      return 0
+    remembering.value = true
+    try {
+      await load()
+      const today = new Date(now).toLocaleDateString('sv-SE')
+      const finished = byDay.value
+        .filter(day => day.date < today && !hasDistilled(day.date))
+        .reverse()
+      let remembered = 0
+      for (const day of finished) {
+        if (await distill(day.date))
+          remembered++
+      }
+      return remembered
+    }
+    finally {
+      remembering.value = false
+    }
+  }
+
   function resetState() {
     reveal.reset()
     distilledByPersona.reset()
@@ -177,6 +215,7 @@ export const useDiaryStore = defineStore('diary', () => {
     total,
     load,
     distill,
+    rememberFinishedDays,
     resetState,
   }
 })

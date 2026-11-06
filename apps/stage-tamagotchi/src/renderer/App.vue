@@ -20,6 +20,7 @@ import { useContextBridgeStore } from '@proj-airi/stage-ui/stores/mods/api/conte
 import { useAiriCardStore } from '@proj-airi/stage-ui/stores/modules/airi-card'
 import { useArtistryStore } from '@proj-airi/stage-ui/stores/modules/artistry'
 import { useConsciousnessStore } from '@proj-airi/stage-ui/stores/modules/consciousness'
+import { useDiaryStore } from '@proj-airi/stage-ui/stores/modules/diary'
 import { useHearingStore } from '@proj-airi/stage-ui/stores/modules/hearing'
 import { useMindStore } from '@proj-airi/stage-ui/stores/modules/mind'
 import { usePerceptionStore } from '@proj-airi/stage-ui/stores/modules/perception'
@@ -162,6 +163,7 @@ const windowContext = resolveRendererWindowContext()
 const initialRoutePath = resolveInitialRendererRoutePath(route.path)
 const chatStore = useChatStore()
 const mindStore = useMindStore()
+const diaryStore = useDiaryStore()
 // The card store is module-scope here on purpose: the card watcher below runs in this scope, and
 // reaching for the one inside `createFullStageRuntime()` was a ReferenceError at startup.
 const airiCards = useAiriCardStore()
@@ -180,6 +182,9 @@ const screenSense = createScreenSense()
 /** How often the idle mind glances at the screen. One look costs a capture plus one vision read. */
 const LOOK_AROUND_INTERVAL_MS = 5 * 60_000
 let lookAroundTimer: ReturnType<typeof setInterval> | null = null
+/** A finished day is remembered by her, not by the owner: the check is cheap and runs every few minutes. */
+const DIARY_REMEMBER_INTERVAL_MS = 5 * 60_000
+let diaryRememberTimer: ReturnType<typeof setInterval> | null = null
 // The desktop shell starts the same autonomy ticker as the web app. Without this
 // line the policy layer runs (its tests pass) but nothing ever fires: she only
 // answers, never opens a conversation on her own.
@@ -522,6 +527,13 @@ onMounted(async () => {
       void mindStore.lookAround()
   }, LOOK_AROUND_INTERVAL_MS)
 
+  // Her day becomes her diary on her own loop, and a start after an absence catches up. The page's
+  // button stays as a manual retry; it is not the normal path.
+  void diaryStore.rememberFinishedDays()
+  diaryRememberTimer = setInterval(() => {
+    void diaryStore.rememberFinishedDays()
+  }, DIARY_REMEMBER_INTERVAL_MS)
+
   // Mirror the engine's psyche into her self-state. Without this the state line and the panel only move when the
   // model calls a tool, and she never does; the bank has the values all along.
   let psycheSyncInFlight = false
@@ -660,6 +672,9 @@ onUnmounted(() => {
   if (lookAroundTimer)
     clearInterval(lookAroundTimer)
   lookAroundTimer = null
+  if (diaryRememberTimer)
+    clearInterval(diaryRememberTimer)
+  diaryRememberTimer = null
   if (psycheSyncTimer)
     clearInterval(psycheSyncTimer)
   psycheSyncTimer = null
