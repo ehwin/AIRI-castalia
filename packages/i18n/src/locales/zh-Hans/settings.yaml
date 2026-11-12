@@ -57,6 +57,25 @@ dialogs:
       optionalHint: 即使没有授予这些权限，您也可以继续。
       stateGranted: 已授权
       stateNotGranted: 未授权
+    castalia:
+      title: 她的记忆和她的主动开口
+      description: 这两样开箱就是开着的。这里说她记在哪、什么时候会先说，以及怎么关。
+      memory-title: 记忆存在哪
+      memory-body: 她记住的每段对话都留在这台电脑的一个目录里，不上传给我们。
+      memory-body-web: 她记住的每段对话都留在这个浏览器里，不上传给我们。
+      memory-unknown: 这台设备还没有记忆目录，她第一次记住东西时会自动建出来。
+      memory-browser: 浏览器里没有可看的目录：她的记忆存在站点自己的存储里，清掉站点数据就会一起清掉。
+      memory-meta: '库：{bank}'
+      voice-title: 她什么时候会主动开口
+      when-awake: 她醒着，精力还够。
+      when-gap: 你安静了一阵，距她上次开口也隔够了时间。
+      when-quiet-office: 23:00 到次日 07:00 她不说话。
+      when-unanswered: 你连着三条没回，她就停下不再说。
+      off-title: 怎么关
+      off-memory: 记住我们的对话
+      off-voice: 不用问就主动开口
+      off-later: 记忆的开关在「设置 → 模块 → 长期记忆」，主动开口的开关在「设置 → 模块 → Castalia」。那一页的 Castalia 开关连情感循环一起关掉。
+      start: 开始使用 AIRI
   bug-report:
     title: Bug 汇报 (´;ω;`)ヾ(･∀･`)
     subtitle: 坏哦，看起来我们不小心搞砸了一些东西。可以分享一下遇到了什么问题吗？
@@ -1003,6 +1022,9 @@ pages:
       energy: 精力
       tsundere-level: 傲娇浓度
       tsundere-level-description: 数值越高，她的语气越冲。它不改变情绪衰减速度。此设置按角色分别保存。
+      voice-enable: 不用问就主动开口
+      voice-enable-description: 关掉之后她只回答你，不再自己起话题。这个开关会保存，重启后仍然有效。
+      backend-bank-dir: '记忆目录：'
       status-description: AIRI 对话接入情绪或愿望事件后才会更新状态。插件副本独立于 AIRI 核心更新。
       backend-title: 后端实际能做什么
       backend-tools-disabled: 工具已被服务商错误降级：{models}

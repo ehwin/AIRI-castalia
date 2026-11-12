@@ -196,6 +196,8 @@ export interface MemoryBackend {
   transport: 'in-process' | 'stdio' | 'entry-only' | 'none'
   project?: string
   character?: string
+  /** 记忆库根目录。设置页与首启向导用它回答「记忆存在哪」。 */
+  bankDir?: string
   capabilities: { vadSweep: boolean, recall: boolean, search: boolean, facts: boolean, ingest: boolean, maintain: boolean, selfCycle: boolean, psyche: boolean, diary?: boolean, thoughts?: boolean }
   /** 自动情感的实验门槛：模块开着也可能一步都不推进 psyche。 */
   emotion?: {

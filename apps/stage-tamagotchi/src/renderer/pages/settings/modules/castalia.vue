@@ -7,7 +7,7 @@ import { useElectronEventaInvoke } from '@proj-airi/electron-vueuse'
 import { useLLM } from '@proj-airi/stage-ui/stores/ai/chat-llm/llm'
 import { useMemoryStore } from '@proj-airi/stage-ui/stores/memory'
 import { useAiriCardStore } from '@proj-airi/stage-ui/stores/modules/airi-card'
-import { readSelfInitiatedDiagnostics } from '@proj-airi/stage-ui/stores/modules/self-initiated-speech'
+import { readSelfInitiatedDiagnostics, useSelfInitiatedSpeechStore } from '@proj-airi/stage-ui/stores/modules/self-initiated-speech'
 import { FieldCheckbox, FieldRange, SettingsCard } from '@proj-airi/ui'
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
@@ -28,6 +28,14 @@ const llm = useLLM()
 const capabilities = computed(() => Object.entries(memory.backend?.capabilities ?? {}))
 const { enabled, currentMood, currentDesire, currentEnergy, activeCharacterId, moodHistory } = storeToRefs(castalia)
 const { locale, t } = useI18n()
+// 主动开口的总开关。这一页本来就是「她什么时候自己说话」的落地页，
+// 而它过去只有诊断没有开关：想让她安静只能去改代码或用调试接口。
+const speech = useSelfInitiatedSpeechStore()
+const { paused } = storeToRefs(speech)
+const voiceEnabled = computed({
+  get: () => !paused.value,
+  set: next => speech.setSpeechPaused(!next),
+})
 // 「她为什么不主动开口」在别处没有答案：哨兵在内存里，重启就没。这里读落盘的那份。
 // 设置窗口有自己的 store 实例、也不跑 ticker，直接读 `store.diagnostics` 永远是空值——
 // 那会把「没有记录」印成「一切正常」。读 stage 窗口写下的那份才是真读数。
@@ -241,6 +249,11 @@ onMounted(() => {
         :label="t('settings.pages.modules.castalia.enable')"
         :description="t('settings.pages.modules.castalia.enable-description')"
       />
+      <FieldCheckbox
+        v-model="voiceEnabled"
+        :label="t('settings.pages.modules.castalia.voice-enable')"
+        :description="t('settings.pages.modules.castalia.voice-enable-description')"
+      />
       <FieldRange
         :model-value="castalia.snapshotFor(activeCharacterId).tsundereLevel"
         :label="t('settings.pages.modules.castalia.tsundere-level')"
@@ -301,6 +314,11 @@ onMounted(() => {
               ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
               : 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'"
           >{{ ok ? '✓' : '✗' }} {{ name }}</span>
+        </div>
+        <!-- 「记忆存在哪」的答案：用户要能顺着这个目录自己找到库文件，而不是去猜。 -->
+        <div v-if="memory.backend?.bankDir" class="mt-2 break-all text-xs text-neutral-500">
+          {{ t('settings.pages.modules.castalia.backend-bank-dir') }}
+          <code class="select-all font-mono">{{ memory.backend.bankDir }}</code>
         </div>
         <p v-if="memory.backend?.emotion" class="mt-2 text-xs text-neutral-500">
           {{ memory.backend.emotion.note }}

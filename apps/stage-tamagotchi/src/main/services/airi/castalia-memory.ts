@@ -419,6 +419,7 @@ export function setupCastaliaMemoryService(params: {
       project: engineOptions.project,
       character: engineOptions.character,
       engineEntry: engineOptions.engineEntry,
+      bankDir: engineOptions.bankDir,
       capabilities: {
         // stdio 后端没有队列工具，这里如实说"扫不了"，而不是让扫描器每年安静空转。
         vadSweep: typeof engine.flushStaleVadQueue === 'function',
@@ -566,6 +567,8 @@ export function setupCastaliaMemoryService(params: {
   const described = describeCastaliaEngineConfig(userDataDir)
   defineInvokeHandler(params.context, castaliaMemoryStatus, () => ({
     transport: 'entry-only' as const,
+    // 引擎没起来，但目录仍然知道：面板照样能回答「记忆存在哪」。
+    bankDir: described.bankDir ?? join(userDataDir, 'memory-banks'),
     capabilities: { vadSweep: false, recall: false, search: false, facts: false, ingest: false, maintain: false, selfCycle: false, psyche: false, diary: false, thoughts: false },
     error: `完整引擎没有启用，只有条目读写：${described.reason ?? '配置不可用'}`,
     checkedAt: Date.now(),

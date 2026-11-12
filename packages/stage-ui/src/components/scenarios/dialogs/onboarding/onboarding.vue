@@ -12,6 +12,7 @@ import { isCustomProvidersDisabled } from '@proj-airi/stage-shared'
 import { storeToRefs } from 'pinia'
 import { computed, ref } from 'vue'
 
+import StepCastaliaBasics from './step-castalia-basics.vue'
 import StepModelSelection from './step-model-selection.vue'
 import StepProviderConfiguration from './step-provider-configuration.vue'
 import StepProviderSelection from './step-provider-selection.vue'
@@ -154,6 +155,12 @@ const allSteps = computed<OnboardingStep[]>(() => {
     {
       id: 'model-selection',
       component: StepModelSelection,
+    },
+    // 装完之后她第一句会说什么、记忆落在哪，都是新用户当场就要知道的事。
+    // 放在最后一步：前面的步骤在配服务商，这一步只讲她自己的行为。
+    {
+      id: 'castalia-basics',
+      component: StepCastaliaBasics,
     },
   ]
 

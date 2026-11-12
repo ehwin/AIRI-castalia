@@ -64,6 +64,25 @@ dialogs:
       optionalHint: You can continue even if these permissions are not granted.
       stateGranted: Granted
       stateNotGranted: Not granted
+    castalia:
+      title: Her memory and her own voice
+      description: Both are on from the start. Here is where her memory lives, when she speaks first, and how to turn each off.
+      memory-title: Where her memory lives
+      memory-body: Every conversation she keeps stays on this computer, in one folder. Nothing goes to us.
+      memory-body-web: Every conversation she keeps stays in this browser. Nothing goes to us.
+      memory-unknown: This device has no memory folder yet. She creates one the first time she remembers something.
+      memory-browser: A browser has no folder to show. Her memory sits in this site's storage, and clearing site data erases it.
+      memory-meta: 'Bank: {bank}'
+      voice-title: When she speaks first
+      when-awake: She is awake, and her energy is above the floor.
+      when-gap: You have been quiet, and enough time passed since her last message.
+      when-quiet-office: She stays silent from 23:00 to 07:00.
+      when-unanswered: She stops after three messages you did not answer.
+      off-title: How to turn it off
+      off-memory: Remember our conversations
+      off-voice: Speak first without being asked
+      off-later: The memory switch is in Settings, under Modules, Long-Term Memory. The voice switch is under Modules, Castalia, where the Castalia switch also turns off the emotion loop.
+      start: Start using AIRI
   bug-report:
     title: Bug report (´;ω;`)ヾ(･∀･`)
     subtitle: Oops, sorry we made something wrong. Would you mind telling us what
@@ -1054,6 +1073,9 @@ pages:
       energy: Energy
       tsundere-level: Tsundere level
       tsundere-level-description: A higher value makes her tone pricklier. It does not change how fast an emotion fades. The setting is saved for each character.
+      voice-enable: Speak first without being asked
+      voice-enable-description: When this is off, she answers you and never starts a topic on her own. The switch is saved, so a restart keeps it off.
+      backend-bank-dir: 'Memory folder:'
       status-description: The state updates after an AIRI conversation feeds an emotion or desire event. The plugin copy updates independently from the AIRI core.
       backend-title: What the backend can actually do
       backend-tools-disabled: 'Tools were switched off after a provider error: {models}'

@@ -31,6 +31,36 @@ import { useMindStore } from './mind'
  */
 const DIAGNOSTICS_KEY = 'castalia/self-initiated-diagnostics'
 
+/**
+ * The silence switch, as a plain key so another window can read it.
+ *
+ * The settings window and the first-run wizard own their own store instances, and `paused` used to
+ * live in memory only: a restart forgot it, and a switch in another window never reached the ticker
+ * that speaks. The ticker reads this key on every tick, so one window turning her off silences the
+ * window that holds the election within a second.
+ */
+export const SILENCE_KEY = 'castalia/self-initiated-silent'
+
+/** Whether the owner turned self-initiated speech off. A storage failure reads as "not silent". */
+export function readSelfInitiatedSilent(): boolean {
+  try {
+    return localStorage.getItem(SILENCE_KEY) === 'true'
+  }
+  catch {
+    return false
+  }
+}
+
+/** Writes the silence switch. The ticker and every window read the same key. */
+export function writeSelfInitiatedSilent(next: boolean): void {
+  try {
+    localStorage.setItem(SILENCE_KEY, String(next))
+  }
+  catch {
+    // A blocked storage still leaves the in-memory switch in this window working.
+  }
+}
+
 export interface LoopDiagnostics {
   lastReason?: string
   lastReasonAt?: number
@@ -152,7 +182,7 @@ export const useSelfInitiatedSpeechStore = defineStore('self-initiated-speech', 
   let currentTopic = 'idle'
   /** Why the last tick stayed silent. The diagnostics page reads it. */
   const lastGateReason = ref<string | undefined>(undefined)
-  const paused = ref(false)
+  const paused = ref(readSelfInitiatedSilent())
   const gatedCount = ref(0)
   /**
    * The last-mile screen look can take as long as the vision model does.
@@ -271,6 +301,10 @@ export const useSelfInitiatedSpeechStore = defineStore('self-initiated-speech', 
         return input
       },
       gate: ({ now }) => {
+        // 开关可能是在另一个窗口（设置页 / 首启向导）按下的：它的 store 不跑 ticker，
+        // 所以这里每跳读一次持久化的键，而不是只信本窗口内存里的 `paused`。
+        if (paused.value || readSelfInitiatedSilent())
+          return { allow: false, reason: 'paused' }
         const verdict = decideOutbound({ now, hour: new Date(now).getHours(), topic: currentTopic }, outbound)
         if (!verdict.allow)
           return { allow: false, reason: verdict.reason }
@@ -411,11 +445,12 @@ ${context}`
   /**
    * Silences or resumes self-initiated speech.
    *
-   * A hand-set pause outlives an owner message: only this call lifts it. The
-   * unanswered pause lifts by itself, because the owner answering is an answer.
+   * A hand-set pause outlives an owner message and a restart: the key is persisted, so the switch
+   * holds across deploys and the ticker in the leading window sees a change made elsewhere.
    */
   function setSpeechPaused(next: boolean) {
     paused.value = next
+    writeSelfInitiatedSilent(next)
     outbound = setPaused(outbound, next)
   }
 

@@ -326,6 +326,24 @@ describe('self-initiated speech store', () => {
     expect(store.diagnostics.lastReason).toBe('asked-busy')
   })
 
+  it('stays silent while the owner turned self-initiated speech off', async () => {
+    // 开关过去只改内存里的 `paused`，重启就忘，等于一个关不掉的按钮。
+    // 现在它是「静音键 + 门」：关上之后每一跳都读到拒绝，打开之后立刻恢复。
+    const store = mountStore(election(true).runtime)
+    store.start()
+
+    store.setSpeechPaused(true)
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(mocks.notify).not.toHaveBeenCalled()
+    expect(store.diagnostics.lastReason).toBe('paused')
+
+    store.setSpeechPaused(false)
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(mocks.notify).toHaveBeenCalledTimes(1)
+
+    store.stop()
+  })
+
   it('asks the look-scoped verdict before it speaks, not the gate\'s older one', async () => {
     // 门（1s 一跳）读的是 mind 的当前裁决；真正开口时只认这一眼之后的那份。
     mocks.mind.interruptionSince.mockImplementation((startedAt: number) => {

@@ -241,6 +241,8 @@ export interface CastaliaMemoryStatus {
   project?: string
   character?: string
   engineEntry?: string
+  /** 记忆库的根目录。面板与首启向导用它回答「记忆存在哪」。 */
+  bankDir?: string
   capabilities: CastaliaMemoryCapabilities
   emotion?: CastaliaEmotionGate
   /** 上一次读取的条目规模，`truncated` 表示面板与索引只看到一部分。 */
