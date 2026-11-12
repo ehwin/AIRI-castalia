@@ -375,6 +375,9 @@ describe('sleep, in the same loop', () => {
         mind.attachNoise({ seed })
       let now = Date.now()
       mind.drives = { fatigue: 10, boredom: 50, curiosity: 0, focus: 0 }
+      // 先把 lastTickAt 对齐到 now，否则第一次 tick 的 dt 取决于真实墙钟，
+      // 两次 walk() 会差出毫秒，驱力就跟着差出 1e-6 量级。CI 上就是这么红的。
+      mind.tick(now)
       for (let i = 0; i < 40; i++) {
         now += 45_000
         mind.tick(now)
@@ -402,8 +405,13 @@ describe('sleep, in the same loop', () => {
       expect(Math.abs(noisy.wobble.boredom)).toBeGreaterThan(0)
       expect(Math.abs(noisy.wobble.boredom)).toBeLessThan(15)
       expect(Math.abs(noisy.offset)).toBeLessThanOrEqual(5)
-      // 噪声只进判定：同样的环境走完同样多的 tick，落盘的驱力一模一样。
-      expect(noisy.drives).toEqual(plain.drives)
+      // 噪声只进判定：同样的环境走完同样多的 tick，落盘的驱力必须一致。
+      // 但两条 walk() 的真实起点相差几毫秒（initialize 里记的是墙钟），
+      // 所以按 1e-4 比，而不是要求逐位相等——噪声真的耦合进驱力会差几个数量级。
+      expect(noisy.drives.fatigue).toBeCloseTo(plain.drives.fatigue, 4)
+      expect(noisy.drives.boredom).toBeCloseTo(plain.drives.boredom, 4)
+      expect(noisy.drives.curiosity).toBeCloseTo(plain.drives.curiosity, 4)
+      expect(noisy.drives.focus).toBeCloseTo(plain.drives.focus, 4)
     })
 
     it('replays one day from one seed and diverges on another', async () => {
