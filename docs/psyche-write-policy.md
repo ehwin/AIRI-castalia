@@ -42,13 +42,23 @@ Measured here (temp bank, one turn, baseline VAD 0.4/0.3/0.6, `speech`-free path
 | explicit + inferred (0.55/0.45/0.50) | 0.539 | 0.418 | 0.548 |
 
 The second appraisal adds about +5% valence and +6% arousal on top of the first, and the drift
-compounds over a conversation. The rule now is **one writer per state**: under `PSYCHE_FROM_VAD=on`
-the explicit write answers `estimator_active` and does not move psyche. The panel still records the
-emotion for the prompt.
+compounds over a conversation. The rule now is **one writer per turn**: the explicit verdict is
+written, and the same verdict is handed back to `ingestTurn`, which stores that row as already
+analyzed and keeps it out of the VAD queue
+(`apps/stage-tamagotchi/src/main/services/airi/castalia-memory.ts:409`-`:417`,
+`packages/castalia-plugin/src/bank/index.ts:841`). One turn moves psyche once, whichever path got
+there first.
 
-Left open: the reverse priority. If the model's judgement must win over the estimator, the engine
-needs a turn-to-memory link so the estimator can skip rows that already have an explicit appraisal.
-That is a schema change and is not done here.
+An earlier revision refused the explicit write while `PSYCHE_FROM_VAD=on`, answering
+`estimator_active`. That guard is gone: the lexicon abstains on most turns (8.6% judged), so the
+refusal left psyche idle on every turn the estimator skipped. The reason survives only as a value
+in the union type (`apps/stage-tamagotchi/src/shared/eventa/castalia-memory.ts:271`) and has no
+producer.
+
+Left open: turns with no stable id. A caller that cannot supply a turn id leaves the row `pending`,
+so the automatic chain judges it after the explicit verdict already landed
+(`packages/castalia-plugin/src/bank/index.ts:589`). The fix is to thread the row id through that
+path, not to add another guard.
 
 ## 3. A background repair must not fail silently
 

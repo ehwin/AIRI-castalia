@@ -3,6 +3,8 @@
 写于 2026-11-12，对着 `ehwin/feat/diary-partition` 的代码读出来的，不是设计文档的回述。
 每条结论后面挂 `path:line`，读到这里的人可以直接跳过去核。凡是我没核实的，会写「未核实」。
 
+初版有四块没写透，本轮补齐并逐条重核过：psyche 到提示词的出口（§2.7，原先整条缺）、29 个可调参数只列了 26 个（§2.5，漏掉 `PSYCHE_MOOD_RELAX_RATIO` 与两项 `ANIMA_*` 关着的开关）、`memory.sqlite` 里的表名与索引落点（§3.1、§3.4）、VAD 队列「15 条 / 2 分钟 / 600 秒」三个数被揉成一句（§5 第 3 步）。另外修了两份说反了的文档：`docs/psyche-write-policy.md` 的「一轮一个写者」规则、`docs/behavior.md` 第 7、8 节的开关位置（两处都指向了不存在的 UI）。
+
 先给三句话，剩下的是它的推导：
 
 1. **她的心情是一个单写者状态机**，输入是「绝对目标 + 有界跟随」，主要瓶颈不在数学而在**输入太少**：自动估计器只判 8.6% 的句子，闸门默认还是关的。
@@ -45,7 +47,7 @@
 
 不在 psyche 里的两个容易混的量：标量 `currentMood`（-10..+10，7 小时半衰期，`vendor/engine/agentState.ts:145`）和 `currentDesire`（字符串，直接覆盖、不衰减，`agentState.ts:137`）。`energy` 在 `agentState.ts:190`：0..100、初值 100、按 `exp(-0.05·h)` 自衰减，**一旦宿主 mind 推过 `setEnergy` 就转成纯镜像、不再自衰减**。
 
-> 顺带纠正一个常见误读：psyche 里**没有** `relationship stage` 字段。关系阶段在 `packages/core-agent` 的关系层，记忆分类里的 `relationship` 只是条目分类（`vendor/engine/db.ts:924`）。
+> 顺带纠正一个常见误读：psyche 里**没有** `relationship stage` 字段。关系阶段在 `packages/core-agent/src/persona/relational-policy.ts:49`（`stage: 1 | 2 | 3 | 4`），由 `updateRelationship`（`:157`）推进、存在 localStorage，渲染层用 `readStoredRelationship` 读回（`packages/stage-ui/src/stores/chat/context-providers/relational-policy.ts:44`），一路喂给闸门的关系系数（§4.2）与关系语气提示（`:74`）。记忆分类里的 `relationship` 只是条目分类（`vendor/engine/db.ts:924`）。
 
 ### 2.2 推进的数学
 
@@ -65,7 +67,7 @@
 
 | 通道 | 入口 | 门槛 | 幂等键 |
 | --- | --- | --- | --- |
-| 自动估计（词表 + 模型） | `flushVadQueueDetailed` | `process.env.PSYCHE_FROM_VAD === 'on'`，且这批确实有 `pending_psyche` 行（`emotion.ts:1171`） | `vad:<project>:<ids.join(,)>`，按持久行 id 规范化拼（`emotion.ts:819`） |
+| 自动估计（词表 + 模型） | `flushVadQueueDetailed` | `process.env.PSYCHE_FROM_VAD === 'on'`，且这批确实有 `pending_psyche` 行（`emotion.ts:1171`） | `vad:<project>:<ids.join(,)>`，按持久行 id 规范化拼（`emotion.ts:1121`、`:1177`） |
 | 显式写入 | Eventa `castaliaMemoryApplyEmotion` → `engine.applyEmotion` | 面板开关 `moduleEnabled.castalia`（关掉回 `disabled`，写失败回 `persist_failed`）（`apps/stage-tamagotchi/src/main/services/airi/castalia-memory.ts:405`） | 调用方给：`emotion:turn:<conversationId>:<turnId>`（`packages/stage-ui/src/stores/chat.ts:712`） |
 
 reflection / self-cycle **只读不写**：`runSelfCycle` 先 `getPsycheState` 再 `formatDiary`，把 band/VAD 写进日记文本，没有任何回写（`vendor/engine/selfCycle.ts:382`）。夜间维护是**间接**通道：每 30 分钟看一次本地时间，落在 04:00–06:00 就跑 `runMaintenance`，最终经 digest → `flushVadQueueDetailed` 回到自动链，所以照样受 `PSYCHE_FROM_VAD` 约束（`apps/stage-tamagotchi/src/main/services/airi/castalia-memory.ts:274`）。
@@ -81,31 +83,67 @@ reflection / self-cycle **只读不写**：`runSelfCycle` 先 `getPsycheState` �
 
 ### 2.5 可调参数
 
-面板画的是 `ACTIVE_TUNING_SPECS = ENGINE_TUNING_SPECS ?? TUNING_SPECS`；本 fork 的 `TUNING_SUPPORT` 是 `null`，所以走静态 29 项清单，key 就是环境变量名（`vendor/engine/tuningSupport.ts:8`）。
+面板画的是 `ACTIVE_TUNING_SPECS = ENGINE_TUNING_SPECS ?? TUNING_SPECS`；本 fork 的 `TUNING_SUPPORT` 是 `null`，所以走静态清单，key 就是环境变量名（`vendor/engine/tuningSupport.ts:6`）。清单实测 **29 项**（`grep -c "key: '"` 得 30，其中一条是 `*` 通配），按 `group` 分八组，下面全列，不摘录：
 
-| 组 | key | 默认 |
-| --- | --- | --- |
-| band | `PSYCHE_BAND_CENTER_OFFSET` | 0（-0.6..0.6） |
-| band | `PSYCHE_BAND_ENTER` / `PSYCHE_BAND_HOLD` | 0.25 / 0.1（hold 必须 < enter） |
-| 快层 | `PSYCHE_HALF_LIFE_{VALENCE,AROUSAL,DOMINANCE}_HOURS` | 1.97 / 4 / 36（单位 H） |
-| 慢层 | `PSYCHE_MOOD_HALF_LIFE_*_HOURS` | **引擎默认 0/0/0 = 关闭**；面板写 45.75/16/144 |
-| 增益 | `PSYCHE_TARGET_GAIN` / `PSYCHE_EVENT_GAIN` / `PSYCHE_MAX_STEP` | 0.55 / 0.35 / 0.35 |
-| 像人 | `PSYCHE_NEGATIVE_IMPACT` / `_NEGATIVE_PERSISTENCE` / `_INERTIA` / `_SATURATION` / `_SALIENCE_PERSISTENCE` | 1.35 / 1.6 / 0.55 / 0.5 / 1 |
-| 证据 | `PSYCHE_EVIDENCE_TTL_HOURS` / `PSYCHE_EVENT_RETENTION_DAYS` | 72 / 90 |
-| 检索 | `WEIGHT_{CONSISTENCY,EMOTION,TIME,DEVIATION}`、`MEMORY_INJECT_{MIN_SIM_LEXICAL,MIN_SIM,STRONG}` | 1 / 0.12 / 0.03 / 0.1、0.2 / 0.5 / 0.5 |
+| 组 | key | 默认 | 备注 |
+| --- | --- | --- | --- |
+| band | `PSYCHE_BAND_CENTER_OFFSET` | 0 | 范围 -0.6..0.6 |
+| band | `PSYCHE_BAND_ENTER` | 0.25 | 进档阈值 |
+| band | `PSYCHE_BAND_HOLD` | 0.1 | 必须 < enter，否则校验拒收 |
+| halfLife | `PSYCHE_HALF_LIFE_VALENCE_HOURS` | 1.97 | 单位是 H，不是 τ |
+| halfLife | `PSYCHE_HALF_LIFE_AROUSAL_HOURS` | 4 | 无人类时序数据 |
+| halfLife | `PSYCHE_HALF_LIFE_DOMINANCE_HOURS` | 36 | 同上 |
+| mood | `PSYCHE_MOOD_HALF_LIFE_VALENCE_HOURS` | 45.75 | **spec 默认值，引擎内部默认是 0 = 慢层关** |
+| mood | `PSYCHE_MOOD_HALF_LIFE_AROUSAL_HOURS` | 16 | 同上 |
+| mood | `PSYCHE_MOOD_HALF_LIFE_DOMINANCE_HOURS` | 144 | 同上 |
+| mood | `PSYCHE_MOOD_RELAX_RATIO` | 1 | 慢层松弛相对快层的倍率 |
+| gain | `PSYCHE_TARGET_GAIN` | 0.55 | 绝对观测 |
+| gain | `PSYCHE_EVENT_GAIN` | 0.35 | 有符号增量 |
+| gain | `PSYCHE_MAX_STEP` | 0.35 | 单步限幅 |
+| trait | `PSYCHE_NEGATIVE_IMPACT` | 1.35 | 向下放大 |
+| trait | `PSYCHE_NEGATIVE_PERSISTENCE` | 1.6 | 负向偏置下的持久度 |
+| trait | `PSYCHE_INERTIA` | 0.55 | 反向折扣 |
+| trait | `PSYCHE_SATURATION` | 0.5 | 饱和系数 |
+| trait | `PSYCHE_SALIENCE_PERSISTENCE` | 1 | 按上一条 salience 放大半衰期 |
+| evidence | `PSYCHE_EVIDENCE_TTL_HOURS` | 72 | 超时后 `hasEvidence` 落回 false |
+| evidence | `PSYCHE_EVENT_RETENTION_DAYS` | 90 | `psyche_events` 保留 |
+| evidence | `ANIMA_NIGHT_DECAY` | **0 = 关** | 打开会按夜重算同一段过去 |
+| evidence | `ANIMA_TSUNDERE_DECAY` | **0 = 关** | 注释：人格表达不该等于遗忘速度 |
+| search | `WEIGHT_CONSISTENCY` | 1 | 记忆检索权重 |
+| search | `WEIGHT_EMOTION` | 0.12 | 同上 |
+| search | `WEIGHT_TIME` | 0.03 | 同上 |
+| search | `WEIGHT_DEVIATION` | 0.1 | 同上 |
+| inject | `MEMORY_INJECT_MIN_SIM_LEXICAL` | 0.2 | 词法门槛 |
+| inject | `MEMORY_INJECT_MIN_SIM` | 0.5 | 向量门槛 |
+| inject | `MEMORY_INJECT_STRONG` | 0.5 | 强命中门槛 |
 
-（`packages/castalia-plugin/src/tuning.ts:41`、`:82`、`:115`、`:159`、`:193`、`:246`、`:511`）
+整份清单在 `packages/castalia-plugin/src/tuning.ts:38`–`:409`（`TUNING_SPECS`），八组各自带 `group` 与范围校验。
+
+`ANIMA_*` 两项挂在 `evidence` 组里，但它们管的是「夜里重算」与「傲娇表达」，与证据 TTL 无关——组名是给面板分区的，不要按组名推断语义。
 
 ### 2.6 已知缺陷（代码注释自认的）
 
 - **自动估计器覆盖率极低**：注释直接写词表「abstains on most turns (8.6% judged)」（`castalia-memory.ts:412`）。所以闸门关着时 psyche 基本不动。
 - **词表评分已被降级摘除**：CPED 分层 300 条实测 κ=0.015、命中率 7.3%、命中处符号一致率 50%，现在只写 `affect_status='abstain'`（`vendor/engine/emotion.ts:750`）。
 - **`PSYCHE_FROM_VAD` 只认小写 `on`**，`ON`/`1` 不算，而且它**不在面板参数清单里**，只能靠环境变量或 config 设（`castalia-memory.ts:449`）。
-- **文档与代码不一致**：`docs/psyche-write-policy.md` 说 `=on` 时显式写入返回 `estimator_active` 且不动 psyche，但该拒绝逻辑已删；`estimator_active` 现在只剩类型联合、没有生产者（`apps/stage-tamagotchi/src/shared/eventa/castalia-memory.ts:271`）。
+- **旧文档写过一条已经不存在的行为**：`docs/psyche-write-policy.md` 原先说 `=on` 时显式写入返回 `estimator_active` 且不动 psyche。该拒绝逻辑已删，`estimator_active` 只剩类型联合、没有生产者（`apps/stage-tamagotchi/src/shared/eventa/castalia-memory.ts:271`）。这份文档本轮已按现状改写。
 - **慢层默认关**是产品决定不是拟合结论；关着时 `mood` 每次跃迁后被强制等于 `vad`（`psycheState.ts:203`）。
 - **面板默认值陷阱**：面板把慢层 valence 写成 45.75，而 `coerceTuning` 会把「等于 spec.default」的值当默认丢弃（`tuning.ts:515`），用户照面板默认保存等于什么都没设。
 - **双算风险**：`MEMORY_AUTO_PROCESS` 默认 1，走 fullAuto 时显式判定拿不到行 id、不参与去重，行仍是 pending，自动链之后还会判同一轮（`packages/castalia-plugin/src/bank/index.ts:589`）。
 - **两套常数容易混**：`psycheState` 用 1.97/4/36 的小时半衰期；`emotion.ts` 的 `DECAY_TAU` 是 24/4/36 的 τ，只用于旧记忆显示衰减（`vendor/engine/emotion.ts:90`）。
+
+### 2.7 出口：psyche 怎么进到提示词
+
+情感环只有一条出口，而且是**运行时上下文**，不是 system prompt：
+
+1. 主进程每 5 分钟轮询一次引擎（`PSYCHE_SYNC_INTERVAL_MS = 5 * 60_000`，`apps/stage-tamagotchi/src/renderer/App.vue:185`）。轮询本身受两道上限：`castaliaStore.enabled` 为假直接返回（`:568`），上一次没回来不发第二次（`:573`）。
+2. 拿到的 `vad/mood/band` 交给 `syncPsyche`（`packages/castalia-plugin/src/store.ts:90`）。它做三件判断：旧答案不覆盖新答案（`now < vadUpdatedAt`，`:95`）；引擎说证据过期就**删掉**镜像里的 `vad/moodVad/band`，不留一个引擎已经不再承认的情绪（`:101`）；`psyche` 那条心情事件是替换而不是追加（`:97`、`:118`）。
+3. 发送时 `formatSelfStatePrompt(snapshot, { drivesLine, energy })` 把快照渲染成几句英文（`packages/stage-ui/src/stores/chat.ts:1103`、`packages/castalia-plugin/src/agent-state.ts:116`），再包成一条 `ReplaceSelf` 的上下文消息（`chat.ts:1108`、`chat/context-providers/mind-state.ts:21`）。放在这里而不是 system prompt，是因为它每轮都变，而 system prompt 是各家供应商都会缓存的整段前缀（`mind-state.ts:11`）。
+4. 渲染规则：VAD 三维各自只在越过阈值时给词——valence ±0.25、arousal / dominance ±0.3（`agent-state.ts:81`）；标量 `currentMood` 绝对值 ≥3 才并入同一句（`:161`）；能量 <50 才说话（`:166`）；慢层只在和快层差 ≥0.05 时出现（`:125`、`:169`）；`desire` 一行（`:172`）；最近事件按 `reason` 去重、最多两条且排除 `psyche` 镜像（`:134`）；`tsundereLevel ≥ 3` 才加语气句（`:176`）。全空时整段返回空字符串，一条不发（`:148`）。
+5. 节流：同一句状态连发 3 轮就停（`STATE_STICKY_SENDS = 3`，`stores/modules/mind.ts:435`、`stateLineForSend` `:453`），避免一个恒定的句子变成常驻指令。
+6. Castalia 模块关掉时这条出口退化：只送 mind 的驱力那一句，psyche 完全不进提示词（`chat.ts:1102` 判 `castalia.enabled`，`:1107` 回落到只有驱力那一句）。
+
+**`band` 没有消费者。** `AgentStateSnapshot.band` 只有类型声明（`agent-state.ts:25`），全仓读它的地方只有面板分组标签（`settings/modules/castalia.vue:148`）。也就是说 `negative|neutral|positive` 这个分档目前只用于显示，措辞完全由连续值决定；想让它影响语气，得先在 `formatSelfStatePrompt` 里加一句。这是本报告写前没有说清的一点，不是缺陷但容易误读。
 
 ---
 
@@ -119,7 +157,7 @@ reflection / self-cycle **只读不写**：`runSelfCycle` 先 `getPsycheState` �
 
 - 没有 `castalia-engine.json` 时用 `<userData>/memory-banks`；一旦有配置就完全按 `bankDir`，不用默认值盖掉坏路径（`apps/stage-tamagotchi/src/main/services/airi/castalia-engine.ts:106`）。
 - 实机一致：`D:/castalia/memory-banks/airi/airi/{general,user,feedback,project,reference,diary,thoughts}/memory.sqlite`。
-- **project 是目录名**（默认 `airi`），**persona 不是目录而是 `memory.character_id` 列**；`general` 里 `character_id` 为空的行等于通用条目（`packages/castalia-plugin/src/bank/index.ts:131`）。
+- **project 是目录名**（默认 `airi`），**persona 不是目录而是 `memory.character_id` 列**；`character_id` 为空的历史行在 v1.24 迁移时被归到「本库唯一角色」，而「通用条目」是渲染层 `visibleTo` 的口径——`!entry.persona` 或等于本卡（`vendor/engine/db.ts:955`–`:979`、`stores/memory.ts:760`）。
 - 目录枚举白名单只有 `general/user/feedback/project/reference`；**`diary` 与 `thoughts` 故意不进 `MEM_TYPES`**，所以 list、衰减、反刍、星图这些遍历路径天然看不到它们（`vendor/engine/db.ts:331`）。这就是「日记分区」的关键：日记与念头各自一个库，不会被当成普通记忆去衰减或反刍。
 - 各类内容落点：
 
@@ -136,6 +174,8 @@ reflection / self-cycle **只读不写**：`runSelfCycle` 先 `getPsycheState` �
 
 （`vendor/engine/db.ts:1013`、`bank/index.ts:470`、`bank/store-tools.ts:212`、`vendor/engine/search.ts:1308`）
 
+`memory.sqlite` 内部的表（同一个建库函数，`vendor/engine/db.ts:423` 起）：`memory`、`edges`、`categories`、`embedding_cache`、`facts`、`psyche_state`、`self_cycle_runs`、`psyche_events`，加上后加的 `memory_access_log`（`:784`）、`entities` / `fact_entities` / `memory_entities`（`:828`、`:839`、`:846`）；向量是 `vec0` 虚拟表，指纹表 `_embed_space`（`:110`），分块缓存 `chunk_meta`（`:900`）。`global.sqlite` 是另一套：`instructions`（`:354`）、`projects`（`:412`）。
+
 ### 3.2 传输层：四种状态，能力逐项为真或为假
 
 | 状态 | 什么时候是它 | 能做到什么 |
@@ -148,6 +188,7 @@ reflection / self-cycle **只读不写**：`runSelfCycle` 先 `getPsycheState` �
 - 渲染层只认这四个值，并配一张逐项布尔能力表（vadSweep/recall/search/facts/ingest/maintain/selfCycle/psyche/diary/thoughts）（`packages/stage-ui/src/stores/memory.ts:196`）。
 - stdio 拉 `node <engineEntry>`，固定 `MCP_TOOLS='store,self_cycle,memory_recent,memory_search'`，并显式清空 `ELECTRON_RUN_AS_NODE`（引擎的 better-sqlite3 按外部 Node 的 ABI 编）（`castalia-engine.ts:326`）。
 - stdio 缺的能力**如实报 false**（`typeof engine.x === 'function'`），不假装在线（`castalia-memory.ts:423`）。
+- **`entry-only` 有实体文件**：`<userData>/castalia/memory.sqlite` 里的条目仓储，朴素 `node:sqlite` 打开、带 WAL（`castalia-memory.ts:326`、`:332`）。所以它能存笔记、能按名字读，但没有向量、没有 facts、没有 psyche——状态里的 `bankDir` 仍然会回答一个真实路径（配置里的，没有就回落 `<userData>/memory-banks`），面板那句「记忆存在哪」在引擎没起来时也不说谎（`castalia-memory.ts:571`、`:573`）。
 - `castalia-engine.json` 字段：`enabled`、`engineEntry`、`bankDir`、`project`、`character`、`nodeBinary`（Full 总线另有 `fullUrl`，默认 `http://127.0.0.1:3314/mcp`），同名字段可被 `CASTALIA_ENGINE_ENTRY/CASTALIA_BANK_DIR/CASTALIA_PROJECT/CASTALIA_NODE` 覆盖（`castalia-engine.ts:103`）。
 
 ### 3.3 写：一轮对话怎么进库
@@ -180,7 +221,9 @@ reflection / self-cycle **只读不写**：`runSelfCycle` 先 `getPsycheState` �
 - 二次去重：相似度 ≥0.55 视为近重复；按日期 `perDay` 只留 1 条，否则同一晚的复述会占满 Recent（`stores/memory.ts:479`）。
 - 装填是贪心的：About you → About the owner → Recent，整段放不下就整段跳过，所以预算永远不会被截半句（`stores/memory.ts:507`）。
 
-三种检索分工（`stores/memory.ts:1071`）：
+落点（前一版报告缺的一环）：`chat.ts:348` 把 `composeMemoryPrompt(memory.indexFor(persona))` 拼进 **system prompt**，所以这 1900 字是每轮都要付的缓存前缀；具体条目不进前缀，走 `recall` 的运行时上下文消息（`chat/context-providers/memory-recall.ts:54`，接线 `chat.ts:366`、使用 `:1121`，800ms 死线 `:20`）。两段的分工直接写在提示词里：索引是地图，细节要 `read` / `search`（`tools/memory.ts:48`–`:52`）。
+
+三种检索分工（recall `stores/memory.ts:1011`、search `:889`、facts `:1071`）：
 
 | 手段 | 门槛 | 回答什么 |
 | --- | --- | --- |
@@ -193,7 +236,7 @@ reflection / self-cycle **只读不写**：`runSelfCycle` 先 `getPsycheState` �
 ### 3.5 维护与自循环
 
 - `maintain` 一条流水线四段：反刍抽取（未分析对话 → memory/facts/entities）→ 整合（近重复合并、衰减、升格）→ 事件摘要（把一天压成「发生了什么」，只摘录）→ digest；跑前跑后各拍一次每库 active/facts/entities 快照（`bank/index.ts:655`）。
-- 调度在主进程：每天本地 04:00–06:00 每 30 分钟探一次，启动后 3 分钟先补跑一次；`CASTALIA_MAINTENANCE=off` 可关（`castalia-memory.ts:269`）。
+- 调度在主进程：每天本地 04:00–06:00 每 30 分钟探一次（`:267`），启动后 3 分钟先补跑一次（`:269`–`:272`）；`CASTALIA_MAINTENANCE=off` 可关（`:246`）。
 - 有账本与冷却：成功间隔 20 小时、失败 30 分钟重试，记 `lastAttemptAt/lastOk/lastReport`，所以 23:00 睡下跑过一次后 04:00 那次会变成 no-op 而不是二次烧 token（`castalia-memory.ts:78`）。
 - 单飞：`maintenanceInFlight` 让手动按钮、夜班、睡眠路径共用同一个 Promise；结果追加到 `<userData>/logs/memory-maintenance.log`，**不写进她能读到的库目录**（`castalia-memory.ts:139`）。
 - 多角色：维护按「配置角色 + 所有已打开角色」各跑一遍（`castalia-inprocess.ts:305`）。
@@ -205,8 +248,8 @@ reflection / self-cycle **只读不写**：`runSelfCycle` 先 `getPsycheState` �
 
 - **库里绝大多数是转录**：注释实测 270 条里 220 条是 `mem-43bf085e` 这类按轮次命名的行，描述是「用户: … 助手: …」——这正是索引必须做 transcript 过滤的原因（`stores/memory.ts:9`）。
 - **「端口在」不等于「后端活」**：MCP transport 在引擎死后仍挂着；另有 okCount/failureCount/lastError，连续 2 次失败才判 `remoteDegraded`（`stores/memory.ts:127`）。
-- **检索失败不能读成「没有」**：`lookup` 区分 `ok/partial/unavailable/failed`，后端没 search 能力时工具层回「这说明不了这条记忆是否存在」（`stores/memory.ts:1044`）。
-- **日记正文读不回来**：引擎 `memory_get` 按 agent 的 memType 目录找，日记写在 project 分类库，实测返回 NOT_FOUND；只能退回 `memory_recent` 或直接只读连接（`castalia-engine.ts:452`）。
+- **检索失败不能读成「没有」**：`lookup` 区分 `ok/partial/unavailable/failed`，后端没 search 能力时工具层回「这说明不了这条记忆是否存在」（`stores/memory.ts:1036`）。
+- **日记正文读不回来**：引擎 `memory_get` 按 agent 的 memType 目录找，日记写在 project 分类库，实测返回 NOT_FOUND；只能退回 `memory_recent` 或直接只读连接（`castalia-engine.ts:453`–`:454`）。
 - **一个进程只能开一个 bank**：换 bank 会让 `alignEmbedSpace` 拿旧指纹比对新库从而清空 vec 表，所以 `openBank` 直接拒绝热切换；缺 `config.json` 也拒绝打开真实库（`bank/index.ts:311`）。
 - **工具层硬上限**：name ≤64、description ≤150、body ≤2000、query ≤200、单条命中 400 字、整条答复 1400 字，多出的只报 `(+N more hits)`（`packages/stage-ui/src/tools/memory.ts:76`）。
 - **召回有 800ms 死线**（原 300ms）：实测冷启动一次 recall 要 597ms，300ms 时每个会话第一轮的记忆块都被静默丢掉，表现为「她翻遍小本本也没找到」（`stores/chat/context-providers/memory-recall.ts:20`）。
@@ -222,7 +265,7 @@ reflection / self-cycle **只读不写**：`runSelfCycle` 先 `getPsycheState` �
 - 这个 store **没有 synced 状态**，只用选举：`synced.onLeadershipChange`（`stores/modules/self-initiated-speech.ts:96`、`:433`）。
 - 桌面端只有主窗口带 `synced-leader=true`，settings/chat/inlay/workspace/notice 全部 `false`（`apps/stage-tamagotchi/src/main/windows/main/index.ts:304`、`windows/settings/index.ts:94`），映射成 `leader-only` / `follower-only`（`renderer/window-context.ts:62`）。
 - 必须单窗口，是因为**闸门状态是每窗口内存**（`outbound` 是模块级 let）：两个窗口各自放行同一节奏，她就会连说三条（`self-initiated-speech.ts:101`、`:156`）。
-- 代价：选举心跳 15s、参与者失联 120s 过期，**主窗口崩溃后最长约两分钟无人接手**；而其它窗口是 follower-only，真没人接手时她彻底不说话。
+- 代价：选举心跳 15s、参与者失联 120s 过期，**主窗口崩溃后最长约两分钟无人接手**；而其它窗口是 follower-only，真没人接手时她彻底不说话。这两个数是插件的默认值，不是本仓库设定的：`pinia-plugin-synced@0.1.7` 的 `participantHeartbeatInterval` 默认 15000、`participantTimeout` 默认 120000（`node_modules/.pnpm/pinia-plugin-synced@0.1.7_*/node_modules/pinia-plugin-synced/dist/index.d.mts:33`、`:35`）。
 - 重启不靠内存恢复节奏：`lastSpokeAt` 每次新建都是 null，真正压住她的是按角色落盘的 outbound（`lastSentAt/sentToday/dayStartedAt`）（`ticker.ts:76`、`speak-decision.ts:91`、`self-initiated-speech.ts:122`）。
 
 ### 4.2 想不想说：hybrid-drive
@@ -238,7 +281,7 @@ reflection / self-cycle **只读不写**：`runSelfCycle` 先 `getPsycheState` �
 
 ### 4.3 能不能说：闸门
 
-判定顺序（先命中先返回）：参数健全性 → `paused` → `quiet-hours` → `unanswered-pause` → `min-gap` → `duplicate` → `daily-cap` → `allowed`（`outbound-gate.ts:221`）。
+判定顺序（先命中先返回）：参数健全性 → `paused` → `quiet-hours` → `unanswered-pause` → `min-gap` → `duplicate` → `daily-cap` → `allowed`（`outbound-gate.ts:216`–`:266`，顺序注释在 `:212`）。
 
 拒绝理由六个：`daily-cap`、`duplicate`、`min-gap`、`paused`、`quiet-hours`、`unanswered-pause`（`outbound-gate.ts:17`）。
 
@@ -276,8 +319,8 @@ reflection / self-cycle **只读不写**：`runSelfCycle` 先 `getPsycheState` �
 - 看的那一眼超时/失败只记诊断（`look-timeout` + `lookMs`），不阻断开口——她按已知信息说话（`self-initiated-speech.ts:362`）。
 - 看完仍 `away`/`busy`：买断 5 分钟、写 `screen:*` 诊断、直接 return，且**不记账**（不推 lastSentAt、不占这次开口）（`self-initiated-speech.ts:369`）。
 - 发送失败（`sent.ok` 假或没文本）同样不记账，改用 `SEND_FAILED_RETRY_MS = 5 × 60_000` 冷却，避免 provider 报错时每秒重试（`self-initiated-speech.ts:180`、`:389`）。
-- 只有送达才 `recordOutbound`（时间取送达时刻）+ `saveOutbound`，并落盘 `lastReason: 'sent'`、`lastSpokeAt`、`lookMs`（`self-initiated-speech.ts:397`）。
-- 事后三件事：`markSaidOutLoud`（复述进日记）、`relieveAfterSpeaking`（付掉无聊）、`castalia.recordMood(1, '我主动跟主人开口了')`；若裁决非 free 且问了「你在忙吗」再记 `asked-busy`（`self-initiated-speech.ts:405`、`:407`）。
+- 只有送达才 `recordOutbound`（时间取送达时刻）+ `saveOutbound`，并落盘 `lastReason: 'sent'`、`lastSpokeAt`、`lookMs`（`self-initiated-speech.ts:397`–`:401`）。
+- 事后三件事：`markSaidOutLoud`（复述进日记，`:407`）、`relieveAfterSpeaking`（付掉无聊，`:409`）、`castalia.recordMood(1, '我主动跟主人开口了')`（`:413`）；若裁决非 free 且问了「你在忙吗」再记 `asked-busy`（`:405`）。
 - 整条发送 180s 上限（覆盖 20s 看屏 + 模型调用），超时由 ticker 收回锁并记 `speak-timeout`，防止一次卡死的请求让她安静到重启（`self-initiated-speech.ts:233`、`:341`）。
 - 诊断字段 `LoopDiagnostics`：`lastReason`、`lastReasonAt`、`lastSpokeAt`、`askedBusyAt`、`lookMs`、`gatedCount`、`running`、`updatedAt`，按角色落盘（`self-initiated-speech.ts:64`、`:84`）。
 
@@ -296,7 +339,7 @@ reflection / self-cycle **只读不写**：`runSelfCycle` 先 `getPsycheState` �
 
 **SILENCE_KEY 是全局键、不分角色**：一次关掉会让同一 profile 下所有角色都闭嘴（`self-initiated-speech.ts:42`、`:306`）。
 
-> 文档不一致：`docs/behavior.md` §8 让用户关「打断许可 `interruptAllowed`」，但该 ref 只由视觉裁决写入、没有任何 UI 能设它，照着文档关不掉（`docs/behavior.md:64`、`stores/modules/mind.ts:319`、`:786`）。
+> 文档不一致（本轮已修）：`docs/behavior.md` §8 曾让用户关「打断许可 `interruptAllowed`」，但该 ref 只由视觉裁决写入、没有任何 UI 能设它（`stores/modules/mind.ts:319`、`:789`）。现在那两节改成了指向本节这个真开关，并写明 `interruptAllowed` 不是用户开关。
 
 ---
 
@@ -304,13 +347,14 @@ reflection / self-cycle **只读不写**：`runSelfCycle` 先 `getPsycheState` �
 
 1. 主人说话 → `onAssistantTurnReady`。
 2. `ingestTurn` 异步写库（`conv-<turnId>` 幂等），`resolvePersona` 先决定这轮属于哪张卡。
-3. 若模型给了 VAD → `recordEmotion` → `applyEmotion` → `applyPsycheAppraisal` 推 psyche（版本 +1，写 `psyche_state`，追加 `psyche_events`），并把本轮标 `analyzed`；没给 VAD 则留在 `pending_psyche` 队列，等 `PSYCHE_FROM_VAD=on` 时由自动链批量判（上限 15，另 2 分钟超龄 sweep）。
-4. 下一次请求前，`stores/memory.ts` 把 1900 字的三段索引拼进 system prompt（放在缓存前缀里）；需要细节时 `recall` 走相似度门槛再取一块。
-5. 每秒一跳的 ticker 读 `snapshot`（energy/desire/arousal）+ 关系阶段 → hybrid-drive 算「想不想」。
-6. 想过就进闸门：静音、静默时段、无人应答、间隔、去重、日上限。
-7. 过闸门再看一眼屏幕（20s 预算）→ `free` 才发；`away`/`busy` 买断 5 分钟。
-8. 送达后记账（outbound 落盘）+ 写日记（`markSaidOutLoud`）+ 付掉无聊 + `recordMood(+1)`。
-9. 每天 04:00–06:00 主进程整理：反刍抽取 → 整合 → 事件摘要 → digest；自循环每 360 分钟写一篇 `agent_diary`（不进索引）。
+3. 若模型给了 VAD → `recordEmotion` → `applyEmotion` → `applyPsycheAppraisal` 推 psyche（版本 +1，写 `psyche_state`，追加 `psyche_events`），并把本轮标 `analyzed`，同时带回 `ingestTurn` 让这行不进队列；没给 VAD 则留在队列里，等 `PSYCHE_FROM_VAD=on` 时由自动链批量判——一批上限 15（`VAD_QUEUE_MAX_SIZE`，`vendor/engine/emotion.ts:531`）。队列不会等人说话：主进程每 2 分钟扫一次（`VAD_SWEEP_MINUTES` 默认 2，`castalia-memory.ts:215`），最老一条超过 600 秒才强制 flush（`bank/index.ts:789`），所以一段安静下来的对话也会落账。
+4. 下一次请求前，`stores/memory.ts` 把 1900 字的三段索引拼进 **system prompt**（`chat.ts:348`，缓存前缀）；需要细节时 `recall` 走相似度门槛再取一块，作为运行时上下文消息（`chat.ts:1121`）。
+5. 同一次请求还会组一条自状态上下文：psyche 的 VAD（主进程每 5 分钟镜像进来的）+ mind 的驱力 + 能量，渲染成 `formatSelfStatePrompt` 那几行（`chat.ts:1103`、`agent-state.ts:116`），挂在缓存前缀之外——它每轮都变。
+6. 每秒一跳的 ticker 读 `snapshot`（energy/desire/arousal）+ 关系阶段 → hybrid-drive 算「想不想」。
+7. 想过就进闸门：静音、静默时段、无人应答、间隔、去重、日上限。
+8. 过闸门再看一眼屏幕（20s 预算）→ `free` 才发；`away`/`busy` 买断 5 分钟。
+9. 送达后记账（outbound 落盘）+ 写日记（`markSaidOutLoud`）+ 付掉无聊 + `recordMood(+1)`。
+10. 每天 04:00–06:00 主进程整理：反刍抽取 → 整合 → 事件摘要 → digest；自循环每 360 分钟写一篇 `agent_diary`（不进索引）。
 
 ---
 
@@ -342,6 +386,16 @@ pnpm typecheck
 
 browser 项目在本机全量跑会有 3 条稳定失败（`optional-modules` ×2、`airi-card` ×1），另有若干条随负载抖动的时序失败。**把本次改动 stash 后重跑，失败一字不差**，所以是基线，判据写在 `docs/known-lint-debt.md`。
 
+这一轮（报告修订）只动文档，不动代码：
+
+| 文档 | 改了什么 | 依据 |
+| --- | --- | --- |
+| `docs/fork/emotion-loop-and-memory.md` | 补 §2.7 出口、§2.5 全 29 项、§3.1 表名、§3.4 落点、§5 三个时间常数 | 本文各处 `path:line` |
+| `docs/psyche-write-policy.md` | §2 的规则从「`=on` 时拒绝显式写入」改成「一轮一个写者」 | `castalia-memory.ts:409`–`:417`、`bank/index.ts:841`；拒绝逻辑已不在源码里 |
+| `docs/behavior.md` | §7 按真实入口拆分；§8 改为设置 → 模块 → Castalia 的开关 | 意识页只有服务商与模型选择、`settings/modules/castalia.vue:31` |
+
+验证方式：全文 166 个 `path:line` 先用脚本核了一遍文件与行号是否存在，再逐段 `awk` 对齐语义，这轮改掉 16 处指错或偏移——例如 `outbound-gate.ts:221` 实际是乘数那一行（判定顺序在 `:216`–`:266`）、`castalia-memory.ts:213` 是空行（`VAD_SWEEP_MINUTES` 在 `:215`）、`bank/index.ts:131` 讲的是 list 工具而不是角色列（角色归并迁移在 `db.ts:955`–`:979`）。没有代码改动，因此没有新增测试。
+
 ---
 
 ## 7. 还没补的缺口
@@ -349,12 +403,17 @@ browser 项目在本机全量跑会有 3 条稳定失败（`optional-modules` ×
 | 缺口 | 影响 | 位置 |
 | --- | --- | --- |
 | `outbound.paused` 空转 | `setPaused` 每跳被 `outboundFor` 覆盖，读代码的人会以为它生效 | `self-initiated-speech.ts:283` |
-| `interruptAllowed` 文档写了但没 UI | 用户照着文档关不掉「打断许可」 | `docs/behavior.md:64` |
 | 自动估计器覆盖率 8.6% | 闸门关着时 psyche 几乎不动，情感环事实上靠显式写入 | `castalia-memory.ts:412` |
 | 慢层默认关 | 面板默认值又被 `coerceTuning` 当默认丢弃，照默认保存等于没设 | `tuning.ts:515` |
-| `docs/psyche-write-policy.md` 过时 | 描述的 `estimator_active` 拒绝逻辑已删 | `shared/eventa/castalia-memory.ts:271` |
-| 日记 `memory_get` 读不回 | 只能走 `memory_recent` 或直连 sqlite | `castalia-engine.ts:452` |
+| 日记 `memory_get` 读不回 | 只能走 `memory_recent` 或直连 sqlite | `castalia-engine.ts:453`–`:454` |
 | 主窗口崩溃 2 分钟内无人开口 | follower-only 无人接手 | `window-context.ts:62` |
+| `band` 没有消费者 | 分档只上屏，不进提示词；要它影响语气得先加渲染 | `castalia-plugin/src/agent-state.ts:25` |
+| 驱力阈值 / 作息没有设置页 | 全是 `packages/core-agent` 里的常量，没有 UI 也没有 env | `core-agent/src/mind/drives.ts:88`、`:164` |
+
+已在本轮修掉的（原来列在这里，或写在别的文档里说错了）：
+
+- `docs/psyche-write-policy.md` §2 说 `PSYCHE_FROM_VAD=on` 时显式写入被拒（`estimator_active`）——那条拒绝逻辑已经不在了，现在的规则是「一轮一个写者」：显式判定照写，并把这一轮标 `analyzed` 挡在自动链外面（`castalia-memory.ts:409`–`:417`、`chat.ts:712`）。文档已按现状改写。
+- `docs/behavior.md` §7/§8 让用户去「设置 → 意识」关主动开口、关 `interruptAllowed`——两处都不存在：意识页只有服务商与模型选择（`packages/stage-pages/src/pages/settings/modules/consciousness.vue`），`interruptAllowed` 只由视觉裁决写入（`stores/modules/mind.ts:319`、`:789`）。文档已改为指向设置 → 模块 → Castalia 的真开关。
 
 ---
 
