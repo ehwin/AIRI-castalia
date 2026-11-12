@@ -1096,12 +1096,16 @@ export const useChatStore = defineStore('chat', () => {
         // scene or queued turn can be sent while another session is selected.
         const persona = memory.enabled ? memory.resolvePersona(personaOf(sessionId)) : personaOf(sessionId)
         const drivesLine = mindStore.stateLineForSend()
-        if (!castalia.enabled)
-          return createMindStateContext(drivesLine)
-        return createMindStateContext(formatSelfStatePrompt(castalia.snapshotFor(persona), {
-          drivesLine,
-          energy: 100 - mindStore.drives.fatigue,
-        }))
+        // 现在能不能打扰，和心情一样每轮都可能变，所以也放运行时上下文。
+        // 有了这一句，「你在忙吗」就变成她本可以自己回答的问题：看得见就直接说事。
+        const screenLine = mindStore.interruptionLine()
+        const stateText = castalia.enabled
+          ? formatSelfStatePrompt(castalia.snapshotFor(persona), {
+              drivesLine,
+              energy: 100 - mindStore.drives.fatigue,
+            })
+          : drivesLine
+        return createMindStateContext([stateText, screenLine].filter(Boolean).join('\n'))
       },
       // Relationship policy: tone, depth, and when disagreement is allowed.
       () => relationalPolicyContext(),
@@ -1176,7 +1180,10 @@ export const useChatStore = defineStore('chat', () => {
       else {
         // The turn is written under the card that said it, not under the configured character.
         const persona = memory.enabled ? memory.resolvePersona(personaOf(sessionId)) : personaOf(sessionId)
-        void memory.ingestTurn({ user: userText, assistant: assistantText, sessionId, persona, ...(affect ? { affect } : {}) })
+        // `turnId` is the id of the user message this reply answered. The bank keys the row on it,
+        // so a replay or a retry keeps one row instead of adding a second copy of the same words.
+        const turnId = pendingUserTurns.get(sessionId)?.id
+        void memory.ingestTurn({ user: userText, assistant: assistantText, sessionId, persona, ...(affect ? { affect } : {}), ...(turnId ? { turnId } : {}) })
       }
       const artistry = sessionCard(sessionId)?.extensions?.airi?.modules?.artistry
       if (artistry?.autonomousEnabled && artistry?.autonomousTarget === 'assistant')

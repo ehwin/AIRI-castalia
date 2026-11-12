@@ -1,4 +1,5 @@
 import { useCastaliaPluginStore } from '@proj-airi/castalia-plugin'
+import { asksIfBusy } from '@proj-airi/core-agent'
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
@@ -20,6 +21,39 @@ import { readStoredRelationship } from '../chat/context-providers/relational-pol
 import { useChatSessionStore } from '../chat/session-store'
 import { useMemoryStore } from '../memory'
 import { useMindStore } from './mind'
+
+/**
+ * Why the loop is quiet, kept per character.
+ *
+ * In memory this answered nothing: every restart wiped it, and a silent companion has no other
+ * surface. It is written on every refusal and every utterance. It lives at module scope so the
+ * settings page can read the persisted copy from its own window, where the ticker never runs.
+ */
+const DIAGNOSTICS_KEY = 'castalia/self-initiated-diagnostics'
+
+export interface LoopDiagnostics {
+  lastReason?: string
+  lastReasonAt?: number
+  lastSpokeAt?: number
+  /** 上一次她仍然问「你在忙吗」的时刻。感知已经能回答的问题被再问一次，要在面板上看得见。 */
+  askedBusyAt?: number
+  /** 开口前那一眼花了多久。超时预算够不够，看这个数，不靠猜。 */
+  lookMs?: number
+  gatedCount: number
+  running: boolean
+  updatedAt?: number
+}
+
+/**
+ * The persisted diagnostics of one character.
+ *
+ * The settings window has its own store instance and never runs the ticker, so `store.diagnostics`
+ * there is the initial empty value — printing it would be a fake green. This reads the copy the
+ * stage window wrote.
+ */
+export function readSelfInitiatedDiagnostics(personaId: string): LoopDiagnostics | null {
+  return readScoped<LoopDiagnostics | null>(DIAGNOSTICS_KEY, personaId, null)
+}
 
 /**
  * Lets the character open a turn without an owner message.
@@ -100,8 +134,20 @@ export const useSelfInitiatedSpeechStore = defineStore('self-initiated-speech', 
   let blockedUntil = 0
   /** When the last "no input this tick" reason was written. One a minute is enough to read. */
   let lastSkipSavedAt = 0
+  /** 上一个落盘的拒绝理由，与它的时间：同一理由连续成立时不再每秒落盘。 */
+  let lastGatedReason = ''
+  let lastGatedSavedAt = 0
+  /** 冷却从哪一刻开始：只有比它更新的「可以说话」才能提前解除这段冷却。 */
+  let blockedAt = 0
   /** How long a refusal from the screen holds before she looks again. */
   const SCREEN_BLOCK_RECHECK_MS = 5 * 60_000
+  /**
+   * 一次发送失败之后的冷却。
+   *
+   * 失败现在不计入节奏（没送出去就不算说过），所以必须另给一段冷却：不然 provider
+   * 持续报错时，她会每秒重试一次，白烧请求。
+   */
+  const SEND_FAILED_RETRY_MS = 5 * 60_000
   /** Topic of the message the current tick would send. It comes from the tick's own read. */
   let currentTopic = 'idle'
   /** Why the last tick stayed silent. The diagnostics page reads it. */
@@ -115,28 +161,6 @@ export const useSelfInitiatedSpeechStore = defineStore('self-initiated-speech', 
    * with it. Past this budget she speaks on what she already knows and records that the look was late.
    */
   const LOOK_BUDGET_MS = 20_000
-  /**
-   * A screen verdict only describes the moment it was taken.
-   *
-   * Vision can fail for hours. Holding the last `false` would keep her quiet with nothing left to
-   * refresh it, so an old verdict stops counting as a refusal.
-   */
-  const SCREEN_VERDICT_TTL_MS = 15 * 60_000
-  /**
-   * Why the loop is quiet, kept per character.
-   *
-   * In memory this answered nothing: every restart wiped it, and a silent companion has no other
-   * surface. It is written on every refusal and every utterance.
-   */
-  const DIAGNOSTICS_KEY = 'castalia/self-initiated-diagnostics'
-  interface LoopDiagnostics {
-    lastReason?: string
-    lastReasonAt?: number
-    lastSpokeAt?: number
-    gatedCount: number
-    running: boolean
-    updatedAt?: number
-  }
   const diagnostics = ref<LoopDiagnostics>({ gatedCount: 0, running: false })
   let diagnosticsPersona = ''
 
@@ -149,19 +173,21 @@ export const useSelfInitiatedSpeechStore = defineStore('self-initiated-speech', 
       lastReason: saved?.lastReason,
       lastReasonAt: saved?.lastReasonAt,
       lastSpokeAt: saved?.lastSpokeAt,
+      askedBusyAt: saved?.askedBusyAt,
+      lookMs: saved?.lookMs,
       updatedAt: saved?.updatedAt,
       gatedCount: Number(saved?.gatedCount ?? 0),
       running: false,
     }
+    // 计数也要接着上次的来：只读进 `diagnostics` 而不回填 ref，重启后第一次拒绝会把
+    // 持久化的总数覆盖成 1。
+    gatedCount.value = diagnostics.value.gatedCount
   }
   function saveDiagnostics(patch: Partial<LoopDiagnostics>) {
     diagnostics.value = { ...diagnostics.value, ...patch, updatedAt: Date.now() }
     writeScoped(DIAGNOSTICS_KEY, diagnosticsPersona || currentPersona, diagnostics.value)
   }
   /** Whether the screen verdict still describes this moment. */
-  function screenVerdictIsFresh(mind: { interruptVerdictAt?: number }, now: number) {
-    return typeof mind.interruptVerdictAt === 'number' && now - mind.interruptVerdictAt < SCREEN_VERDICT_TTL_MS
-  }
 
   /** Opens the ticker in this window. Only a window that holds the election calls it. */
   function beginTicker() {
@@ -192,7 +218,15 @@ export const useSelfInitiatedSpeechStore = defineStore('self-initiated-speech', 
         }
         // A screen that just told her to stay quiet holds these ticks: no reads, no decision, no look.
         if (now < blockedUntil) {
-          return skip('screen-hold')
+          // 买断只在「那一句仍然成立」时有效。定时扫视或别处刚看过一眼、而且说可以说话，
+          // 就没有理由让她按五分钟前的结论继续闭嘴；更新时间的比较保证不会用旧 `free` 解冻。
+          const mind = useMindStore()
+          // `>=`：同一毫秒内先被判定买断、随后那一眼说可以说话，也算「更新」；被买断的
+          // 那一句只可能是 away/busy，所以同一时间戳上的 free 必然来自另一次判断。
+          const fresh = mind.interruptionNow().level === 'free' && (mind.interruptVerdictAt ?? 0) >= blockedAt
+          if (!fresh)
+            return skip('screen-hold')
+          blockedUntil = 0
         }
         const sessionId = chatSession.activeSessionId
         const cardId = sessionId ? chatSession.sessionMetas[sessionId]?.characterId : undefined
@@ -208,7 +242,7 @@ export const useSelfInitiatedSpeechStore = defineStore('self-initiated-speech', 
 
         // Castalia records the drives under the persona that chats, not under the card id: a card id and a bank
         // persona are two names for one character (`default` reads `airi`). Reading the card id returned an empty
-        // state for every card whose persona differs, so the drives never reached the decision.
+        // state whenever the two differ, so the drives never reached the decision.
         const personaId = memory.enabled ? memory.resolvePersona(cardId) : cardId
         const snapshot = castalia.snapshotFor(personaId)
         const messages = chatSession.getSessionMessagesIfLoaded(sessionId)
@@ -246,16 +280,29 @@ export const useSelfInitiatedSpeechStore = defineStore('self-initiated-speech', 
         const mind = useMindStore()
         if (mind.asleep || mind.napping)
           return { allow: false, reason: mind.asleep ? 'sleeping' : 'napping' }
-        // Only a verdict taken a moment ago is a refusal. An old one means vision stopped answering,
-        // which is not the same as the owner being busy.
-        if (!mind.interruptAllowed && screenVerdictIsFresh(mind, now))
-          return { allow: false, reason: `screen:${mind.interruptReason ?? 'busy'}` }
-        return { allow: true, reason: verdict.reason }
+        // 一处裁决，两路证据：锁屏/长时间空闲（廉价路）与视觉那一句（昂贵路）。
+        // `away` 和 `busy` 都不出声；`unknown` 放行，但上下文里写明不许问「你在忙吗」。
+        const interruption = mind.interruptionNow()
+        if (interruption.level === 'away' || interruption.level === 'busy') {
+          // 一句话就把接下来五分钟买断：没有这一步，「到点了」会每秒成立一次，
+          // 每秒跑一遍 snapshot/话题计算，再每秒拒绝一次。开口路径同样这么买断。
+          blockedUntil = now + SCREEN_BLOCK_RECHECK_MS
+          blockedAt = now
+          return { allow: false, reason: `screen:${interruption.reason ?? interruption.level}` }
+        }
+        return { allow: true, reason: interruption.reason ?? verdict.reason }
       },
       onGated: (verdict) => {
-        gatedCount.value += 1
         lastGateReason.value = verdict.reason
-        saveDiagnostics({ gatedCount: gatedCount.value, lastReason: verdict.reason, lastReasonAt: Date.now(), running: true })
+        // 一秒一跳：同一个理由会连续成立几百次。按「事件」记，不按 tick 记，
+        // 否则计数每天上万，`localStorage` 还会被每秒同步写一次。
+        const now = Date.now()
+        if (verdict.reason === lastGatedReason && now - lastGatedSavedAt < 60_000)
+          return
+        lastGatedReason = verdict.reason
+        lastGatedSavedAt = now
+        gatedCount.value += 1
+        saveDiagnostics({ gatedCount: gatedCount.value, lastReason: verdict.reason, lastReasonAt: now, running: true })
       },
       onStuck: () => {
         lastGateReason.value = 'speak-timeout'
@@ -267,32 +314,36 @@ export const useSelfInitiatedSpeechStore = defineStore('self-initiated-speech', 
           return
         }
         const mind = useMindStore()
-        const now = Date.now()
         // 要开口的这一刻再看一眼屏幕。上一次 glance 可能是几分钟前的，回答的是「刚才能不能打扰」，
         // 不是现在：人可能已经走开、换了事，或者正被全屏挡着。看的结果同时也刷新了下面那段
-        // innerContextLine 里的「你此刻看到」，所以她不会拿旧画面去推断主人在干什么。
+        // innerContextLine 里的裁决，所以她不会拿旧画面去推断主人在干什么。
         // Bounded: a look that never returns must not take the loop with it.
+        const lookStartedAt = Date.now()
         const looked = await Promise.race([
           mind.lookAround({ force: true }).then(() => 'done' as const).catch(() => 'failed' as const),
           new Promise<'timeout'>(resolve => setTimeout(resolve, LOOK_BUDGET_MS, 'timeout')),
         ])
+        // 看完之后重新取时间：`now` 是看一眼之前的，用它算裁决等于用旧答案。
+        const now = Date.now()
         if (looked === 'timeout')
-          saveDiagnostics({ lastReason: 'look-timeout', lastReasonAt: Date.now() })
-        if (!mind.interruptAllowed && screenVerdictIsFresh(mind, now)) {
-          // 没发出去就不记账：pace 不动，也不占用这次开口。屏幕上不方便时先安静一会儿，不是每秒重试。
+          saveDiagnostics({ lastReason: 'look-timeout', lastReasonAt: now, lookMs: now - lookStartedAt })
+        // 只认这一眼之后产生的裁决：超时、或视觉只回了描述没回裁决时，
+        // 几分钟前的 `free` 不能当作「他现在不忙」的许可。
+        const interruption = mind.interruptionSince(lookStartedAt)
+        // 看完仍说不了话：锁屏/走开、或者屏幕在开会。没发出去就不记账——pace 不动，
+        // 也不占用这次开口；先安静五分钟，而不是每秒再抓一次屏。
+        if (interruption.level === 'away' || interruption.level === 'busy') {
           blockedUntil = now + SCREEN_BLOCK_RECHECK_MS
-          lastGateReason.value = `screen:${mind.interruptReason ?? 'busy'}`
+          blockedAt = now
+          lastGateReason.value = `screen:${interruption.reason ?? interruption.level}`
           saveDiagnostics({ lastReason: lastGateReason.value, lastReasonAt: now })
           return
         }
         blockedUntil = 0
-        outbound = recordOutbound(outbound, { now, hour: new Date(now).getHours(), topic: currentTopic })
-        saveOutbound(currentPersona, outbound)
         lastGateReason.value = undefined
-        saveDiagnostics({ lastReason: 'sent', lastReasonAt: now, lastSpokeAt: now, gatedCount: gatedCount.value, running: true })
         // 状态机自己的上下文：把「刚才在心里想什么 / 此刻看到什么 / 现在的状态」一起带上。
         // 不带的话，她每次主动开口都像凭空冒一句，和自己那串自言自语接不上。
-        const context = mind.innerContextLine(3)
+        const context = mind.innerContextLine(3, { minAgeMs: now - lookStartedAt })
         const text = context
           ? `${SELF_INITIATED_NOTICE}
 
@@ -301,9 +352,27 @@ ${context}`
         const sent = await chat.notifyConversation(sessionId, { source: SELF_INITIATED_SOURCE, text })
         // Only a delivered line counts. A gated or failed send says nothing, and a line that does
         // not repeat a thought leaves every thought private.
-        if (!sent?.ok || !sent.text)
+        if (!sent?.ok || !sent.text) {
+          // 没送到就不是「说了」：不推后 `lastSentAt`、不记话题、不算 unanswered。
+          // 旧代码在发送之前记账，一次失败也照样消耗掉一小时的间隔。
+          blockedUntil = now + SEND_FAILED_RETRY_MS
+          blockedAt = now
+          saveDiagnostics({ lastReason: 'send-failed', lastReasonAt: Date.now(), lookMs: now - lookStartedAt })
           return
+        }
+        // 真的送出去了才记账。时间取送达那一刻，不用看一眼之前的 `now`。
+        const sentAt = Date.now()
+        outbound = recordOutbound(outbound, { now: sentAt, hour: new Date(sentAt).getHours(), topic: currentTopic }, { random: Math.random })
+        saveOutbound(currentPersona, outbound)
+        saveDiagnostics({ lastReason: 'sent', lastReasonAt: sentAt, lastSpokeAt: sentAt, lookMs: sentAt - lookStartedAt, gatedCount: gatedCount.value, running: true })
+        // 弱模型仍可能问「你在忙吗」。不拦、不改写已经生成的话，但要留下证据：
+        // 这一句本该由感知回答，它出现在诊断里就说明上下文还没压住模型。
+        // `free` 除外：她看得见主人不忙，问这一句只是习惯用语，不算猜错。
+        if (interruption.level !== 'free' && asksIfBusy(sent.text))
+          saveDiagnostics({ lastReason: 'asked-busy', lastReasonAt: sentAt, askedBusyAt: sentAt })
         mind.markSaidOutLoud(sent.text)
+        // 说过一次就把无聊付掉：不然下一跳仍读到满格，每 10 分钟又想开口、又抓一次屏。
+        mind.relieveAfterSpeaking()
         // Reaching out and getting an answer is an event in her state, not only a log line. A
         // shared video's answer lands the same way (`feedbackEffect`); this is the speech half:
         // one mood entry where the prompt and the panel both read it.
@@ -357,6 +426,12 @@ ${context}`
     lastOwnerAt = null
     gatedCount.value = 0
     lastGateReason.value = undefined
+    // 重置也要放掉「屏幕说忙」的买断与落盘节流，否则重置后第一跳会被旧冷却继续按住，
+    // 而且同一个理由在 60 秒内不会再记一次。
+    blockedUntil = 0
+    blockedAt = 0
+    lastGatedReason = ''
+    lastGatedSavedAt = 0
   }
 
   return {

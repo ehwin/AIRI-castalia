@@ -1,13 +1,10 @@
 name: CI
+# NOTICE:
+# 本工作流来自上游 AIRI，矩阵覆盖整个 monorepo（含浏览器/端到端项目）。
+# 本 fork 的 CI 只跑改动包的检查，见 fork-ci.yml。
+# 保留本文件便于与上游对齐；这里改为手动触发，避免 fork 的 main 一推就红。
+# 与上游重新同步时，这个 on: 块会冲突，按需要取舍。
 on:
-  push:
-    branches:
-      - main
-
-  pull_request:
-    branches:
-      - main
-
   workflow_dispatch:
 
 jobs:

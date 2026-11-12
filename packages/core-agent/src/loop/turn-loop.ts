@@ -14,10 +14,10 @@ import type { StepRecord } from './session-log'
 
 import { emptyMemory } from './ports'
 
-export type LoopMessage =
-  | { role: 'user', content: string }
-  | { role: 'assistant', content: string, toolCalls: ToolCall[] }
-  | { role: 'tool', callId: string, content: string, failed?: boolean }
+export type LoopMessage
+  = | { role: 'user', content: string }
+    | { role: 'assistant', content: string, toolCalls: ToolCall[] }
+    | { role: 'tool', callId: string, content: string, failed?: boolean }
 
 export interface LoopPolicy {
   /** Model calls allowed in one turn. */
@@ -33,14 +33,14 @@ export const defaultLoopPolicy: LoopPolicy = {
 
 export type LoopFinish = 'ok' | 'budget' | 'cancelled' | 'error'
 
-export type LoopEvent =
-  | { type: 'user-said', text: string }
-  | { type: 'model-replied', text: string, toolCalls: ToolCall[] }
-  | { type: 'tool-settled', callId: string, output: string }
-  | { type: 'tool-failed', callId: string, error: string }
-  | { type: 'request-header', model: string, tools: string[] }
-  | { type: 'model-failed', error: string }
-  | { type: 'cancelled' }
+export type LoopEvent
+  = | { type: 'user-said', text: string }
+    | { type: 'model-replied', text: string, toolCalls: ToolCall[] }
+    | { type: 'tool-settled', callId: string, output: string }
+    | { type: 'tool-failed', callId: string, error: string }
+    | { type: 'request-header', model: string, tools: string[] }
+    | { type: 'model-failed', error: string }
+    | { type: 'cancelled' }
 
 export interface LoopState {
   messages: LoopMessage[]
@@ -50,19 +50,21 @@ export interface LoopState {
   finished?: LoopFinish
 }
 
-export type LoopEffect =
-  | { type: 'call-model', messages: LoopMessage[] }
-  | { type: 'run-tool', call: ToolCall }
-  | { type: 'finish', reason: LoopFinish, messages: LoopMessage[] }
+export type LoopEffect
+  = | { type: 'call-model', messages: LoopMessage[] }
+    | { type: 'run-tool', call: ToolCall }
+    | { type: 'finish', reason: LoopFinish, messages: LoopMessage[] }
 
 export function createState(): LoopState {
   return { messages: [], rounds: 0, toolCalls: 0, pending: [] }
 }
 
-const finish = (state: LoopState, reason: LoopFinish): { state: LoopState, effects: LoopEffect[] } => ({
-  state: { ...state, pending: [], finished: reason },
-  effects: [{ type: 'finish', reason, messages: state.messages }],
-})
+function finish(state: LoopState, reason: LoopFinish): { state: LoopState, effects: LoopEffect[] } {
+  return {
+    state: { ...state, pending: [], finished: reason },
+    effects: [{ type: 'finish', reason, messages: state.messages }],
+  }
+}
 
 /**
  * Advances the loop by one event.
@@ -163,7 +165,7 @@ export interface TurnResult {
   record: StepRecord[]
 }
 
-const lastAssistantText = (messages: LoopMessage[]) => {
+function lastAssistantText(messages: LoopMessage[]) {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i]
     if (message.role === 'assistant' && message.content)

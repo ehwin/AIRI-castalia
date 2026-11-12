@@ -108,7 +108,7 @@ export function saveTuning(
   patch: Record<string, string | number | boolean | null>,
 ): CastaliaTuningSnapshot {
   const config = readConfigFile(userDataDir)
-  const stored = { ...(config.tuning ?? {}) }
+  const stored = { ...config.tuning }
   const before = { ...stored }
 
   const { values: accepted, rejected: invalid } = coerceTuning(patch)

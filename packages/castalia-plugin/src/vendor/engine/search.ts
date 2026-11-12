@@ -720,7 +720,7 @@ const QUERY_STOP_WORDS = new Set(['的', '了', '是', '我', '你', '他', '她
  */
 export function queryTerms(query: string, max = 16): string[] {
   const out = new Set<string>();
-  for (const raw of String(query ?? '').split(/[\s,，。！？、；：""''（）()\[\]【】\-\/\\|]+/)) {
+  for (const raw of String(query ?? '').split(/[\s,，。！？、；：""''（）()[\]【】\-/\\|]+/)) {
     const seg = raw.trim();
     if (seg.length < 2) continue;
     if (!/[\u4e00-\u9fff]/.test(seg)) out.add(seg);

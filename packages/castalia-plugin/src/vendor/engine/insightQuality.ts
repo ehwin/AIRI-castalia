@@ -226,7 +226,7 @@ export function evaluateInsight(input: {
   srcImportance?: number;
   policy?: QualityPolicy;
 }): QualityVerdict {
-  const p = { minNovelty: 0.3, dupJaccard: 0.7, dupContainment: 0.8, minEvidenceChars: 4, ...(input.policy || {}) };
+  const p = { minNovelty: 0.3, dupJaccard: 0.7, dupContainment: 0.8, minEvidenceChars: 4, ...input.policy };
   const reasons: string[] = [];
   const text = String(input.text || '').trim();
   const srcConcat = (input.sources || []).map(s => s.text).join('\n');

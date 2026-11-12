@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { Alert, ErrorContainer, RadioCardManySelect, RadioCardSimple } from '@proj-airi/stage-ui/components'
 import { useAiriCardStore } from '@proj-airi/stage-ui/stores/modules/airi-card'
-import { useConsciousnessStore } from '@proj-airi/stage-ui/stores/modules/consciousness'
+import { MODEL_PARAM_PRESETS, useConsciousnessStore } from '@proj-airi/stage-ui/stores/modules/consciousness'
 import { useConsciousnessSettingsStore } from '@proj-airi/stage-ui/stores/modules/consciousness-settings'
 import { useProviderConfigStore } from '@proj-airi/stage-ui/stores/providers/config'
 import { useProviderStore } from '@proj-airi/stage-ui/stores/providers/provider'
 import { FieldCheckbox, FieldRange, SettingsCard } from '@proj-airi/ui'
 import { storeToRefs } from 'pinia'
-import { watch } from 'vue'
+import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 
@@ -34,7 +34,42 @@ const {
   activeProviderModelError,
   temperature,
   topP,
+  activeParamPreset,
+  activeTemperature,
+  activeTopP,
 } = storeToRefs(consciousnessStore)
+
+/** 两套参数的实际值 + 哪一套正被当前模型使用。 */
+const paramPresetRows = computed(() => MODEL_PARAM_PRESETS.map((preset) => {
+  // 读「当前模型在这个家族里的那份」，读不到才是家族起点。手改坏的 localStorage
+  // 由 store 的 `readParamPreset` 兜住，面板不再自己解析一遍。
+  const entry = consciousnessStore.paramPresetFor(preset.id, activeModel.value ?? '')
+  return {
+    id: preset.id,
+    label: preset.label,
+    values: {
+      temperature: entry.values.temperature,
+      topP: entry.values.topP,
+    },
+    scope: entry.scope,
+    active: activeParamPreset.value?.id === preset.id,
+  }
+}))
+
+/**
+ * 请求真正会带上的采样参数。
+ *
+ * 读的是 `activeTemperature`/`activeTopP`——chat 发请求时读的也是这两个。面板因此
+ * 显示的是「生效值」，不是「存了一个数」。
+ */
+const effectiveSamplingText = computed(() => {
+  const parts: string[] = []
+  if (activeTemperature.value !== undefined)
+    parts.push(`temperature=${activeTemperature.value.toFixed(2)}`)
+  if (activeTopP.value !== undefined)
+    parts.push(`top_p=${activeTopP.value.toFixed(2)}`)
+  return parts.join(' · ')
+})
 
 const { t } = useI18n()
 watch(activeProvider, async (provider) => {
@@ -362,6 +397,79 @@ async function updateTopPEnabled(value: boolean) {
         :step="0.1"
         :format-value="value => value.toFixed(1)"
       />
+    </div>
+  </SettingsCard>
+
+  <!--
+    两套采样参数：一套给 DeepSeek，一套给 MiniMax。
+    这里不复制一份「生效值」——上面两个滑杆就是请求读的那一份，所以列表里的数字、
+    「正在使用」徽标和下面这行「请求实际带上」都能互相验证，不是画给人看的。
+  -->
+  <SettingsCard v-if="activeProvider" class="mt-4">
+    <div :class="['flex', 'flex-col', 'gap-4']">
+      <div>
+        <h2 :class="['text-lg', 'text-neutral-500', 'md:text-2xl', 'dark:text-neutral-400']">
+          {{ t('settings.pages.modules.consciousness.sections.section.param-presets.title') }}
+        </h2>
+        <div text="neutral-400 dark:neutral-400">
+          <span>{{ t('settings.pages.modules.consciousness.sections.section.param-presets.description') }}</span>
+        </div>
+        <div text="neutral-400 dark:neutral-400">
+          <span>{{ t('settings.pages.modules.consciousness.sections.section.param-presets.per-model', { model: activeModel || '—' }) }}</span>
+        </div>
+      </div>
+
+      <div
+        v-for="row in paramPresetRows"
+        :key="row.id"
+        :class="['flex', 'flex-col', 'gap-2', 'rounded-lg', 'border', 'border-neutral-200', 'p-3', 'dark:border-neutral-800']"
+      >
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-sm font-medium">{{ row.label }}</span>
+          <span
+            v-if="row.active"
+            :class="['rounded', 'bg-primary-100', 'px-2', 'py-0.5', 'text-xs', 'text-primary-700', 'dark:bg-primary-900/40', 'dark:text-primary-300']"
+          >
+            {{ t('settings.pages.modules.consciousness.sections.section.param-presets.active') }}
+          </span>
+        </div>
+        <div :class="['text-xs', 'text-neutral-500', 'dark:text-neutral-400']">
+          temperature {{ row.values.temperature.toFixed(2) }} · top_p {{ row.values.topP.toFixed(2) }}
+          <span class="ml-2">
+            {{ row.scope === 'model'
+              ? t('settings.pages.modules.consciousness.sections.section.param-presets.scope-model')
+              : t('settings.pages.modules.consciousness.sections.section.param-presets.scope-default') }}
+          </span>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button
+            type="button"
+            :class="['rounded', 'bg-neutral-100', 'px-2', 'py-1', 'text-xs', 'text-neutral-600', 'transition-colors', 'hover:bg-neutral-200', 'dark:bg-neutral-800/60', 'dark:text-neutral-300', 'dark:hover:bg-neutral-700/60']"
+            @click="consciousnessStore.applyParamPreset(row.id)"
+          >
+            {{ t('settings.pages.modules.consciousness.sections.section.param-presets.apply') }}
+          </button>
+          <button
+            type="button"
+            :class="['rounded', 'bg-neutral-100', 'px-2', 'py-1', 'text-xs', 'text-neutral-600', 'transition-colors', 'hover:bg-neutral-200', 'dark:bg-neutral-800/60', 'dark:text-neutral-300', 'dark:hover:bg-neutral-700/60']"
+            @click="consciousnessStore.saveParamPresetFromCurrent(row.id)"
+          >
+            {{ t('settings.pages.modules.consciousness.sections.section.param-presets.save-current') }}
+          </button>
+        </div>
+      </div>
+
+      <div :class="['text-xs', 'text-neutral-500', 'dark:text-neutral-400']">
+        <span v-if="activeParamPreset && effectiveSamplingText">
+          {{ t('settings.pages.modules.consciousness.sections.section.param-presets.effective', { values: effectiveSamplingText }) }}
+        </span>
+        <span v-else-if="activeParamPreset">
+          {{ t('settings.pages.modules.consciousness.sections.section.param-presets.effective-off') }}
+        </span>
+        <span v-else>
+          {{ t('settings.pages.modules.consciousness.sections.section.param-presets.none') }}
+        </span>
+      </div>
     </div>
   </SettingsCard>
 

@@ -39,6 +39,7 @@ export type VideoDepth = 'skim' | 'read' | 'deep'
 export const VIDEO_TOOLSET_PROMPT = `You can watch a video with the built-in video tools.
 When the user asks about a specific video, or hands you a link, file or bilibili id:
 - call \`${VIDEO_PROBE_TOOL_NAME}\` first: it returns the duration, the resolution, and whether a text track exists;
+- a multi-part bilibili video (分P/合集) is one part at a time: when the probe reports \`part\`, \`durationSeconds\` is that part only, and adding \`?p=N\` to the link reads part N;
 - call \`${VIDEO_OUTLINE_TOOL_NAME}\` when \`hasTextTrack\` is true: it returns the speech as \`[mm:ss]\` rows, which is the cheapest and the only quotable part of a video;
 - call \`${VIDEO_STORYBOARD_TOOL_NAME}\` for one contact sheet of the whole clip, and read the cell index against the timecodes it returns;
 - call \`${VIDEO_ZOOM_TOOL_NAME}\` only when the answer needs a moment you cannot see at sheet resolution. Each zoom is an extra image.
@@ -69,6 +70,13 @@ export interface VideoProbe {
   hasClosedCaptions?: boolean
   /** `bilibili:BV…` for a link, else the local path or URL that was read. */
   source: string
+  /**
+   * Set when the link is one part of a multi-part bilibili video (分P/合集).
+   *
+   * Such a video is read one part at a time: `durationSeconds` is the part's own length, and
+   * `?p=N` on the link reads part N.
+   */
+  part?: { index: number, count: number, title?: string }
   /** `true` when the answer came from a cache: a sprite, or a rendered sheet. */
   cached: boolean
 }

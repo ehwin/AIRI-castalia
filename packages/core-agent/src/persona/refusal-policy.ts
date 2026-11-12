@@ -12,7 +12,7 @@
 import type { Drives } from '../mind/drives'
 import type { RequestTraitsWithKind } from './request-traits'
 
-import { assessFriction, applyFriction } from './friction'
+import { applyFriction, assessFriction } from './friction'
 
 export interface RefusalPolicy {
   /** Asking again within this window counts as insisting. */
@@ -63,7 +63,7 @@ export interface RefusalDecision {
  * A prefix collides whenever two chores start with the same pasted block, and a
  * collision would read as "the owner asked again" when they asked something else.
  */
-const keyOf = (text: string) => {
+function keyOf(text: string) {
   const normalized = text.trim().toLowerCase().replace(/\s+/g, ' ')
   let hash = 5381
   for (let index = 0; index < normalized.length; index++)

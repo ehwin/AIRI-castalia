@@ -615,6 +615,18 @@ pages:
             top_p_description: 控制模型输出的多样性（核采样）。较低的值（例如 0.2）会将输出限制在概率较高的词汇；较高的值（例如 1.0）则会包含更广泛的可能性。
             subtitle: 选择一个默认模型
             title: 模型
+          param-presets:
+            title: 参数预设
+            description: 每个模型存一套采样参数。切到这个模型时恢复它自己的值；上面的滑杆仍是请求读取的那一份。
+            per-model: '参数按模型分别保存。下面两个按钮写入当前模型：{model}。'
+            scope-model: 当前模型的值
+            scope-default: 家族起点
+            active: 正在使用
+            apply: 套用这套
+            save-current: 把当前值存进这套
+            effective: '请求实际带上：{values}'
+            effective-off: 请求不带采样覆盖，因为两个开关都关着。
+            none: 没有与当前模型匹配的预设，上面的滑杆原样生效。
           model-options:
             title: 模型选项
             thinking:
@@ -998,6 +1010,11 @@ pages:
       self-initiated: 主动发言
       self-initiated-empty: 还没有记录
       self-initiated-last: 上次 {reason}（{at}），累计被挡 {count} 次
+      system-presence: '系统读数：{state}，空闲 {seconds} 秒'
+      system-presence-unknown: '系统读数：读不到'
+      asked-busy: '上次她仍在问「你在忙吗」：{at}。这一问本来该由屏幕回答，出现它说明提示词还没压住模型。'
+      asked-busy-none: '加上这项之后，她还没有问过「你在忙吗」。'
+      look-latency: '开口前看一眼耗时：{ms} 毫秒。'
       backend-truncated: 只读到 {listed} 条：列表撞到上限，这不是整个库。
       short-term-memory: 短期记忆
       short-term-memory-description: 下一轮对话会带入的最近心情事件。

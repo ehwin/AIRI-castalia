@@ -267,8 +267,8 @@ const PERSONAL_PATTERN = /我最近|我其实|说实话|跟你说|i've been|to b
 // A farewell is a verb the user is leaving to do, plus a marker that they are
 // going now. Neither half alone is enough: "我在学习函数渐近线" has the verb and no
 // marker, "我觉得还行" has neither.
-const CLOSING_VERB_PATTERN = /睡|洗澡|做饭|复习|背|学习|写|出门|上班|收拾|躺|忙|睡午觉/
-const CLOSING_MARK_PATTERN = /我(得|要|先|去|该|继续)|得先|得准备|不聊了|先不聊|先这样|就到这|到这儿|回头聊|拜拜|晚安|挂了|下线|算了|好了|该走了/
+const CLOSING_VERB_PATTERN = /[睡背写躺忙]|洗澡|做饭|复习|学习|出门|上班|收拾|睡午觉/
+const CLOSING_MARK_PATTERN = /我([得要先去该]|继续)|得先|得准备|不聊了|先不聊|先这样|就到这|到这儿|回头聊|拜拜|晚安|挂了|下线|算了|好了|该走了/
 // Pure closings carry no verb at all.
 const CLOSING_BARE_PATTERN = /^(晚安|拜拜|先这样|不聊了|下线了|挂了|走了|撤了)[。.!！~～]*$/
 

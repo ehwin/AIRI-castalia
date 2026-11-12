@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
-
 import type { Drives } from '../mind/drives'
+
+import { describe, expect, it } from 'vitest'
 
 import { composeThought, defaultLaneConfig } from './background-lane'
 import { createStream, record, sharedRatio } from './inner-stream'

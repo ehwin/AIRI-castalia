@@ -657,6 +657,18 @@ pages:
             top_p_description: Control the diversity of the model's output via nucleus sampling. A lower value (e.g. 0.2) limits the output to only high-probability tokens, while a higher value (e.g. 1.0) includes a broader set of possibilities.
             subtitle: Select a default model from the provider
             title: Model
+          param-presets:
+            title: Parameter presets
+            description: One saved sampling set per model. Switching the model restores its own values, and the sliders above stay the single source that the request reads.
+            per-model: 'Values are stored per model. The two buttons below write to the current model: {model}.'
+            scope-model: Stored for this model
+            scope-default: Family default
+            active: In use
+            apply: Apply this set
+            save-current: Save current values here
+            effective: 'The request sends: {values}'
+            effective-off: The request sends no sampling override, because both switches are off.
+            none: No preset matches this model. The sliders above apply as they are.
           model-options:
             title: Model options
             thinking:
@@ -1049,6 +1061,11 @@ pages:
       self-initiated: Self-initiated speech
       self-initiated-empty: no attempt recorded yet
       self-initiated-last: last {reason} at {at}, held back {count} times
+      system-presence: 'System reading: {state}, idle {seconds}s'
+      system-presence-unknown: 'System reading: unreadable'
+      asked-busy: 'The last time she still asked whether you were busy: {at}. The screen can answer that question, so this line means the prompt has not held the model yet.'
+      asked-busy-none: 'She has not asked whether you were busy since this was added.'
+      look-latency: 'The look before she speaks took {ms} ms.'
       backend-truncated: 'Only {listed} entries were read: the list hit its limit, so this is not the whole bank.'
       short-term-memory: Short-term memory
       short-term-memory-description: The recent mood events that the next turn carries.

@@ -155,7 +155,7 @@ $$\text{age} = \frac{t_{\text{eff}} - t_{\text{lastEvidence}}}{3.6\times10^6}\ \
 ```ts
 const scalar = psyche.hasEvidence
   ? (psyche.band === 'neutral' ? 0 : clamp(psyche.vad.valence * 10, -10, 10))
-  : agentState.getSnapshot().currentMood;
+  : agentState.getSnapshot().currentMood
 ```
 
 注入块固定四行，`hasEvidence` 时追加传感器行：

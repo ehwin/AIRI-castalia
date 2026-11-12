@@ -82,6 +82,12 @@ describe('video engine', () => {
     expect(picked.map(cell => cell.atSeconds)).toEqual([80, 120, 160])
   })
 
+  it('draws nothing rather than another window\'s cells when the sprite does not cover the window', () => {
+    // The sprite of a 349 s clip stops at 336 s: a window at 08:00 has no frame of its own, and
+    // labelling part 1's cells with that timecode would be a lie the reply then quotes.
+    expect(pickSpriteCells(sprite, { fromSeconds: 480, toSeconds: 660 }, 4)).toEqual([])
+  })
+
   it('builds one filter graph for the whole sheet', () => {
     const graph = spriteFilterGraph(
       [{ x: 0, y: 0 }, { x: 480, y: 0 }, { x: 960, y: 0 }, { x: 0, y: 270 }],
@@ -222,5 +228,93 @@ describe('video engine captions', () => {
       return
     expect(result.error).toContain('even with the cookie')
     expect(result.error).not.toContain('Fill the bilibili cookie')
+  })
+})
+
+/**
+ * A multi-part video (分P/合集): one id, twelve streams, one cid readable at a time.
+ *
+ * Measured 2026-11-09 on BV1JRx76SE2z: 12 parts, `data.cid` is part 1's cid and `data.duration` is
+ * the sum of every part (3313 s), while part 1 runs 273 s. Reading the collection's numbers made
+ * the probe advertise a 55-minute clip and every window past 04:33 decode a stream that had
+ * already ended, which ffmpeg reports by exiting 0 and writing no file.
+ */
+describe('video engine multi-part', () => {
+  const collection = {
+    bvid: 'BV1JRx76SE2z',
+    cid: 43_126_293_640,
+    title: '【纪录片】月亮 大自然的神秘力量 凭月而行',
+    duration: 3313,
+    videos: 3,
+    dimension: { width: 1920, height: 1080 },
+    pages: [
+      { cid: 43_126_293_640, page: 1, part: '凭月而行 1', duration: 273 },
+      { cid: 43_126_425_101, page: 2, part: '凭月而行 2', duration: 277 },
+      { cid: 43_126_557_109, page: 3, part: '凭月而行 3', duration: 274 },
+    ],
+  }
+  const wbi = {
+    wbi_img: {
+      img_url: 'https://i0.hdslb.com/bfs/wbi/7cd084941338484aae1ad9425b84077c.png',
+      sub_url: 'https://i0.hdslb.com/bfs/wbi/4932caff0ff746eab6f01bf08b70ac45.png',
+    },
+  }
+
+  function fakeCollection() {
+    const requests: string[] = []
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      const url = String(input)
+      requests.push(url)
+      const json = (body: unknown) => ({ ok: true, json: async () => body })
+      if (url.includes('/x/web-interface/nav'))
+        return json({ code: 0, data: wbi })
+      if (url.includes('/x/web-interface/view'))
+        return json({ code: 0, data: collection })
+      if (url.includes('/x/player/wbi/v2'))
+        return json({ code: 0, data: { subtitle: { subtitles: [] } } })
+      throw new Error(`unexpected request ${url}`)
+    }) as unknown as typeof fetch
+    return { fetchImpl, requests }
+  }
+
+  const engineWith = (fetchImpl: typeof fetch) => createVideoEngine({ cacheDir: 'test-cache', ffmpegPath: 'ffmpeg-not-installed', fetchImpl })
+
+  it('reports the part the link names, not the sum of every part', async () => {
+    const { fetchImpl } = fakeCollection()
+    const result = await engineWith(fetchImpl).probe(collection.bvid)
+
+    expect('error' in result).toBe(false)
+    if ('error' in result)
+      return
+    expect(result.durationSeconds).toBe(273)
+    expect(result.part).toMatchObject({ index: 1, count: 3, title: '凭月而行 1' })
+    // She passes this back on the next call, so it has to name the part it came from.
+    expect(result.source).toBe('bilibili:BV1JRx76SE2z?p=1')
+  })
+
+  it('reads the part `?p=` asks for', async () => {
+    const { fetchImpl } = fakeCollection()
+    const result = await engineWith(fetchImpl).probe(`https://www.bilibili.com/video/${collection.bvid}?p=3`)
+
+    expect('error' in result).toBe(false)
+    if ('error' in result)
+      return
+    expect(result.durationSeconds).toBe(274)
+    expect(result.part).toMatchObject({ index: 3, count: 3 })
+    expect(result.source).toBe('bilibili:BV1JRx76SE2z?p=3')
+  })
+
+  it('refuses a window past the end of the part, naming the part and the next `?p=`', async () => {
+    const { fetchImpl, requests } = fakeCollection()
+    const result = await engineWith(fetchImpl).sheet(collection.bvid, { fromSeconds: 480, toSeconds: 660, cells: 4 })
+
+    expect('error' in result).toBe(true)
+    if (!('error' in result))
+      return
+    expect(result.error).toContain('part 1 of 3')
+    expect(result.error).toContain('04:33')
+    expect(result.error).toContain('?p=2')
+    // The refusal comes before the stream is resolved: no seek past the end of the part at all.
+    expect(requests.some(url => url.includes('/x/player/playurl'))).toBe(false)
   })
 })

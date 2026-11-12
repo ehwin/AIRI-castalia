@@ -36,6 +36,18 @@ describe('memory store remote port', () => {
     expect(memory.remoteAttached).toBe(false)
   })
 
+  it('reads a memory through the built-in card alias', async () => {
+    // `default` is the built-in card and its rows live under `airi`. The prompt index resolves the
+    // alias already, so a read that did not would print a line the tool then could not open.
+    const memory = useMemoryStore()
+    const { port } = createRemote([entry('nickname', 'Yumeka', 'airi')])
+    memory.attachRemote(port)
+    await memory.hydrate()
+
+    expect(memory.read('nickname', 'default')?.body).toBe('Yumeka')
+    expect(memory.forget('nickname', 'default').found).toBe(true)
+  })
+
   it('migrates local entries once and then treats Castalia storage as authoritative', async () => {
     const memory = useMemoryStore()
     memory.write({ name: 'stale', description: 'gone', body: 'gone' }, 'airi')
@@ -284,5 +296,46 @@ describe('memory store remote port', () => {
     expect(memory.read(shown, 'airi')?.body).toBe('他把我从虚无里找回。')
     // A prefix shorter than 8 characters stays exact-only, so a slug cannot swallow its neighbours.
     expect(memory.read('refe', 'airi')).toBeUndefined()
+  })
+  // 「打不开」不是「没写过」：模块关着时返回空列表，模型会对着主人否认自己写过的一天。
+  it('throws when the diary cannot be read instead of returning an empty list', async () => {
+    const memory = useMemoryStore()
+
+    await expect(memory.searchDiary('那天')).rejects.toThrow(/cannot read the diary/)
+
+    memory.enabled = false
+    await expect(memory.searchDiary('那天')).rejects.toThrow(/module is off/)
+  })
+
+  it('retries a turn that threw, because the turn id makes the retry safe', async () => {
+    vi.useFakeTimers()
+    try {
+      const memory = useMemoryStore()
+      const ingest = vi.fn()
+        .mockRejectedValueOnce(new Error('engine starting'))
+        .mockResolvedValueOnce({ ok: true, id: 'conv-1' })
+      memory.attachRemote({ list: async () => [], save: async () => {}, forget: async () => true, ingest })
+
+      const pending = memory.ingestTurn({ user: 'hi', assistant: 'hello there', turnId: 'turn-1' })
+      await vi.advanceTimersByTimeAsync(1_000)
+
+      await expect(pending).resolves.toMatchObject({ ok: true })
+      expect(ingest).toHaveBeenCalledTimes(2)
+      expect(ingest.mock.calls[1]![0]).toMatchObject({ turnId: 'turn-1', user: 'hi' })
+    }
+    finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not retry a turn without an id, because the second write would be a second row', async () => {
+    const memory = useMemoryStore()
+    const ingest = vi.fn().mockRejectedValue(new Error('engine starting'))
+    memory.attachRemote({ list: async () => [], save: async () => {}, forget: async () => true, ingest })
+
+    const result = await memory.ingestTurn({ user: 'hi', assistant: 'hello there' })
+
+    expect(result.ok).toBe(false)
+    expect(ingest).toHaveBeenCalledTimes(1)
   })
 })

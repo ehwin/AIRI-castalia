@@ -66,7 +66,7 @@ export function classifyEntityName(raw: string): EntityKind {
   const lower = s.toLowerCase();
   if (/^(user|agent|environment|reference|assistant|system|human|用户|助手|环境|参考|系统|我|你)$/.test(lower)) return 'role';
   if (/:\/\//.test(s) || /^(https?|ftp|ws|wss)\b/.test(lower)) return 'url';
-  if (/^[a-z]:[\\/]/.test(lower) || /^\\\\/.test(s) || /^[a-z]:$/.test(lower)) return 'path';
+  if (/^[a-z]:[\\/]/.test(lower) || s.startsWith('\\\\') || /^[a-z]:$/.test(lower)) return 'path';
   if (/[\\/]/.test(s) && /\.(ts|js|mjs|cjs|json|toml|ya?ml|env|bak|log|db|sqlite|md|py|rs|exe|dll)\b/i.test(s)) return 'path';
   if (/^\.env/i.test(s) || /^[a-z][a-z0-9_]*=/i.test(s)) return 'config';
   if (/^[¥$€]?\d+([.,]\d+)?\s*([a-z%]+(\/[a-z]+)?)?$/i.test(s) && /\d/.test(s)) return 'number';
@@ -79,8 +79,8 @@ export function classifyEntityKey(key: string): EntityKind {
   if (!k) return 'topic';
   if (/^(user|agent|environment|reference|assistant|system|human|用户|助手|环境|参考|系统|我|你)$/.test(k)) return 'role';
   if (/:\/\//.test(k)) return 'url';
-  if (/^[a-z]:[\\/]/.test(k) || /^\\\\/.test(k)) return 'path';
-  if (/^\.env/.test(k) || /^[a-z][a-z0-9_]*=/.test(k)) return 'config';
+  if (/^[a-z]:[\\/]/.test(k) || k.startsWith('\\\\')) return 'path';
+  if (k.startsWith('.env') || /^[a-z][a-z0-9_]*=/.test(k)) return 'config';
   if (/^[¥$€]?\d+([.,]\d+)?\s*([a-z%]+(\/[a-z]+)?)?$/.test(k) && /\d/.test(k)) return 'number';
   return 'topic';
 }

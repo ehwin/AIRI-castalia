@@ -1,7 +1,9 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+
 import { openBank } from './index'
 
 // 运行环境: Node 24 的 node:sqlite + vec0.dll（Electron 主进程同样可用，另见 .cache 下的探针）。
@@ -18,7 +20,8 @@ beforeAll(async () => {
 
 afterAll(() => {
   bank?.close()
-  try { rmSync(dir, { recursive: true, force: true }) } catch {}
+  try { rmSync(dir, { recursive: true, force: true }) }
+  catch {}
 })
 
 describe('in-process bank', () => {
@@ -135,7 +138,7 @@ describe('in-process bank', () => {
 
     const dry = bank.orphanSessions({ aliveSessionIds: ['sess-a'] })
     expect(dry.some(r => r.orphans > 0)).toBe(true)
-    expect(dry.every(r => r.orphaned === 0)).toBe(true)   // 默认 dryRun
+    expect(dry.every(r => r.orphaned === 0)).toBe(true) // 默认 dryRun
 
     const applied = bank.orphanSessions({ aliveSessionIds: ['sess-a'], dryRun: false })
     expect(applied.some(r => r.orphaned > 0)).toBe(true)
@@ -145,8 +148,8 @@ describe('in-process bank', () => {
     const rows = db.prepare('SELECT id, is_active FROM memory WHERE id IN (?,?)').all(a.id, b.id) as any[]
     db.close()
     const byId = new Map(rows.map(r => [r.id, Number(r.is_active)]))
-    expect(byId.get(a.id)).toBe(1)   // 活会话不动
-    expect(byId.get(b.id)).toBe(0)   // 孤儿被软删
+    expect(byId.get(a.id)).toBe(1) // 活会话不动
+    expect(byId.get(b.id)).toBe(0) // 孤儿被软删
   })
 
   it('runs the embedded self-cycle and keeps diary isolated', async () => {
@@ -308,7 +311,7 @@ describe('store tools (memory_store_* port)', () => {
     const recalled = await bank.recallQuery('用户喜欢安安静静的月下散步')
     const injected = (recalled.stats as any)?.ids ?? []
     const afterInjection = read()
-    expect(injected.length).toBeGreaterThan(0)   // 没命中，下面的断言就是空转
+    expect(injected.length).toBeGreaterThan(0) // 没命中，下面的断言就是空转
     for (const row of afterInjection) {
       const old = before.find(b => b.id === row.id)!
       expect(row.accessed_count).toBe(old.accessed_count)
@@ -344,8 +347,10 @@ describe('store tools (memory_store_* port)', () => {
     // 旧行为是继续返回同一个引擎句柄（写入落回 A），比抛错更难查。
     const other = mkdtempSync(join(tmpdir(), 'castalia-bank-other-'))
     await expect(openBank({ bankDir: other, project: 'testproj', charId: 'airi', allowNoConfig: true }))
-      .rejects.toThrow(/不能热切换 bank/)
-    try { rmSync(other, { recursive: true, force: true }) } catch {}
+      .rejects
+      .toThrow(/不能热切换 bank/)
+    try { rmSync(other, { recursive: true, force: true }) }
+    catch {}
   })
 })
 
@@ -453,5 +458,29 @@ describe('a turn the model already judged', () => {
     after.close()
     expect(kept?.affect_status).toBe('analyzed')
     expect(kept?.affect_analyzed_at).toBe(row?.affect_analyzed_at)
+  })
+  // 落库没有幂等键时，一次重试/重放就是两行同样的对话，情绪也会跟着算两次。
+  // 键由宿主给（用户消息 id），引擎按主键忽略第二次写。
+  it('writes one row per turn when the same turn id arrives twice', async () => {
+    const turn = { user: '同一句话', assistant: '只该有一行', turnId: 'turn-dedupe-1', persona: 'airi' }
+
+    const first = await bank.ingestTurn(turn)
+    const second = await bank.ingestTurn(turn)
+
+    expect(first.ok).toBe(true)
+    expect(second.ok).toBe(true)
+    expect(second.id).toBe(first.id)
+    const rows = bank.listMemories(200).filter(row => String(row.text).includes('只该有一行'))
+    expect(rows).toHaveLength(1)
+  })
+
+  it('writes a new row when the caller gives no turn id', async () => {
+    const turn = { user: '没有 id', assistant: '每次都该是新的一行', persona: 'airi' }
+
+    await bank.ingestTurn(turn)
+    await bank.ingestTurn(turn)
+
+    const rows = bank.listMemories(200).filter(row => String(row.text).includes('每次都该是新的一行'))
+    expect(rows).toHaveLength(2)
   })
 })

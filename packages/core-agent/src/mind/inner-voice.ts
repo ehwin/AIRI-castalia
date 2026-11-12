@@ -93,7 +93,7 @@ const BUSY_PATTERNS: Array<[RegExp, string]> = [
   [/代码编辑器|编辑器|ide|vs ?code|cursor|sublime|pycharm|jetbrains/iu, 'a code editor she is working in'],
   [/写文档|文档|笔记|笔记软件|markdown|word|notion|obsidian|语雀|飞书文档/iu, 'a document being written or read'],
   [/阅读|论文|pdf|读书|长文/iu, 'something being read'],
-  [/正在输入|视频渲染|导出中|下载中|进度 \d+%/iu, 'a job still running'],
+  [/正在输入|视频渲染|导出中|下载中|进度 \d+%/u, 'a job still running'],
 ]
 
 export function screenBusy(line: string | undefined): { busy: boolean, reason?: string } {

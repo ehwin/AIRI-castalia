@@ -133,11 +133,19 @@ export interface CastaliaIngestTurnInput {
    * 行落成 analyzed 并带上 VAD，不进 VAD 队列，同一轮不会被自动估计器再算一次。
    */
   affect?: { vad: { valence: number, arousal: number, dominance: number }, reason?: string }
+  /**
+   * 这条用户消息的持久 id。
+   *
+   * 引擎拿它派生行主键，同一轮被重放/重试/两个窗口同时补写都只留一行；缺省时每次新插一行。
+   */
+  turnId?: string
 }
 export interface CastaliaIngestTurnResult {
   ok: boolean
   id?: string
   mode?: string
+  /** 这一行已经存在：这一轮之前落过库，没有重复写。 */
+  deduped?: boolean
   error?: string
 }
 export const castaliaMemoryIngest = defineInvokeEventa<CastaliaIngestTurnResult, CastaliaIngestTurnInput>('eventa:invoke:castalia:memory:ingest')

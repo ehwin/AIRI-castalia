@@ -35,7 +35,7 @@
 - 桌面 channel server：`0.0.0.0:6121`（`hostname` 已从 `127.0.0.1` 改为 `0.0.0.0`）
 - 配置文件：`C:\Users\1\AppData\Roaming\@proj-airi\stage-tamagotchi\server-channel-config.json`
   ```json
-  {"authToken":"a922931e-...","hostname":"0.0.0.0","tlsConfig":null}
+  { "authToken": "a922931e-...", "hostname": "0.0.0.0", "tlsConfig": null }
   ```
   备份在 `server-channel-config.json.bak-002919`
 - 桌面日志：`C:\Users\1\AppData\Roaming\@proj-airi\stage-tamagotchi\logs\*.log`（主进程+server-runtime，**不含 renderer console**）

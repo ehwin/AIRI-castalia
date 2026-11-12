@@ -32,18 +32,26 @@ export function renderStateLine(input: StateLineInput): string {
   const { fatigue, boredom, curiosity, focus } = input.drives
   const parts: string[] = []
 
-  if (fatigue >= 75) parts.push('very tired')
-  else if (fatigue >= 45) parts.push('tired')
+  if (fatigue >= 75)
+    parts.push('very tired')
+  else if (fatigue >= 45)
+    parts.push('tired')
 
-  if (boredom >= 75) parts.push('very bored')
-  else if (boredom >= 45) parts.push('a little bored')
+  if (boredom >= 75)
+    parts.push('very bored')
+  else if (boredom >= 45)
+    parts.push('a little bored')
 
-  if (curiosity >= 45) parts.push('curious about something')
+  if (curiosity >= 45)
+    parts.push('curious about something')
 
-  if (focus >= 60) parts.push('absorbed in work')
+  if (focus >= 60)
+    parts.push('absorbed in work')
 
-  if (input.slept) parts.push('just woke up')
-  if (input.heldBack) parts.push('holding something back')
+  if (input.slept)
+    parts.push('just woke up')
+  if (input.heldBack)
+    parts.push('holding something back')
 
   return parts.slice(0, 3).join(', ')
 }

@@ -451,7 +451,7 @@ export async function saveSelfDiary(params: {
   metadata?: Record<string, unknown>;
 }): Promise<MemoryRecord> {
   const metadata: Record<string, unknown> = {
-    ...(params.metadata || {}),
+    ...params.metadata,
     generated_by: 'self_cycle',
     evidence_ids: Array.from(new Set((params.evidenceIds || []).filter(Boolean))).slice(0, 20),
     state_version: params.stateVersion ?? 1,
@@ -668,11 +668,19 @@ export async function saveConversationTurn(
     source: string
     vad?: { valence: number, arousal: number, dominance: number }
   },
+  /**
+   * 这一轮在持久层的唯一名（用户消息 id）。
+   *
+   * 给了就按它派生主键：同一条消息被重放、两个窗口同时补写、或宿主重试一次，
+   * 都落成同一个 `conv-<turnId>`，`INSERT OR IGNORE` 只留第一行。不给时行为不变。
+   */
+  turnId?: string,
 ): Promise<any> {
   characterId = normalizeCharacterId(characterId);
   const db = DatabaseManager.getInstance(project);
   const now = new Date().toISOString();
-  const id = generateId();
+  // 稳定主键：重复落库是同一个 id，去重交给主键，不靠时间窗或文本比对。
+  const id = turnId && turnId.trim() ? `conv-${turnId.trim()}` : generateId();
   const proj = normalizeProject(project);
 
   let moodPrefix = '';
@@ -686,8 +694,9 @@ export async function saveConversationTurn(
   const text = `${moodPrefix}用户: ${userMsg}\n${assistantName}: ${assistantMsg}`;
 
   const analyzed = initialAffect?.status === 'analyzed';
-  db.prepare(`
-    INSERT INTO memory (id, text, project, type, category, tags, importance, character_id, source, subject, tier, is_active, created_at, updated_at, last_accessed_at, accessed_count, reference_count, affect_status, affect_source, affect_analyzed_at, vad_valence, vad_arousal, vad_dominance)
+  // OR IGNORE：主键撞上就是这一轮已经落过库。重放不该再写一行，也不该再进 VAD 队列。
+  const inserted = db.prepare(`
+    INSERT OR IGNORE INTO memory (id, text, project, type, category, tags, importance, character_id, source, subject, tier, is_active, created_at, updated_at, last_accessed_at, accessed_count, reference_count, affect_status, affect_source, affect_analyzed_at, vad_valence, vad_arousal, vad_dominance)
     VALUES (?, ?, ?, 'episodic', 'conversation', '[]', 0.5, ?, 'conversation_log', 'user', 'standard', 1, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
@@ -710,6 +719,11 @@ export async function saveConversationTurn(
   // id again; queueForVad deduplicates by durable id.
   // A turn that already carries a model verdict must not enter the queue at all:
   // the auto estimator would appraise the same words a second time.
+  // `changes === 0` 就是同一轮重复落库：库里那一行已经带着自己的情感结论，
+  // 再入队会让自动估计器把同一句话算第二次。
+  if (!inserted.changes)
+    return { id, ok: true, deduped: true };
+
   if (!analyzed)
     await enqueueConversationEvidence(text, proj, id, characterId, userMsg, assistantMsg);
 

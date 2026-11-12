@@ -58,7 +58,12 @@ export function toAutonomyInput(args: AdapterArgs): AutonomyInput {
 }
 
 /** The notice text that starts a self-initiated turn. */
-export const SELF_INITIATED_NOTICE = 'A quiet moment passed. Act on your own only if you have something to say or do. Stay silent otherwise.'
+export const SELF_INITIATED_NOTICE = [
+  'A quiet moment passed. Act on your own only if you have something to say or do. Stay silent otherwise.',
+  // 弱模型最容易在这里退回「你在忙吗」：那是把不确定推给主人。她刚看过屏幕（或
+  // 至少知道自己没看见），所以这一问要么多余，要么该由感知来回答。
+  'You already looked at the owner\'s screen. If you saw they are free, say what you wanted. If you could not see, do not ask whether they are busy.',
+].join('\n')
 
 /** The notice source that marks the stored turn. */
 export const SELF_INITIATED_SOURCE = 'self-initiated-speech'

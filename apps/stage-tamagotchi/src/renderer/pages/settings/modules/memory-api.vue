@@ -63,7 +63,7 @@ function toNumber(value: string): number | null | undefined {
  */
 function text(value: string): string | undefined {
   const trimmed = value.trim()
-  return trimmed ? trimmed : undefined
+  return trimmed || undefined
 }
 
 async function load() {

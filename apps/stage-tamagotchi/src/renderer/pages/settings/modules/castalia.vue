@@ -1,17 +1,20 @@
 <script setup lang="ts">
+import type { LoopDiagnostics } from '@proj-airi/stage-ui/stores/modules/self-initiated-speech'
+
 import { useCastaliaPluginStore } from '@proj-airi/castalia-plugin'
 import { ACTIVE_TUNING_GROUPS, ACTIVE_TUNING_PRESETS, ACTIVE_TUNING_SPECS } from '@proj-airi/castalia-plugin/tuning'
 import { useElectronEventaInvoke } from '@proj-airi/electron-vueuse'
 import { useLLM } from '@proj-airi/stage-ui/stores/ai/chat-llm/llm'
 import { useMemoryStore } from '@proj-airi/stage-ui/stores/memory'
 import { useAiriCardStore } from '@proj-airi/stage-ui/stores/modules/airi-card'
-import { useSelfInitiatedSpeechStore } from '@proj-airi/stage-ui/stores/modules/self-initiated-speech'
+import { readSelfInitiatedDiagnostics } from '@proj-airi/stage-ui/stores/modules/self-initiated-speech'
 import { FieldCheckbox, FieldRange, SettingsCard } from '@proj-airi/ui'
 import { storeToRefs } from 'pinia'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { castaliaTuningGet, castaliaTuningSave } from '../../../../shared/eventa/castalia-memory'
+import { systemPresenceGet } from '../../../../shared/eventa/presence'
 
 // NOTICE: 覆盖 stage-pages 的同名页（见 electron.vite.config.ts 的 exclude）。
 // 唯一原因：心智参数面板要调主进程的 eventa（tuning:get/save），而 stage-pages 拿不到 app 的
@@ -26,10 +29,67 @@ const capabilities = computed(() => Object.entries(memory.backend?.capabilities 
 const { enabled, currentMood, currentDesire, currentEnergy, activeCharacterId, moodHistory } = storeToRefs(castalia)
 const { locale, t } = useI18n()
 // 「她为什么不主动开口」在别处没有答案：哨兵在内存里，重启就没。这里读落盘的那份。
-const selfInitiated = useSelfInitiatedSpeechStore()
+// 设置窗口有自己的 store 实例、也不跑 ticker，直接读 `store.diagnostics` 永远是空值——
+// 那会把「没有记录」印成「一切正常」。读 stage 窗口写下的那份才是真读数。
+const selfInitiatedDiagnostics = ref<LoopDiagnostics | null>(null)
+function refreshSelfInitiatedDiagnostics() {
+  const personaId = memory.enabled ? memory.resolvePersona(cards.activeCardId) : cards.activeCardId
+  selfInitiatedDiagnostics.value = readSelfInitiatedDiagnostics(personaId)
+}
+/**
+ * 主进程直读的占用状态。
+ *
+ * 设置窗口不跑心智 tick，`useMindStore().presence` 在这里永远是空的；所以这项不走
+ * store，而是直接问主进程。看到「active / idle 12s」就说明廉价那一路真的接上了。
+ */
+const invokeSystemPresence = useElectronEventaInvoke(systemPresenceGet)
+const presence = ref<{ state: string, idleSeconds: number }>()
+let presenceTimer: ReturnType<typeof setInterval> | undefined
+async function refreshPresence() {
+  try {
+    presence.value = await invokeSystemPresence()
+  }
+  catch {
+    presence.value = undefined
+  }
+}
+onMounted(() => {
+  void refreshPresence()
+  refreshSelfInitiatedDiagnostics()
+  presenceTimer = setInterval(() => {
+    void refreshPresence()
+    refreshSelfInitiatedDiagnostics()
+  }, 5_000)
+})
+onUnmounted(() => {
+  if (presenceTimer)
+    clearInterval(presenceTimer)
+})
+const presenceLine = computed(() => {
+  if (!presence.value)
+    return t('settings.pages.modules.castalia.system-presence-unknown')
+  return t('settings.pages.modules.castalia.system-presence', {
+    state: presence.value.state,
+    seconds: presence.value.idleSeconds,
+  })
+})
+// 「那一眼花了多久」：超时预算够不够，看这个数，不靠猜。
+const lookLine = computed(() => {
+  const ms = selfInitiatedDiagnostics.value?.lookMs
+  return ms ? t('settings.pages.modules.castalia.look-latency', { ms }) : ''
+})
+// 「她还在问你在忙吗」是这条链路唯一诚实的回归信号：问了，就说明上下文没压住模型。
+const askedBusyLine = computed(() => {
+  const at = selfInitiatedDiagnostics.value?.askedBusyAt
+  if (!at)
+    return t('settings.pages.modules.castalia.asked-busy-none')
+  return t('settings.pages.modules.castalia.asked-busy', {
+    at: new Date(at).toLocaleString(locale.value),
+  })
+})
 const selfInitiatedLine = computed(() => {
-  const state = selfInitiated.diagnostics
-  if (!state.lastReasonAt)
+  const state = selfInitiatedDiagnostics.value
+  if (!state?.lastReasonAt)
     return t('settings.pages.modules.castalia.self-initiated-empty')
   const at = new Date(state.lastReasonAt).toLocaleString(locale.value)
   return t('settings.pages.modules.castalia.self-initiated-last', {
@@ -46,9 +106,10 @@ const moodKnown = computed(() =>
   Boolean(castalia.snapshotFor(activeCharacterId.value).vad) || moodHistory.value.length > 0)
 // The chat maps `default` to `airi` before it touches Castalia, so the panel has to ask the same
 // question: reading the raw card id showed an empty `default` partition next to a real `airi` one (F11).
-watch(() => cards.activeCardId, characterId => castalia.setCharacter(
-  memory.enabled ? memory.resolvePersona(characterId) : characterId,
-), { immediate: true })
+watch(() => cards.activeCardId, (characterId) => {
+  castalia.setCharacter(memory.enabled ? memory.resolvePersona(characterId) : characterId)
+  refreshSelfInitiatedDiagnostics()
+}, { immediate: true })
 
 const KEY = 'settings.pages.modules.castalia'
 
@@ -252,6 +313,15 @@ onMounted(() => {
         </p>
         <p class="mt-1 text-xs text-neutral-500">
           {{ t('settings.pages.modules.castalia.self-initiated') }} · {{ selfInitiatedLine }}
+        </p>
+        <p class="mt-1 text-xs text-neutral-500">
+          {{ presenceLine }}
+        </p>
+        <p v-if="lookLine" class="mt-1 text-xs text-neutral-500">
+          {{ lookLine }}
+        </p>
+        <p class="mt-1 text-xs text-neutral-500">
+          {{ askedBusyLine }}
         </p>
         <div v-if="llm.toolsDisabledFor.length" class="mt-2 flex flex-wrap items-center gap-2 text-xs text-amber-600">
           <span>{{ t('settings.pages.modules.castalia.backend-tools-disabled', { models: llm.toolsDisabledFor.join(', ') }) }}</span>

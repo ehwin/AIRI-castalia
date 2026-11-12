@@ -272,3 +272,136 @@ describe('consciousness store provider selection', () => {
     expect(store.activeModel).toBe('auto')
   })
 })
+
+describe('consciousness parameter presets', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    setActivePinia(createPinia())
+  })
+
+  it('applies the DeepSeek set as soon as that model is selected', async () => {
+    const store = useConsciousnessStore()
+    const settings = useConsciousnessSettingsStore()
+
+    store.activeProvider = 'deepseek'
+    store.activeModel = 'deepseek-chat'
+    await nextTick()
+
+    // 预设写的就是请求读的那一份：滑杆值与开关，没有第二份「生效值」。
+    expect(store.temperature).toBe(0.8)
+    expect(store.topP).toBe(0.9)
+    expect(settings.temperatureEnabled).toBe(true)
+    expect(store.activeTemperature).toBe(0.8)
+    expect(store.activeParamPreset?.id).toBe('deepseek')
+  })
+
+  it('keeps one set per family, so switching the model switches the values back', async () => {
+    const store = useConsciousnessStore()
+
+    store.activeProvider = 'deepseek'
+    store.activeModel = 'deepseek-chat'
+    await nextTick()
+    store.temperature = 0.1
+    store.saveParamPresetFromCurrent('deepseek')
+
+    store.activeProvider = 'minimax'
+    store.activeModel = 'minimax-m2'
+    await nextTick()
+    expect(store.temperature).toBe(1)
+
+    store.activeProvider = 'deepseek'
+    store.activeModel = 'deepseek-chat'
+    await nextTick()
+    // 存回 DeepSeek 那套的值还在，没有被 MiniMax 的默认值覆盖。
+    expect(store.temperature).toBe(0.1)
+  })
+
+  it('keeps a separate set for every model, not only for the family', async () => {
+    const store = useConsciousnessStore()
+
+    store.activeProvider = 'deepseek'
+    store.activeModel = 'deepseek-chat'
+    await nextTick()
+    store.temperature = 0.1
+    store.saveParamPresetFromCurrent('deepseek')
+
+    // 同族的另一个模型：先拿家族起点，不拿 deepseek-chat 的值。
+    store.activeModel = 'deepseek-reasoner'
+    await nextTick()
+    expect(store.temperature).toBe(0.8)
+    expect(store.activeParamPresetScope).toBe('default')
+
+    store.temperature = 0.85
+    store.saveParamPresetFromCurrent('deepseek')
+
+    // 切回去：每个模型自己的值都还在。
+    store.activeModel = 'deepseek-chat'
+    await nextTick()
+    expect(store.temperature).toBe(0.1)
+    expect(store.activeParamPresetScope).toBe('model')
+
+    store.activeModel = 'deepseek-reasoner'
+    await nextTick()
+    expect(store.temperature).toBe(0.85)
+  })
+
+  it('migrates the old flat set instead of silently resetting to the family default', async () => {
+    localStorage.clear()
+    localStorage.setItem('settings/consciousness/param-presets', JSON.stringify({
+      deepseek: { temperature: 0.15, topP: 0.8, temperatureEnabled: true, topPEnabled: false },
+    }))
+
+    const store = useConsciousnessStore()
+    store.activeProvider = 'deepseek'
+    store.activeModel = 'deepseek-chat'
+    await nextTick()
+
+    expect(store.temperature).toBe(0.15)
+    expect(store.topP).toBe(0.8)
+    // 旧键迁完就删：留着两份真源，下一次只会更难判断哪份在生效。
+    expect(localStorage.getItem('settings/consciousness/param-presets')).toBeNull()
+    expect(localStorage.getItem('settings/consciousness/param-presets-by-model')).toContain('0.15')
+  })
+
+  it('remembers a switch the user turned off for that model', async () => {
+    const store = useConsciousnessStore()
+    const settings = useConsciousnessSettingsStore()
+
+    store.activeProvider = 'deepseek'
+    store.activeModel = 'deepseek-chat'
+    await nextTick()
+    expect(settings.temperatureEnabled).toBe(true)
+
+    await settings.setTemperatureEnabled(false)
+    await nextTick()
+
+    // 重新套用一次（等价于下次启动时的 immediate watcher）。
+    store.applyParamPreset('deepseek')
+    await nextTick()
+    expect(settings.temperatureEnabled).toBe(false)
+    expect(store.activeTemperature).toBeUndefined()
+  })
+
+  it('matches a model id that runs under another provider', async () => {
+    const store = useConsciousnessStore()
+
+    store.activeProvider = 'volcengine-coding-plan'
+    store.activeModel = 'volcengine-coding-plan/deepseek-v4-flash'
+    await nextTick()
+
+    expect(store.activeParamPreset?.id).toBe('deepseek')
+    expect(store.temperature).toBe(0.8)
+  })
+
+  it('changes nothing when no preset matches', async () => {
+    const store = useConsciousnessStore()
+
+    store.temperature = 0.55
+    store.activeProvider = 'openai'
+    store.activeModel = 'gpt-4o-mini'
+    await nextTick()
+
+    expect(store.activeParamPreset).toBeUndefined()
+    expect(store.temperature).toBe(0.55)
+  })
+})

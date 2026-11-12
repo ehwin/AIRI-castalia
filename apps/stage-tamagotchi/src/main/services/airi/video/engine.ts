@@ -123,8 +123,12 @@ export function pickSpriteCells(
   const all = geometry.seconds.map((atSeconds, index) => ({ atSeconds, index }))
   if (all.length === 0)
     return []
+  // A window that holds no timecode has no frames of its own. Falling back to the whole sprite
+  // drew part 1's cells under a 15:00 label, so an empty pick is the honest answer.
   const inside = all.filter(cell => cell.atSeconds >= window.fromSeconds && cell.atSeconds <= window.toSeconds)
-  const source = inside.length > 0 ? inside : all
+  if (inside.length === 0)
+    return []
+  const source = inside
 
   const picked: Array<{ x: number, y: number, index: number, atSeconds: number }> = []
   for (let slot = 0; slot < cells; slot++) {
@@ -252,16 +256,24 @@ export function createVideoEngine(options: VideoEngineOptions) {
     return join(cacheDir, createHash('sha1').update(source).digest('hex').slice(0, 16))
   }
 
-  /** Reads the `bvid` out of a link, a bare id, a short link target, or an `av` id. */
-  function bilibiliRefOf(source: string): { bvid?: string, avid?: number } | undefined {
+  /**
+   * Reads the `bvid` out of a link, a bare id, a short link target, or an `av` id.
+   *
+   * `page` is the `?p=N` of a link: a multi-part video (分P/合集) is 12 separate streams behind one
+   * id, and this engine reads one cid at a time. Ignoring the parameter made every part answer from
+   * part 1 while `x/web-interface/view` reported the whole collection's duration.
+   */
+  function bilibiliRefOf(source: string): { bvid?: string, avid?: number, page?: number } | undefined {
+    const pageMatch = source.match(/[?&]p=(\d+)/i)
+    const page = pageMatch ? Number(pageMatch[1]) : undefined
     const bv = source.match(/BV[0-9A-Za-z]{10}/)
     if (bv)
-      return { bvid: bv[0] }
+      return page ? { bvid: bv[0], page } : { bvid: bv[0] }
     if (source.startsWith('av') && /^\d+$/.test(source.slice(2)))
-      return { avid: Number(source.slice(2)) }
+      return page ? { avid: Number(source.slice(2)), page } : { avid: Number(source.slice(2)) }
     const av = source.match(/(?:^|\/|av)(\d{5,})$/i)
     if (av && /bilibili|b23|\/av/i.test(source))
-      return { avid: Number(av[1]) }
+      return page ? { avid: Number(av[1]), page } : { avid: Number(av[1]) }
     return undefined
   }
 
@@ -344,9 +356,23 @@ export function createVideoEngine(options: VideoEngineOptions) {
     durationSeconds: number
     width: number
     height: number
+    /** 1-based part this link reads. `1` for a single clip. */
+    page: number
+    /** How many parts the video publishes. `1` for a single clip. */
+    pages: number
+    /** The platform's own name for the part, when there is more than one. */
+    partTitle?: string
   }
 
-  async function bilibiliMeta(reference: { bvid?: string, avid?: number }, cookie?: string): Promise<BilibiliMeta> {
+  /**
+   * One part's metadata, not the collection's.
+   *
+   * Measured 2026-11-09 on BV1JRx76SE2z: 12 parts, `data.cid` is part 1's cid and `data.duration`
+   * is the sum of every part (3313 s), while part 1 runs 273 s. Reading the collection's duration
+   * made the engine plan windows over a 55-minute video that only ever resolved to a 4-minute
+   * stream, so every window past 04:33 decoded nothing and failed with a bare `ENOENT`.
+   */
+  async function bilibiliMeta(reference: { bvid?: string, avid?: number, page?: number }, cookie?: string): Promise<BilibiliMeta> {
     const query = reference.bvid ? `bvid=${reference.bvid}` : `aid=${reference.avid}`
     const view = await bilibiliJson<{
       bvid: string
@@ -354,20 +380,45 @@ export function createVideoEngine(options: VideoEngineOptions) {
       title: string
       duration: number
       dimension?: { width: number, height: number }
+      pages?: Array<{ cid: number, page: number, part?: string, duration: number }>
     }>(`https://api.bilibili.com/x/web-interface/view?${query}`, cookie)
+
+    const parts = view.pages ?? []
+    const wanted = Math.min(Math.max(reference.page ?? 1, 1), Math.max(1, parts.length))
+    const part = parts[wanted - 1]
+
     return {
       bvid: view.bvid,
-      cid: view.cid,
+      // The cid decides which stream, sprite and caption list everything else reads.
+      cid: part?.cid ?? view.cid,
       title: view.title,
-      durationSeconds: view.duration,
+      // A part's own duration, because a part is all any downstream call can reach.
+      durationSeconds: part?.duration || view.duration,
       width: view.dimension?.width ?? 0,
       height: view.dimension?.height ?? 0,
+      page: part ? wanted : 1,
+      pages: parts.length || 1,
+      partTitle: parts.length > 1 ? part?.part : undefined,
     }
+  }
+
+  /** Why a window is outside the part a link names, and how to reach the next one. */
+  function partRangeMessage(meta: BilibiliMeta, askedFrom: number): string {
+    const length = timestampOf(meta.durationSeconds)
+    if (meta.pages <= 1)
+      return `this video is ${length} long, so ${timestampOf(askedFrom)} is past its end.`
+    const name = meta.partTitle ? ` (${meta.partTitle})` : ''
+    const next = meta.page < meta.pages
+      ? ` Ask for a window inside that part, or add \`?p=${meta.page + 1}\` to the link to read the next part.`
+      : ` Ask for a window inside that part; it is the last of the ${meta.pages} parts.`
+    return `this link is part ${meta.page} of ${meta.pages}${name}, and that part is ${length} long, so ${timestampOf(askedFrom)} is past its end.${next}`
   }
 
   /** The platform sprite, downloaded once and kept: ~265 KB for a whole clip. */
   async function bilibiliSprite(meta: BilibiliMeta, cookie?: string): Promise<SpriteGeometry & { path: string }> {
-    const dir = cacheDirFor(`bilibili:${meta.bvid}`)
+    // Keyed by cid, not by bvid: every part of a multi-part video has its own sprite, and one
+    // shared file would answer part 5 with part 1's frames.
+    const dir = cacheDirFor(`bilibili:${meta.bvid}:${meta.cid}`)
     const target = join(dir, 'sprite.jpg')
     await mkdir(dir, { recursive: true })
 
@@ -456,9 +507,13 @@ export function createVideoEngine(options: VideoEngineOptions) {
           hasAudio: true,
           hasTextTrack: hasClosedCaptions,
           hasClosedCaptions,
-          source: `bilibili:${meta.bvid}`,
+          // The page must survive into the source she passes back, or the next call reads part 1.
+          source: meta.pages > 1 ? `bilibili:${meta.bvid}?p=${meta.page}` : `bilibili:${meta.bvid}`,
           cached: true,
-          title: meta.title,
+          title: meta.pages > 1 && meta.partTitle ? `${meta.title} — ${meta.partTitle}` : meta.title,
+          ...(meta.pages > 1
+            ? { part: { index: meta.page, count: meta.pages, ...(meta.partTitle ? { title: meta.partTitle } : {}) } }
+            : {}),
         } satisfies VideoProbe
       }
 
@@ -642,7 +697,12 @@ export function createVideoEngine(options: VideoEngineOptions) {
 
       if (reference) {
         const meta = await bilibiliMeta(reference, request.cookie)
-        const from = clamp(request.fromSeconds ?? 0, 0, Math.max(0, meta.durationSeconds - 1))
+        const askedFrom = request.fromSeconds ?? 0
+        // Refuse a window past the end of the part the link names: clamping it would draw the last
+        // second of the part and call it the movie, and decoding past the end exits 0 with no file.
+        if (askedFrom > meta.durationSeconds - 1)
+          throw new Error(partRangeMessage(meta, askedFrom))
+        const from = clamp(askedFrom, 0, Math.max(0, meta.durationSeconds - 1))
         const to = clamp(request.toSeconds ?? meta.durationSeconds, from + 1, meta.durationSeconds)
         const wholeClip = from <= 0.5 && to >= meta.durationSeconds - 1
 
@@ -686,6 +746,8 @@ export function createVideoEngine(options: VideoEngineOptions) {
     const rows = Math.ceil(window.cells / columns)
     const count = columns * rows
     const picked = pickSpriteCells(sprite, window, count)
+    if (picked.length === 0)
+      throw new Error(`this video's contact sheet has no frame between ${timestampOf(window.fromSeconds)} and ${timestampOf(window.toSeconds)}.`)
 
     const cellWidth = Math.max(CELL_MIN_PX, Math.min(CELL_MAX_PX, Math.floor(SHEET_MAX_WIDTH / columns)))
     const cellHeight = Math.round(cellWidth * (sprite.cellHeight / sprite.cellWidth))
@@ -770,6 +832,11 @@ export function createVideoEngine(options: VideoEngineOptions) {
       ], { timeoutMs: 300_000 })
       cached = false
     }
+
+    // A seek past the end of the stream is not an ffmpeg error: it exits 0 and writes nothing, so
+    // the missing file is the only evidence. Say it in the words the model can act on.
+    if (!existsSync(target))
+      throw new Error(`the stream ended before ${timestampOf(window.fromSeconds)}, so no frame of that window could be read.`)
 
     const size = await stat(target)
     const image = await imageSizeOf(target)

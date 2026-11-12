@@ -1,3 +1,4 @@
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 /**
  * 记忆库的配置读写（`<bankDir>/config.json` + `<bankDir>/keys.enc`）。
  *
@@ -10,7 +11,6 @@
  * 页面只回 `hasApiKey`，永远不回明文。
  */
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 
 /** 一次配置读取的结果。密钥只有「有没有」，没有明文。 */
@@ -238,7 +238,7 @@ export function writeCastaliaSettings(
     if (!next)
       return
     if (next.apiKey && next.apiKey.trim()) {
-      secrets[name] = { ...(secrets[name] ?? {}), api_key: next.apiKey.trim() }
+      secrets[name] = { ...secrets[name], api_key: next.apiKey.trim() }
       keysUpdated = true
       drop(section, 'api_key', label)
     }
@@ -253,7 +253,7 @@ export function writeCastaliaSettings(
 
   // 三个 section 都先拷贝再写：patch 只填了一个通道时，另外两个不该在 config.json 里
   // 冒出空对象（`"triage": {}`）—— 那是「这份文件被人写过」的痕迹，不是配置。
-  const emb = { ...(config.embedding ?? {}) } as Record<string, any>
+  const emb = { ...config.embedding } as Record<string, any>
   if (patch.embedding) {
     const p = patch.embedding
     if (p.mode)
@@ -269,7 +269,7 @@ export function writeCastaliaSettings(
     applyKey(emb, 'embedding', 'embedding.apiKey')
   }
 
-  const ref = { ...(config.reflect ?? {}) } as Record<string, any>
+  const ref = { ...config.reflect } as Record<string, any>
   if (patch.reflect) {
     const p = patch.reflect
     assign(ref, 'llm_url', p.llmUrl, 'reflect.llmUrl')
@@ -286,7 +286,7 @@ export function writeCastaliaSettings(
     applyKey(ref, 'reflect', 'reflect.apiKey')
   }
 
-  const tri = { ...(config.triage ?? {}) } as Record<string, any>
+  const tri = { ...config.triage } as Record<string, any>
   if (patch.triage) {
     const p = patch.triage
     assign(tri, 'llm_url', p.llmUrl, 'triage.llmUrl')
@@ -319,4 +319,3 @@ export function writeCastaliaSettings(
   const restartRequired = changed.some(field => field.startsWith('embedding.') || field.startsWith('reflect.') || field.startsWith('triage.') || keysUpdated)
   return { ok: true, changed, keysUpdated, restartRequired }
 }
-

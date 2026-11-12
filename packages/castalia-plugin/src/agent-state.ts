@@ -57,28 +57,41 @@ export function currentEnergyFrom(energy: number, lastUpdated: number, now: numb
  *  - 仍然声明它属于角色、不属于用户（保留原来那句约束）。
  */
 function moodWords(mood: number): string {
-  if (mood >= 6) return 'in very good spirits'
-  if (mood >= 3) return 'in a good mood'
-  if (mood >= -2) return 'steady'
-  if (mood >= -5) return 'a little down'
+  if (mood >= 6)
+    return 'in very good spirits'
+  if (mood >= 3)
+    return 'in a good mood'
+  if (mood >= -2)
+    return 'steady'
+  if (mood >= -5)
+    return 'a little down'
   return 'low'
 }
 
 function energyWords(energy: number): string {
-  if (energy >= 80) return 'energetic'
-  if (energy >= 50) return 'about normal'
-  if (energy >= 25) return 'tired'
+  if (energy >= 80)
+    return 'energetic'
+  if (energy >= 50)
+    return 'about normal'
+  if (energy >= 25)
+    return 'tired'
   return 'running on empty'
 }
 
 function affects(vad: VADVector): string[] {
   const out: string[] = []
-  if (vad.valence > 0.25) out.push('warmer than usual')
-  else if (vad.valence < -0.25) out.push('cooler than usual')
-  if (vad.arousal > 0.3) out.push('keyed up')
-  else if (vad.arousal < -0.3) out.push('slow and quiet')
-  if (vad.dominance > 0.3) out.push('in control')
-  else if (vad.dominance < -0.3) out.push('carried along by things')
+  if (vad.valence > 0.25)
+    out.push('warmer than usual')
+  else if (vad.valence < -0.25)
+    out.push('cooler than usual')
+  if (vad.arousal > 0.3)
+    out.push('keyed up')
+  else if (vad.arousal < -0.3)
+    out.push('slow and quiet')
+  if (vad.dominance > 0.3)
+    out.push('in control')
+  else if (vad.dominance < -0.3)
+    out.push('carried along by things')
   return out
 }
 

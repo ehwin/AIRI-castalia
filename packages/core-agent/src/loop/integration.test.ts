@@ -1,13 +1,13 @@
-import { describe, expect, it, vi } from 'vitest'
-
 import type { Drives } from '../mind/drives'
 
+import { describe, expect, it, vi } from 'vitest'
+
 import { advanceDrives, decide, gatesFrom, isQuietHour, quietEnvironment, relieveAfterSpeech, restDrives } from '../mind/drives'
-import { mayProvoke, planExpression } from '../mind/expression'
+import { planExpression } from '../mind/expression'
 import { planReturn } from '../persona/absence'
 import { composeThought } from '../persona/background-lane'
 import { createStream, record, sharedRatio, surface } from '../persona/inner-stream'
-import { evaluateRefusal, createRefusalState } from '../persona/refusal-policy'
+import { createRefusalState, evaluateRefusal } from '../persona/refusal-policy'
 import { inferRequestTraits } from '../persona/request-traits'
 import { renderStateLine } from '../persona/state-line'
 import { replay } from './session-log'
@@ -86,7 +86,7 @@ describe('a day in the life', () => {
     }
 
     // Blocked by the gate, she does not go quiet: she shows a bubble instead.
-    expect(levels.some(level => level === 'L1-held')).toBe(true)
+    expect(levels.includes('L1-held')).toBe(true)
     expect(levels).not.toContain('L2')
   })
 

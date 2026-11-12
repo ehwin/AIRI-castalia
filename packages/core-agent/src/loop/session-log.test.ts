@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from 'vitest'
-
 import type { ToolPort } from './ports'
+
+import { describe, expect, it, vi } from 'vitest'
 
 import { parseRecord, replay, serializeRecord } from './session-log'
 import { runTurn } from './turn-loop'
@@ -73,7 +73,8 @@ describe('replay', () => {
   })
 })
 
-describe('malformed tool calls', () => {  it('records an unknown tool as a failure instead of throwing', async () => {
+describe('malformed tool calls', () => {
+  it('records an unknown tool as a failure instead of throwing', async () => {
     const send = vi.fn()
       .mockResolvedValueOnce({ text: '', toolCalls: [{ callId: 'x', name: '', arguments: 'not json' }] })
       .mockResolvedValueOnce({ text: 'sorry', toolCalls: [] })

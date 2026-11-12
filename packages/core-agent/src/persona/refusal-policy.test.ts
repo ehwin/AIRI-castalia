@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
-
 import type { Drives } from '../mind/drives'
+
+import { describe, expect, it } from 'vitest'
 
 import { createRefusalState, defaultRefusalPolicy, evaluateRefusal } from './refusal-policy'
 import { inferRequestTraits } from './request-traits'
@@ -10,14 +10,15 @@ const fresh: Drives = { fatigue: 0, boredom: 0, curiosity: 0, focus: 0 }
 const persona = { tidiness: 0.9, patience: 0.3 }
 const NOW = 1_000_000
 
-const ask = (text: string, drives: Drives = tired, now = NOW) =>
-  evaluateRefusal(createRefusalState(), {
+function ask(text: string, drives: Drives = tired, now = NOW) {
+  return evaluateRefusal(createRefusalState(), {
     text,
     traits: inferRequestTraits(text),
     persona,
     drives,
     now,
   })
+}
 
 /** A messy chore whose tail varies, so two of them are different requests. */
 const heavy = (tag: string) => `${Array.from({ length: 40 }, (_, i) => (i % 3 === 0 ? '\t' : '') + 'x'.repeat(150)).join('\n')}\n整理成表格 ${tag}`

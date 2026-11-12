@@ -4,7 +4,17 @@
 
 上游原版 AIRI 是“会说话的虚拟角色”，但对话只停留在上下文窗口里，关掉软件就忘。本仓库将记忆系统拆解为三条互不越界的物理链路——**证据链、情感链、派生链**——直接运行在 Electron 主进程内，通过 SQLite 本地落盘，实现零子进程开销、零存储 API 成本。
 
-* **版本基线**：基于上游 `v0.13.1`（`pnpm@11.24.0`），本仓在此基础上新增 40 个提交
+## 直接使用
+
+| 想做的事 | 去哪 |
+| --- | --- |
+| 装上跑起来 | [Releases](https://github.com/ehwin/AIRI-castalia/releases) → `AIRI-Castalia-<版本>-windows-x64-setup.exe`，步骤见 [docs/install.md](docs/install.md) |
+| 搞懂她什么时候会自己开口 | [docs/behavior.md](docs/behavior.md) |
+| 从源码构建 | 见文末「构建与开发」 |
+
+> 当前的 Windows 安装包用**自签名证书**，SmartScreen 会提示“未知发布者”。校验 SHA-256 或按 [docs/install.md](docs/install.md) 第 2 节信任本机证书即可。
+
+* **版本基线**：基于上游 `v0.13.1`（`pnpm@11.24.0`），本仓在此基础上新增 104 个提交
 * **核心改动规模**：涉及 201 个文件，`+26,574 / -21` 行代码
   * 引擎镜像：52 个文件（15,639 行）
   * 插件胶水层：11 个文件（613 行）

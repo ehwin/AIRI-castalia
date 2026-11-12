@@ -135,20 +135,29 @@ AIRI 跨端流量是文本 + 音频 + 低频情绪，量级几十 KB/s，不需�
 ## 协议增量（缩到最小：四件事）
 
 ```ts
-interface HelloEvent { protocolVersion: number }        // 两端独立升级，缺了会静默"半懂"
+interface HelloEvent { protocolVersion: number } // 两端独立升级，缺了会静默"半懂"
 
-interface SpeechSegmentEvent {                          // 仅在"桌面合成"开关下使用
-  binding: string, turnId: string, seq: number
-  mimeType: string, data: string                        // Base64，句子级 1–3 s
-  durationMs?: number, text: string
+interface SpeechSegmentEvent { // 仅在"桌面合成"开关下使用
+  binding: string
+  turnId: string
+  seq: number
+  mimeType: string
+  data: string // Base64，句子级 1–3 s
+  durationMs?: number
+  text: string
 }
 
-interface AffectUpdateEvent {                           // 低频，不是逐帧
-  characterId: string, valence: number, arousal: number, dominance: number
-  mood?: string, expression?: string, at: number
+interface AffectUpdateEvent { // 低频，不是逐帧
+  characterId: string
+  valence: number
+  arousal: number
+  dominance: number
+  mood?: string
+  expression?: string
+  at: number
 }
 
-interface TurnCancelEvent { binding: string, turnId?: string }   // 手机点停 → 取消电脑那一轮（省钱）
+interface TurnCancelEvent { binding: string, turnId?: string } // 手机点停 → 取消电脑那一轮（省钱）
 ```
 
 `context:update` 不能拿来塞这些：那条通道的语义是"给下一轮当上下文、不触发说话"。

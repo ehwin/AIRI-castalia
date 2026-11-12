@@ -443,7 +443,7 @@ export function transitionPsycheState(
   const effectiveNow = Math.max(Number.isFinite(now) ? now : Date.now(), previous.updatedAt);
   const elapsedHours = Math.max(0, effectiveNow - previous.updatedAt) / 3600000;
   const tuning = readPsycheTuning();
-  const halfLife = { ...tuning.halfLife, ...(options.halfLifeHours || {}) };
+  const halfLife = { ...tuning.halfLife, ...options.halfLifeHours };
   // 重要性延长持续时间（rumination）：Verduyn & Lavrijsen 2014 的实测结论是
   // 「持续时间由事件重要性与反刍决定」，不是由情绪维度决定。这里把 importance
   // 直接接到半衰期上，而不是给 V/A/D 各配一个固定常数。

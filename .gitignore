@@ -192,3 +192,11 @@ apps/stage-tamagotchi/dist-*/
 scripts/__pycache__/
 scripts/*.bak-*
 packages/castalia-plugin/memory/
+
+# 签名材料（私钥绝不入库）
+*.pfx
+*.cer
+*.p12
+# 安装包与本地产物
+apps/stage-tamagotchi/dist-installer/
+apps/stage-tamagotchi/*.blockmap

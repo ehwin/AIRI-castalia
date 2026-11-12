@@ -62,7 +62,7 @@ export function parseActivityAssessment(raw: string): ActivityAssessment | undef
   if (typeof rawFlag === 'boolean')
     interruptible = rawFlag
   else if (typeof rawFlag === 'string')
-    interruptible = /^(true|yes|y|1|可以|能|是)$/iu.test(rawFlag.trim())
+    interruptible = /^(true|yes|[y1能是]|可以)$/iu.test(rawFlag.trim())
   else
     return undefined
 

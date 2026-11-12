@@ -12,6 +12,8 @@
  * exists; until then the companion is blind and behaves exactly as before.
  */
 
+import type { PresenceReading } from './interruption'
+
 export type SenseKind = 'screen' | 'camera' | 'window' | 'text'
 
 export interface SenseObservation {
@@ -36,6 +38,14 @@ export interface SenseObservation {
 export interface SensePort {
   /** What the companion can perceive right now. Empty when nothing is available or allowed. */
   look: () => Promise<SenseObservation[]>
+  /**
+   * 廉价的一路：主人此刻在不在电脑前。
+   *
+   * 它不耗模型，所以每次 tick 都能问一次；`look` 要起截图和视觉调用，只在她打算
+   * 开口、或者每五分钟一次的扫视里跑。缺了这一路，「不知道」就只能靠视觉猜，
+   * 而视觉失败时她会把「不知道」当成「不忙」，开口就是一句「你在忙吗」。
+   */
+  presence?: () => Promise<PresenceReading>
   /**
    * What happened on the last look.
    *

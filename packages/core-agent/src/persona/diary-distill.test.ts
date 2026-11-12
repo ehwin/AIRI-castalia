@@ -5,12 +5,14 @@ import { describe, expect, it } from 'vitest'
 import { distillDay } from './diary-distill'
 
 const at = (hour: number, minute = 0) => new Date(`2026-10-25T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`).getTime()
-const thought = (hour: number, text: string, visibility: 'private' | 'shared' = 'private'): Thought => ({
-  id: `t-${hour}-${text}`,
-  at: at(hour),
-  text,
-  visibility,
-})
+function thought(hour: number, text: string, visibility: 'private' | 'shared' = 'private'): Thought {
+  return {
+    id: `t-${hour}-${text}`,
+    at: at(hour),
+    text,
+    visibility,
+  }
+}
 
 describe('distillDay', () => {
   it('returns nothing for an empty day', () => {

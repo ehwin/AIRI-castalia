@@ -41,6 +41,16 @@ export interface OutboundPolicy {
   unansweredGrowthCap: number
   /** After this many unanswered messages, outbound waits for the owner. */
   pauseAfterUnanswered: number
+  /**
+   * How far the wait after a message may wander, as a fraction of `minGapMs`.
+   *
+   * A fixed gap is a metronome: every message lands on the hour mark, so the
+   * owner can predict her and no day differs from the last. Human inter-event
+   * times are bursty rather than periodic (Barabási 2005; Vázquez et al. 2006),
+   * so each send draws the next wait inside `± gapSpread`. 0 restores the old
+   * fixed gap; the value is clamped to 0.6 so a draw cannot swallow the pacing.
+   */
+  gapSpread?: number
 }
 
 export interface OutboundState {
@@ -56,6 +66,13 @@ export interface OutboundState {
   unanswered: number
   /** True when a setting or the owner asked for silence. */
   paused: boolean
+  /**
+   * The factor for the wait that started at `lastSentAt`.
+   *
+   * Drawn once when the message goes out, then stored: drawing it again on every
+   * tick would let a message slip out earlier each time the caller asked.
+   */
+  gapFactor?: number
 }
 
 export interface OutboundRequest {
@@ -95,6 +112,41 @@ export const OUTBOUND_POLICY_DEFAULTS: OutboundPolicy = {
 
 /** One day, the window that `dailyCap` counts over. */
 export const DAY_MS = 86_400_000
+
+/** The widest a single draw may move the wait, as a fraction of the base gap. */
+const MAX_GAP_SPREAD = 0.6
+/** Default spread: the wait after a message lands between 65% and 135% of it. */
+export const DEFAULT_GAP_SPREAD = 0.35
+
+function spreadOf(policy: OutboundPolicy): number {
+  const spread = policy.gapSpread ?? DEFAULT_GAP_SPREAD
+  if (!Number.isFinite(spread) || spread < 0)
+    return DEFAULT_GAP_SPREAD
+  return Math.min(MAX_GAP_SPREAD, spread)
+}
+
+/** The stored draw, or 1 when this state predates the field. */
+export function gapFactorOf(state: OutboundState, policy: OutboundPolicy = OUTBOUND_POLICY_DEFAULTS): number {
+  const spread = spreadOf(policy)
+  const factor = state.gapFactor
+  if (typeof factor !== 'number' || !Number.isFinite(factor))
+    return 1
+  return Math.min(1 + spread, Math.max(1 - spread, factor))
+}
+
+/**
+ * The wait factor for the message after this one.
+ *
+ * Drawn at send time and stored, so the gap belongs to that message: asking the
+ * gate twice cannot shorten it. Moved by the distance between the character and
+ * the owner only through `unansweredMultiplier`, which stays separate.
+ */
+export function nextGapFactor(random: () => number = Math.random, spread = DEFAULT_GAP_SPREAD): number {
+  const width = Math.min(MAX_GAP_SPREAD, Math.max(0, spread))
+  const draw = random()
+  const unit = Number.isFinite(draw) ? Math.min(1, Math.max(0, draw)) : 0.5
+  return 1 + width * (2 * unit - 1)
+}
 
 export function createOutboundState(now: number): OutboundState {
   return {
@@ -189,7 +241,7 @@ export function decideOutbound(
   }
 
   if (state.lastSentAt !== null) {
-    const earliest = state.lastSentAt + policy.minGapMs * multiplier
+    const earliest = state.lastSentAt + policy.minGapMs * multiplier * gapFactorOf(state, policy)
     if (request.now < earliest) {
       return { allow: false, reason: 'min-gap', retryAtMs: earliest, intervalMultiplier: multiplier }
     }
@@ -218,7 +270,11 @@ export function decideOutbound(
 }
 
 /** Records a message that went out. Rolls the day, counts it, and remembers its topic. */
-export function recordOutbound(state: OutboundState, request: OutboundRequest): OutboundState {
+export function recordOutbound(
+  state: OutboundState,
+  request: OutboundRequest,
+  options: { random?: () => number, gapSpread?: number } = {},
+): OutboundState {
   const rolled = request.now - state.dayStartedAt >= DAY_MS
     ? { dayStartedAt: request.now, sentToday: 0 }
     : { dayStartedAt: state.dayStartedAt, sentToday: state.sentToday }
@@ -229,6 +285,8 @@ export function recordOutbound(state: OutboundState, request: OutboundRequest): 
     lastSentAt: request.now,
     recentTopics: { ...state.recentTopics, [request.topic]: request.now },
     unanswered: state.unanswered + 1,
+    // Drawn here, once per message: the next wait belongs to this send.
+    gapFactor: options.random ? nextGapFactor(options.random, options.gapSpread) : state.gapFactor,
   }
 }
 

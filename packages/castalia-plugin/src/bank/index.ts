@@ -1,3 +1,5 @@
+import process from 'node:process'
+
 // NOTICE: 进程内记忆体入口（AIRI 插件层）。
 // why: 之前 app 通过 stdio/HTTP 客户端连 CastaliaNode 子进程；这里改成在主进程内直接跑引擎
 //      的存储/检索代码，用 node:sqlite + sqlite-vec，不再需要子进程或端口。
@@ -6,7 +8,6 @@
 //      下面的 openBank 因此强制校验 config，缺失直接抛错，不给静默清库的机会。
 // 移除条件: 引擎提供稳定的、无环境变量耦合的工厂 API 后，这层可以退化成薄包装。
 import { existsSync } from 'node:fs'
-import process from 'node:process'
 import { join } from 'node:path'
 
 /**
@@ -37,7 +38,7 @@ interface SelfCycleOptions {
   now?: Date
 }
 
-type SelfCycleResult = {
+interface SelfCycleResult {
   ok: boolean
   skipped: boolean
   reason?: string
@@ -92,7 +93,6 @@ export interface StoredThought {
   visibility: string
   topic?: string
 }
-
 
 export interface BankHandle {
   bankDir: string
@@ -258,6 +258,13 @@ export interface IngestTurn {
    * 否则显式判定和两分钟后的自动扫描会把同一句话算两次。
    */
   affect?: { vad: { valence: number, arousal: number, dominance: number }, reason?: string }
+  /**
+   * 这条用户消息的持久 id。
+   *
+   * 落库拿它派生主键：同一条消息重放、宿主重试、两个窗口同时补写，都只留一行。
+   * 宿主不给时行为不变（每次新插一行）。
+   */
+  turnId?: string
 }
 export interface IngestResult {
   ok: boolean
@@ -298,7 +305,8 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
   const replaceWrites = new Map<string, Promise<unknown>>()
   const configPath = options.configPath ?? join(bankDir, 'config.json')
 
-  if (!existsSync(bankDir)) throw new Error(`[castalia-bank] bank dir 不存在: ${bankDir}`)
+  if (!existsSync(bankDir))
+    throw new Error(`[castalia-bank] bank dir 不存在: ${bankDir}`)
 
   // 跨 bank 热切换会让 alignEmbedSpace 拿旧配置比对新库 → 清空向量索引，必须显式拒绝。
   if (current && (current.bankDir !== bankDir || current.project !== project)) {
@@ -535,9 +543,13 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
       const dbMod = db as any
       return ['general', 'user', 'project', 'reference', 'feedback'].map((memType) => {
         const file = join(bankDir, project, memType, 'memory.sqlite')
-        if (!existsSync(file)) return { memType, active: 0, vec: 0, chunk: 0 }
+        if (!existsSync(file))
+          return { memType, active: 0, vec: 0, chunk: 0 }
         const conn = dbMod.DatabaseManager.getInstance(project, memType)
-        const one = (sql: string) => { try { return Number(conn.prepare(sql).get()?.c ?? 0) } catch { return 0 } }
+        const one = (sql: string) => {
+          try { return Number(conn.prepare(sql).get()?.c ?? 0) }
+          catch { return 0 }
+        }
         return {
           memType,
           active: one('SELECT COUNT(*) c FROM memory WHERE is_active=1'),
@@ -569,7 +581,8 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
       const user = (turn.user ?? '').trim()
       const assistant = (turn.assistant ?? '').trim()
       // 纯工具调用轮次模型可能不产出正文;写进去只会得到 "用户: x\nairi: " 的残句。
-      if (!user || !assistant) return { ok: false, mode: 'minimal', error: 'empty turn' }
+      if (!user || !assistant)
+        return { ok: false, mode: 'minimal', error: 'empty turn' }
       const fullAuto = process.env.MEMORY_AUTO_PROCESS === '1'
       try {
         if (fullAuto) {
@@ -593,6 +606,7 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
           return { ok: Boolean(result?.conversationSaved), mode: 'auto', details: result?.details ?? [] }
         }
         // 最小路径:conversation_log + 用户观察。两者都是本地计算,离线/无 key 也能跑。
+        // `turn.turnId` 是这条用户消息的持久 id：重复落库会撞同一个主键，只留一行。
         const saved = await store.saveConversationTurn(
           user,
           assistant,
@@ -601,6 +615,7 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
           undefined,
           project,
           turn.affect ? { status: 'analyzed' as const, source: 'model', vad: turn.affect.vad } : undefined,
+          turn.turnId,
         )
         try {
           const userLearning = await import('../vendor/engine/userLearning')
@@ -646,7 +661,10 @@ export async function openBank(options: OpenBankOptions): Promise<BankHandle> {
         for (const mt of MEM_TYPES) {
           try {
             const conn = (db as any).DatabaseManager.getInstance(project, mt)
-            const one = (sql: string) => { try { return Number(conn.prepare(sql).get()?.c ?? 0) } catch { return 0 } }
+            const one = (sql: string) => {
+              try { return Number(conn.prepare(sql).get()?.c ?? 0) }
+              catch { return 0 }
+            }
             out[`${mt}.active`] = one('SELECT COUNT(*) c FROM memory WHERE is_active=1')
             out[`${mt}.facts`] = one('SELECT COUNT(*) c FROM facts')
             out[`${mt}.entities`] = one('SELECT COUNT(*) c FROM entities')

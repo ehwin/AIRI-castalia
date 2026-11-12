@@ -520,6 +520,11 @@ onMounted(async () => {
 
   await mindStore.initialize(resolvedPersona())
 
+  // 她的心情要有抖动：阈值每天偏一次、驱力在慢漂移上走、贴着 think 线的那次选择掷一次骰子。
+  // 否则同样的环境跑两遍一模一样，「今天她怪怪的」永远不会发生。种子按这次启动取，
+  // 换角色或重启换一条流；记录和「能不能打扰」那条裁决不接噪声。
+  mindStore.attachNoise({ seed: Date.now() })
+
   // Switching cards switches the mind: drives, sleep, and the diary stream belong to one character, so the
   // outgoing character's state is saved under her own key and the new one resumes from her own.
   watch(() => airiCards.activeCardId, () => {

@@ -339,12 +339,21 @@ export interface MemoryIngestTurn {
   persona?: string
   /** A verdict the model already gave for this turn: the row lands analyzed and never queues. */
   affect?: { vad: MemoryVAD, reason?: string }
+  /**
+   * The durable id of the user message.
+   *
+   * The backend derives the row's primary key from it, so a replay, a retry, or a second
+   * window writing the same turn keeps one row. Without it every write inserts a new row.
+   */
+  turnId?: string
 }
 
 export interface MemoryIngestResult {
   ok: boolean
   id?: string
   mode?: string
+  /** The row was already there: this turn had been written once already. */
+  deduped?: boolean
   error?: string
 }
 
@@ -529,6 +538,15 @@ export function buildMemoryIndex(entries: readonly MemoryEntry[], now = Date.now
  */
 /** Card id to bank persona, only where the two names are known to be one character. */
 const PERSONA_ALIASES: Record<string, string> = { default: 'airi' }
+
+/**
+ * How long to wait before writing the same turn again.
+ *
+ * Only used when the caller supplied a durable `turnId`: the backend keys the row on it, so a
+ * repeat is a no-op instead of a second row. A turn lost to one engine hiccup used to be lost
+ * for good — the reply was already on screen, so nothing else would ever write it.
+ */
+const INGEST_RETRY_DELAYS_MS = [1_000, 4_000] as const
 
 export const useMemoryStore = defineStore('memory', () => {
   const enabled = useLocalStorageManualReset<boolean>('memory/enabled', true)
@@ -788,16 +806,19 @@ export const useMemoryStore = defineStore('memory', () => {
 
   /** Reads an entry by name. The persona's own entry wins over a general one with the same name. */
   function read(name: string, personaId: string) {
+    // `indexFor` already resolves the card-to-bank alias; a read that did not would show a line in
+    // the prompt index that this lookup then cannot open (the built-in card `default` reads `airi`).
+    const ownId = resolvePersona(personaId)
     const key = memoryName(name)
     // Hydrated rows keep the heading they were written with ("Reference: 小托…"), so a
     // normalized lookup has to normalize both sides or every read misses.
     // The index also truncates long headings with `…`; the model copies that line, so a
     // visible prefix has to resolve to the row it came from.
-    const matches = visibleTo(personaId).filter((entry) => {
+    const matches = visibleTo(ownId).filter((entry) => {
       const stored = memoryName(entry.name)
       return stored === key || (key.length >= 8 && stored.startsWith(key))
     })
-    return matches.find(entry => entry.persona === personaId) ?? matches[0]
+    return matches.find(entry => entry.persona === ownId) ?? matches[0]
   }
 
   /**
@@ -858,12 +879,16 @@ export const useMemoryStore = defineStore('memory', () => {
   /**
    * Reads the diary partition only. An ordinary search never returns these rows.
    *
-   * A failed read is thrown, not turned into `[]`: an empty list reads as "she never wrote about
-   * that day", and the model then tells the owner a day she did write never happened.
+   * A failed read is thrown, not turned into `[]`. An empty list reads as "she never wrote about
+   * that day", and the model then tells the owner a day she did write never happened — the same
+   * mistake the diary tool guards against. A module that is off is a read that failed, not a day
+   * that was never written.
    */
   async function searchDiary(query: string, topK = 5, personaId?: string): Promise<MemorySearchHit[]> {
-    if (!enabled.value || !remote?.searchDiary)
-      return []
+    if (!enabled.value)
+      throw new Error('the memory module is off')
+    if (!remote?.searchDiary)
+      throw new Error('this backend cannot read the diary')
     return await remote.searchDiary(query, topK, personaId)
   }
 
@@ -966,8 +991,9 @@ export const useMemoryStore = defineStore('memory', () => {
 
   /** Forgets an entry of the card by name. General memories belong to the owner, so a run cannot forget them. */
   function forget(name: string, personaId: string): MemoryForgetResult {
+    const ownId = resolvePersona(personaId)
     const key = memoryName(name)
-    const target = entries.value.find(entry => memoryName(entry.name) === key && entry.persona === personaId)
+    const target = entries.value.find(entry => memoryName(entry.name) === key && entry.persona === ownId)
     if (!target)
       return { found: false, persisted: Promise.resolve({ ok: false, reason: 'refused', error: 'no such entry' }) }
     return remove(target)
@@ -1060,24 +1086,43 @@ export const useMemoryStore = defineStore('memory', () => {
     const assistant = turn.assistant.trim()
     if (!user || !assistant)
       return { ok: false, error: 'empty turn' }
-    try {
-      const result = await remote.ingest({ user, assistant, ...(turn.sessionId ? { sessionId: turn.sessionId } : {}), ...(turn.persona ? { persona: turn.persona } : {}), ...(turn.affect ? { affect: turn.affect } : {}) })
-      if (result.ok) {
-        markRemoteOk()
-        // The turn the backend just wrote is not in the local cache, so `read` and the prompt
-        // index stayed blind to it until a restart (audit F09). One debounced re-read fixes that.
-        scheduleRefresh()
-      }
-      else {
-        markRemoteFailure(result.error ?? 'ingest rejected')
-      }
-      return result
+    const payload = {
+      user,
+      assistant,
+      ...(turn.sessionId ? { sessionId: turn.sessionId } : {}),
+      ...(turn.persona ? { persona: turn.persona } : {}),
+      ...(turn.affect ? { affect: turn.affect } : {}),
+      ...(turn.turnId ? { turnId: turn.turnId } : {}),
     }
-    catch (cause) {
-      console.warn('[memory] remote ingest failed:', cause)
-      markRemoteFailure(cause)
-      return { ok: false, error: String(cause) }
+    // A retry is only safe with a durable key: without one, a call that threw after the insert
+    // would be written twice. With `turnId` the row id repeats and the backend ignores the second
+    // write, so a transient engine failure costs a second instead of the whole turn.
+    const retries = turn.turnId ? INGEST_RETRY_DELAYS_MS : []
+    let lastError = 'ingest failed'
+    for (let attempt = 0; attempt <= retries.length; attempt++) {
+      try {
+        const result = await remote.ingest(payload)
+        if (result.ok) {
+          markRemoteOk()
+          // The turn the backend just wrote is not in the local cache, so `read` and the prompt
+          // index stayed blind to it until a restart (audit F09). One debounced re-read fixes that.
+          scheduleRefresh()
+        }
+        else {
+          // A refusal is an answer, not a hiccup: the same payload will be refused again.
+          markRemoteFailure(result.error ?? 'ingest rejected')
+        }
+        return result
+      }
+      catch (cause) {
+        lastError = errorText(cause)
+        if (attempt < retries.length)
+          await new Promise(resolve => setTimeout(resolve, retries[attempt]))
+      }
     }
+    console.warn('[memory] remote ingest failed:', lastError)
+    markRemoteFailure(lastError)
+    return { ok: false, error: lastError }
   }
 
   function resetState() {

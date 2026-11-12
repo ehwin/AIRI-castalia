@@ -182,17 +182,92 @@ describe('mind store, end to end', () => {
     expect(mind.senseAttached).toBe(true)
 
     await expect(mind.lookAround()).resolves.toBe(2)
-    // The same desktop is not new twice.
-    await expect(mind.lookAround()).resolves.toBe(0)
+    // The same desktop is not new twice. `force` bypasses the one-minute glance guard so this
+    // still exercises the digest, not the guard.
+    await expect(mind.lookAround({ force: true })).resolves.toBe(0)
+    mind.dispose()
+  })
+
+  it('does not capture twice within a minute unless the caller forces it', async () => {
+    const mind = useMindStore()
+    await mind.initialize()
+    const look = vi.fn(async () => [{ kind: 'screen' as const, text: `窗口 ${Date.now()}`, at: Date.now() }])
+    mind.attachSense({ look })
+
+    await mind.lookAround()
+    await mind.lookAround()
+    expect(look).toHaveBeenCalledTimes(1)
+
+    // 开口前那一眼不能被节流挡住，否则她会拿几分钟前的画面装作刚看过。
+    await mind.lookAround({ force: true })
+    expect(look).toHaveBeenCalledTimes(2)
     mind.dispose()
   })
 
   it('survives a sense that throws', async () => {
     const mind = useMindStore()
     await mind.initialize()
-    mind.attachSense({ look: async () => { throw new Error('permission denied') } })
+    mind.attachSense({
+      look: async () => {
+        throw new Error('permission denied')
+      },
+    })
 
     await expect(mind.lookAround()).resolves.toBe(0)
+    mind.dispose()
+  })
+
+  it('does not turn a description without a verdict into permission', async () => {
+    const mind = useMindStore()
+    await mind.initialize()
+    mind.attachSense({ look: async () => [{ kind: 'screen' as const, text: '一个浏览器窗口，停在一篇文章上', at: Date.now() }] })
+
+    await mind.lookAround({ force: true })
+
+    // 关键词没命中 ≠ 可以打扰。没有裁决就是不知道，和「看不见」同一个结论。
+    expect(mind.interruption.level).toBe('unknown')
+    mind.dispose()
+  })
+
+  it('lets the vision verdict win over the keywords', async () => {
+    const mind = useMindStore()
+    await mind.initialize()
+    mind.attachSense({
+      look: async () => [{ kind: 'screen' as const, text: '终端在编译，他只是在等结果', at: Date.now(), interruptible: true, reason: 'waiting' }],
+    })
+
+    await mind.lookAround({ force: true })
+
+    // 关键词会说「在编译 = 忙」；裁决说可以。忙闲以视觉裁决为准，关键词不是判据。
+    expect(mind.interruption.level).toBe('free')
+    mind.dispose()
+  })
+
+  it('will not claim the owner is free from a look older than the utterance', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-11T10:00:00+08:00'))
+    const mind = useMindStore()
+    await mind.initialize()
+    let observation: { kind: 'screen', text: string, at: number, interruptible?: boolean } = {
+      kind: 'screen',
+      text: '一个浏览器窗口',
+      at: Date.now(),
+      interruptible: true,
+    }
+    mind.attachSense({ look: async () => [observation] })
+    await mind.lookAround({ force: true })
+    expect(mind.interruption.level).toBe('free')
+
+    // 五分钟后想开口；这一眼只回了描述（超时/解析失败），没有新裁决。
+    vi.setSystemTime(new Date('2026-11-11T10:05:00+08:00'))
+    observation = { kind: 'screen', text: '一个浏览器窗口', at: Date.now() }
+    const startedAt = Date.now()
+    await mind.lookAround({ force: true })
+
+    // 十五分钟有效期内，普通回合还能用这条旧裁决；
+    // 但开口那一刻只认这一眼——旧的不算「刚看见他不忙」。
+    expect(mind.interruption.level).toBe('free')
+    expect(mind.interruptionSince(startedAt).level).toBe('unknown')
     mind.dispose()
   })
 })
@@ -245,6 +320,100 @@ describe('sleep, in the same loop', () => {
     expect(mind.sleepCount).toBe(1)
     expect(mind.drives.fatigue).toBeLessThanOrEqual(22)
     mind.dispose()
+  })
+
+  it('wakes with a fresh attention span, not the boredom she lay down with', async () => {
+    const mind = useMindStore()
+    await mind.initialize()
+    mind.attachSleep(async () => ({ reflectOk: true, consolidateOk: true, digestOk: true }))
+    let fire: (() => Promise<void>) | undefined
+    mind.attachTurnComplete((cb) => {
+      fire = cb
+      return () => {}
+    })
+    await fire?.()
+
+    let now = Date.now()
+    mind.drives = { fatigue: 85, boredom: 60, curiosity: 0, focus: 0 }
+    mind.tick(now + 11 * 60_000)
+    now += 11 * 60_000
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(mind.asleep).toBe(true)
+    const lyingDown = mind.drives.boredom
+
+    let woke = false
+    for (let i = 0; i < 440 && !woke; i++) {
+      now += 45_000
+      mind.tick(now)
+      woke = !mind.asleep
+    }
+    expect(woke).toBe(true)
+    // 睡了一夜还带着躺下时那格无聊，睁眼第一跳就会「无聊到想说话」。
+    expect(mind.drives.boredom).toBeLessThanOrEqual(lyingDown - 24)
+    mind.dispose()
+  })
+
+  it('pays boredom down when a line actually goes out', async () => {
+    const mind = useMindStore()
+    await mind.initialize()
+    mind.drives = { fatigue: 10, boredom: 80, curiosity: 40, focus: 0 }
+
+    mind.relieveAfterSpeaking()
+
+    expect(mind.drives.boredom).toBe(35)
+    expect(mind.drives.curiosity).toBe(30)
+    mind.dispose()
+  })
+
+  describe('noise', () => {
+    async function walk(withNoise: boolean, seed = 7) {
+      setActivePinia(createPinia())
+      const mind = useMindStore()
+      await mind.initialize()
+      if (withNoise)
+        mind.attachNoise({ seed })
+      let now = Date.now()
+      mind.drives = { fatigue: 10, boredom: 50, curiosity: 0, focus: 0 }
+      for (let i = 0; i < 40; i++) {
+        now += 45_000
+        mind.tick(now)
+      }
+      const result = {
+        drives: { ...mind.drives },
+        wobble: { boredom: mind.wobble.boredom, curiosity: mind.wobble.curiosity },
+        offset: mind.todayOffset,
+      }
+      mind.dispose()
+      return result
+    }
+
+    it('stays exactly still until the host attaches a source', async () => {
+      const plain = await walk(false)
+
+      expect(plain.wobble).toEqual({ boredom: 0, curiosity: 0 })
+      expect(plain.offset).toBe(0)
+    })
+
+    it('drifts her mood without touching what is recorded', async () => {
+      const plain = await walk(false)
+      const noisy = await walk(true)
+
+      expect(Math.abs(noisy.wobble.boredom)).toBeGreaterThan(0)
+      expect(Math.abs(noisy.wobble.boredom)).toBeLessThan(15)
+      expect(Math.abs(noisy.offset)).toBeLessThanOrEqual(5)
+      // 噪声只进判定：同样的环境走完同样多的 tick，落盘的驱力一模一样。
+      expect(noisy.drives).toEqual(plain.drives)
+    })
+
+    it('replays one day from one seed and diverges on another', async () => {
+      const first = await walk(true, 7)
+      const again = await walk(true, 7)
+      const other = await walk(true, 8)
+
+      expect(again.wobble).toEqual(first.wobble)
+      expect(other.wobble).not.toEqual(first.wobble)
+    })
   })
 
   it('runs one maintenance call per bout', async () => {
@@ -339,8 +508,9 @@ describe('restart and window ownership', () => {
     // One minute of rest at 12.5/h, not a full battery: the old order computed
     // `planReturn` from the defaults and then copied that over the snapshot.
     expect(mind.drives.fatigue).toBeCloseTo(69.7917, 3)
-    expect(mind.drives.boredom).toBe(40)
-    expect(mind.drives.curiosity).toBe(30)
+    // 一分钟的离开不是无聊的休息：注意力两轴按各自的时钟轻微松弛，值仍在原处。
+    expect(mind.drives.boredom).toBeCloseTo(40, 0)
+    expect(mind.drives.curiosity).toBeGreaterThan(25)
     mind.dispose()
   })
 

@@ -1,0 +1,78 @@
+name: Fork CI
+
+# 只跑本 fork 真正改动的包，避免把上游整矩阵搬过来。
+# 手动触发可指定工作区：workflow_dispatch 的 inputs.packages。
+
+on:
+  push:
+    branches:
+      - main
+      - 'ehwin/**'
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: '空格分隔的包名（默认跑核心四包）'
+        required: false
+        default: '@proj-airi/core-agent @proj-airi/castalia-plugin @proj-airi/stage-ui @proj-airi/stage-tamagotchi'
+
+concurrency:
+  group: fork-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Typecheck and test
+    runs-on: windows-latest
+    timeout-minutes: 40
+    env:
+      # 部署环境里带着这些变量时，插件测试会假红一条（见 castalia-plugin 的测试说明）
+      PSYCHE_BAND_HOLD: ''
+      PSYCHE_BAND_CENTER_OFFSET: ''
+      PSYCHE_BAND_ENTER: ''
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build core packages
+        run: pnpm -F @proj-airi/core-agent run build
+
+      - name: Typecheck core-agent
+        run: pnpm -F @proj-airi/core-agent exec tsc --noEmit
+
+      - name: Typecheck castalia-plugin
+        run: pnpm -F @proj-airi/castalia-plugin exec tsc --noEmit
+
+      - name: Test core-agent
+        run: pnpm -F @proj-airi/core-agent exec vitest run
+
+      - name: Test castalia-plugin
+        run: pnpm -F @proj-airi/castalia-plugin exec vitest run
+
+      - name: Typecheck stage-ui
+        run: pnpm -F @proj-airi/stage-ui exec vue-tsc --noEmit
+
+      - name: Test stage-ui memory and mind
+        run: pnpm -F @proj-airi/stage-ui exec vitest run src/stores/memory src/stores/modules src/libs/self-initiated-speech
+
+      - name: Typecheck stage-tamagotchi
+        run: pnpm -F @proj-airi/stage-tamagotchi exec vue-tsc --noEmit
+
+      - name: Test stage-tamagotchi main services
+        run: pnpm -F @proj-airi/stage-tamagotchi exec vitest run src/main/services
+
+      - name: Lint changed files
+        run: pnpm exec eslint packages/core-agent/src packages/castalia-plugin/src apps/stage-tamagotchi/src/main/services/airi

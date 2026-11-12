@@ -1,18 +1,18 @@
-import { describe, expect, it } from 'vitest'
-
 import type { Drives } from './drives'
+
+import { describe, expect, it } from 'vitest'
 
 import {
   advanceDrives,
+  canNap,
   decide,
   defaultActionThresholds,
   defaultDriveConfig,
   defaultGateConfig,
+  defaultNapPolicy,
   gatesFrom,
   isQuietHour,
   quietEnvironment,
-  canNap,
-  defaultNapPolicy,
   relieveAfterSpeech,
   restDrives,
   sleepDrives,
@@ -94,6 +94,24 @@ describe('restDrives', () => {
   it('never goes below zero', () => {
     const next = restDrives({ ...idle(), fatigue: 5 }, 100 * 3_600_000)
     expect(next.fatigue).toBe(0)
+  })
+
+  // 关掉窗口不是无聊：房间是空的，不是没意思。只回疲劳会把关机前的满格无聊
+  // 原样交给下一次启动，开窗第一秒就「无聊到想说话」。
+  it('relaxes the attention drives over the same away clock', () => {
+    const next = restDrives({ fatigue: 40, boredom: 100, curiosity: 80, focus: 90 }, 8 * 3_600_000)
+
+    expect(next.boredom).toBeLessThan(10)
+    expect(next.curiosity).toBeLessThan(5)
+    expect(next.focus).toBeLessThan(5)
+  })
+
+  it('keeps a short reload close to where it left off', () => {
+    const next = restDrives({ fatigue: 40, boredom: 70, curiosity: 50, focus: 60 }, 5 * 60_000)
+
+    expect(next.boredom).toBeGreaterThan(60)
+    expect(next.curiosity).toBeGreaterThan(30)
+    expect(next.focus).toBeGreaterThan(50)
   })
 })
 

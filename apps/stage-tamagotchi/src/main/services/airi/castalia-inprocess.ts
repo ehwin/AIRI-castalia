@@ -18,6 +18,8 @@ import { openBank } from '@proj-airi/castalia-plugin/bank'
 import { parseStoreText } from '@proj-airi/castalia-plugin/bank/store-tools'
 import { parseBankTime } from '@proj-airi/castalia-plugin/bank/time'
 
+import { pushRecentIds, recentIdsFor } from './recent-ids'
+
 /**
  * 按 id 读一条日记的正文。
  *
@@ -59,7 +61,8 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
   const banks = new Map<string, Promise<Awaited<ReturnType<typeof openBank>>>>()
   let closing = false
   // 最近几轮注入过的记忆 id:连续同话题时不重复塞同一段(报告里"连续 3 轮不重复"那条)。
-  let recentIds: string[] = []
+  // 按角色分开：共享(general)记忆两张卡都看得见，第一张卡刚读过的 id 不能把第二张卡排掉。
+  const recentByPersona = new Map<string, string[]>()
 
   /** 配置里的角色：没有任何卡被打开时，维护与自循环退回它。 */
   const configuredCharacter = options.character
@@ -223,12 +226,14 @@ export function createInProcessBankMemory(options: CastaliaEngineOptions): Casta
       const bank = await ensure(persona)
       // 召回也要带上提问的卡：不带时 store-tools 会退回引擎启动时捕获的 CHAR_ID，
       // 于是第二张卡的自动召回拿到的是第一张卡的记忆（审计 A01）。
+      const personaKey = persona?.trim() || options.character
       const result = await bank.recallQuery(query, {
-        recentIds,
-        characterId: persona?.trim() || options.character,
+        recentIds: recentIdsFor(recentByPersona, personaKey),
+        characterId: personaKey,
       })
       const ids = (result.stats as { ids?: string[] } | undefined)?.ids ?? []
-      recentIds = [...recentIds, ...ids].slice(-10) // 只记最近 10 条,不至于整库都被排掉
+      // 只记最近 10 条,不至于整库都被排掉；列表本身按角色分。
+      pushRecentIds(recentByPersona, personaKey, ids)
       return {
         text: result.text ?? '',
         count: result.stats?.count ?? 0,

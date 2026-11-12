@@ -1,11 +1,11 @@
 import { defineInvoke } from '@moeru/eventa'
 import { createContext } from '@moeru/eventa/adapters/electron/renderer'
-
+import { parseActivityAssessment } from '@proj-airi/core-agent'
 import { useVisionOrchestratorStore } from '@proj-airi/stage-ui/stores/modules/vision'
 
-import { parseActivityAssessment } from '@proj-airi/core-agent'
-
 import { computerUseReadImage, computerUseRun } from '../../shared/eventa/computer-use'
+import { systemPresenceGet } from '../../shared/eventa/presence'
+import { downscaleForVision } from './image-downscale'
 
 /** One line the mind may think about. Structurally the `SenseObservation` of `@proj-airi/core-agent`. */
 export interface ScreenSenseObservation {
@@ -18,20 +18,15 @@ export interface ScreenSenseObservation {
   reason?: string
 }
 
-/**
- * A sense port that lets the mind look at this computer's screen.
- *
- * The mind never holds pixels: one capture becomes one line of text through the vision workload, so curiosity
- * reacts to "a chat window with a long session list" rather than to a bitmap. The capture goes through the same
- * AUV path as the computer_use tool, and the WebP→PNG conversion happens in the main process.
- *
- * Returns an empty list on any failure — permission, no vision model, no display. A blind sense is the documented
- * default, so a temporary failure must not surface as an error the mind has to handle.
- */
 export function createScreenSense() {
   let busy = false
+  /** 单条 AUV 命令的上限。截图只要几秒，45 秒还没回就是坏了。 */
+  const LOOK_COMMAND_TIMEOUT_MS = 45_000
   /** 最近一次 look 走到哪一步、拿到什么。没有它，「她看不见」和「她坏了」长得一模一样。 */
   let last: Record<string, unknown> = { stage: 'idle' }
+  /** 廉价那一路的缓存：3 秒内的重复调用不必再问一次主进程。 */
+  let presenceAt = 0
+  let presenceValue: { state: 'active' | 'idle' | 'locked' | 'unknown', idleSeconds?: number, at: number } = { state: 'unknown', at: 0 }
   /** Display layout hardly changes; re-reading it every look would cost an extra CLI run each time. */
   let displays: Array<{ name: string, isPrimary: boolean, frame: { x: number, y: number, w: number, h: number }, logical: { x: number, y: number, w: number, h: number }, scale: number }> = []
   let displaysAt = 0
@@ -53,10 +48,42 @@ export function createScreenSense() {
 
   return {
     diagnostics: () => last,
+    /**
+     * 廉价的一路：主人在不在电脑前。
+     *
+     * 一次 IPC 读系统空闲与锁屏，不抓屏、不进模型。心智每 45 秒问一次也不心疼，
+     * 而视觉那条要起截图和视觉调用——问「他在不在」用它既慢又浪费，还会把
+     * 「看不见」当成「不忙」。
+     */
+    async presence() {
+      const now = Date.now()
+      // 3 秒缓存：同一跳里可能被 tick 与筛选各问一次，重复问没有意义。
+      if (now - presenceAt < 3_000)
+        return presenceValue
+      presenceAt = now
+      try {
+        const { context } = createContext(window.electron.ipcRenderer)
+        const get = defineInvoke(context, systemPresenceGet)
+        // handler 还没注册时 `defineInvoke` 不会拒绝、只会一直等。不中断的话，每 45 秒会多留
+        // 一对永不回收的监听器；abort signal 让 2 秒后连监听器一起清掉。
+        const reading = await get(undefined, { signal: AbortSignal.timeout(2_000) })
+        presenceValue = { state: reading.state, idleSeconds: reading.idleSeconds, at: reading.at }
+      }
+      catch {
+        // 读不到就是不知道，不是「在场」：上层会把 unknown 当成「别问忙不忙」。
+        presenceValue = { state: 'unknown', at: now }
+      }
+      return presenceValue
+    },
     async look(): Promise<ScreenSenseObservation[]> {
       if (busy)
         return []
       busy = true
+      const startedAt = Date.now()
+      // AUV 是外部进程：它不回话时这一眼会永远挂着，`busy` 也就永远不会清——她就彻底失明。
+      // 每条命令都有上限，超时中断，并把这一眼当作「没看见」。
+      const abort = new AbortController()
+      const watchdog = setTimeout(() => abort.abort(), LOOK_COMMAND_TIMEOUT_MS)
       try {
         const { context } = createContext(window.electron.ipcRenderer)
         const run = defineInvoke(context, computerUseRun)
@@ -65,7 +92,7 @@ export function createScreenSense() {
         // 哪一块屏？光标所在的那块。人眼跟着手走，比"主屏"这个静态概念更接近她该看的地方，
         // 也是唯一能把第二块屏带进来的路（`display.capture` 只认主屏，`Target forbidden`）。
         if (Date.now() - displaysAt > 5 * 60_000) {
-          const listed = await run({ argv: ['invoke', 'display.list', '--json'] })
+          const listed = await run({ argv: ['invoke', 'display.list', '--json'] }, { signal: abort.signal })
           const parsed = parseJson(listed?.output)
           const rows = Array.isArray(parsed?.result?.displays) ? parsed.result.displays : []
           displays = rows.map((row: any) => {
@@ -92,7 +119,7 @@ export function createScreenSense() {
 
         let pointer: { x: number, y: number } | undefined
         try {
-          const pos = await run({ argv: ['invoke', 'input.pointerPosition', '--json'] })
+          const pos = await run({ argv: ['invoke', 'input.pointerPosition', '--json'] }, { signal: abort.signal })
           const parsed = parseJson(pos?.output)
           const result = parsed?.result ?? parsed
           if (Number.isFinite(result?.x) && Number.isFinite(result?.y))
@@ -123,10 +150,10 @@ export function createScreenSense() {
               `--height=${Math.round(chosen.logical.h)}`,
               '--json',
             ],
-          })
+          }, { signal: abort.signal })
         }
         else {
-          capture = await run({ argv: ['invoke', 'display.capture', '--json'] })
+          capture = await run({ argv: ['invoke', 'display.capture', '--json'] }, { signal: abort.signal })
         }
 
         last = { ...last, stage: 'capture', route, display: chosen?.name, pointer, exitCode: capture?.exitCode, at: Date.now() }
@@ -140,14 +167,17 @@ export function createScreenSense() {
         if (!artifactPath)
           return []
 
-        const imageDataUrl = await readImage({ path: artifactPath })
+        const imageDataUrl = await readImage({ path: artifactPath }, { signal: abort.signal })
+        // 决策只要认得出「在开会 / 在写代码 / 全屏游戏」，不需要 4K 像素。
+        // 原图按面积计费、还要走一遍传输，4K 换成 1280 宽省下的 token 与时间都有几倍。
+        const visionImage = await downscaleForVision(imageDataUrl)
 
         // `screen:activity` 一次问清两件事：他在干什么（activity）+ 现在能不能打扰（interruptible）。
         // 之前用 `screen:interpret` 只得到一段画面描述，再靠关键词猜忙不忙——那条路没有下限。
         let workload: 'screen:activity' | 'screen:interpret' = 'screen:activity'
         let raw = ''
         try {
-          raw = await ask(imageDataUrl, workload)
+          raw = await ask(visionImage, workload)
         }
         catch (error) {
           last = { ...last, stage: 'activity-threw', error: String((error as Error)?.message ?? error).slice(0, 160) }
@@ -158,7 +188,7 @@ export function createScreenSense() {
         if (!raw) {
           workload = 'screen:interpret'
           try {
-            raw = await ask(imageDataUrl, workload)
+            raw = await ask(visionImage, workload)
           }
           catch (error) {
             last = { ...last, stage: 'interpret-threw', error: String((error as Error)?.message ?? error).slice(0, 160) }
@@ -188,7 +218,11 @@ export function createScreenSense() {
         return []
       }
       finally {
+        clearTimeout(watchdog)
         busy = false
+        // 一次 look 花了多久：超时预算（`LOOK_BUDGET_MS`）够不够，面板上看这个数，
+        // 不要靠猜。
+        last = { ...last, elapsedMs: Date.now() - startedAt }
       }
     },
   }

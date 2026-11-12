@@ -23,7 +23,7 @@ export interface DistillOptions {
   max?: number
 }
 
-const line = (thought: Thought) => {
+function line(thought: Thought) {
   const time = new Date(thought.at)
   const clock = `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`
   return `- ${clock} ${thought.text.replace(/^noticed:\s*/, '')}`

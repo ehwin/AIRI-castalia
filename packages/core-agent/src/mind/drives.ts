@@ -87,7 +87,6 @@ export interface DriveConfig {
  */
 export const BOREDOM_SEEKING_ONSET = 60
 
-
 /**
  * Defaults assume a desktop companion that runs all day.
  * A full battery of boredom takes about 40 minutes of silence.
@@ -140,7 +139,7 @@ export function advanceDrives(
   const boredomRelief = signals.novelty ? config.boredomReliefOnNovelty : 0
   const boredom = clamp(previous.boredom + boredomGain - boredomRelief, 0, 100)
 
-  const curiosityDecay = Math.pow(0.5, Math.max(0, elapsedMs) / config.curiosityHalfLifeMs)
+  const curiosityDecay = 0.5 ** (Math.max(0, elapsedMs) / config.curiosityHalfLifeMs)
   const noveltySpike = signals.novelty ? config.curiositySpikeOnNovelty : 0
   // Boredom is a switching signal: once it crosses the line she starts looking
   // for something to do, so exploration gets first refusal before speech.
@@ -156,19 +155,38 @@ export function advanceDrives(
 }
 
 /**
- * Recovers fatigue while the process did not run.
+ * How fast boredom relaxes while the app was closed, in hours.
+ *
+ * Being closed is not boredom: the room was empty, not dull. Without this, a
+ * shutdown hands back the boredom it had at exit — she opens the window already
+ * "bored enough to speak".
+ */
+export const AWAY_BOREDOM_RELAX_HOURS = 3
+/** Focus is a state of this moment: an hour away and it is gone. */
+export const AWAY_FOCUS_RELAX_HOURS = 1
+
+/**
+ * Recovers drives while the process did not run.
  *
  * A companion that only adds fatigue ends up asleep forever after one day.
  * Source: the same reason a tamagotchi needs a night cycle.
+ *
+ * Fatigue is what sleep restores. The two attention drives relax on the same
+ * offline clock: away time is rest for them too, and a restart that inherits a
+ * full boredom battery is a bug the docs used to describe as intent.
  */
 export function restDrives(
   previous: Drives,
   offlineMs: number,
   config: DriveConfig = defaultDriveConfig,
 ): Drives {
-  const hours = Math.max(0, offlineMs) / 3_600_000
+  const offline = Math.max(0, offlineMs)
+  const hours = offline / 3_600_000
   const fatigue = clamp(previous.fatigue - hours * config.fatigueRecoverPerHour, 0, 100)
-  return { ...previous, fatigue }
+  const boredom = clamp(previous.boredom * Math.exp(-hours / AWAY_BOREDOM_RELAX_HOURS), 0, 100)
+  const curiosity = clamp(previous.curiosity * 0.5 ** (offline / config.curiosityHalfLifeMs), 0, 100)
+  const focus = clamp(previous.focus * Math.exp(-hours / AWAY_FOCUS_RELAX_HOURS), 0, 100)
+  return { ...previous, fatigue, boredom, curiosity, focus }
 }
 
 /**
@@ -294,6 +312,13 @@ export interface MindContext {
   sinceNapMs?: number
   /** Naps already taken today, so a dull afternoon cannot become five naps. */
   napsToday?: number
+  /**
+   * Random source for the think-or-provoke choice, near the think line only.
+   *
+   * Absent means a certain decision, which is what the pure tests want. The loop
+   * passes its own seeded stream so a day can be replayed.
+   */
+  random?: () => number
 }
 
 export interface NapPolicy {
@@ -337,6 +362,26 @@ export function canNap(
     && sinceNap >= policy.cooldownMs
 }
 
+/** Width of the band around the think line where the choice is a draw, in points. */
+export const THINK_TEMPERATURE = 6
+
+/**
+ * Whether she investigates first or asks for company first.
+ *
+ * Deterministic without a random source, so the pure tests keep their old
+ * answers. With one, the choice is a softmax over the distance to the think
+ * line: a curiosity far above it is still a decision, but a curiosity sitting on
+ * the line is a coin. That coin is the difference between a companion who always
+ * thinks and then asks and one who sometimes just asks — the metronome is what
+ * reads as a script (Sutton & Barto, softmax action selection).
+ */
+function prefersThink(curiosity: number, think: number, random?: () => number): boolean {
+  const margin = curiosity - think
+  if (!random)
+    return margin >= 0
+  return random() < 1 / (1 + Math.exp(-margin / THINK_TEMPERATURE))
+}
+
 /**
  * Picks what the companion wants to do, before any gate applies.
  *
@@ -364,9 +409,7 @@ export function decide(
     // Boredom is a switching signal, not a complaint: if something also looks
     // worth investigating, she goes and looks before she asks for company.
     // Source: Bench & Lench 2013 — boredom readies pursuit of alternatives.
-    if (drives.curiosity >= thresholds.think)
-      return 'think'
-    return 'provoke'
+    return prefersThink(drives.curiosity, thresholds.think, context.random) ? 'think' : 'provoke'
   }
   if (drives.curiosity >= thresholds.think)
     return 'think'

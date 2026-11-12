@@ -6,7 +6,9 @@ import {
   createOutboundState,
   DAY_MS,
   decideOutbound,
+  gapFactorOf,
   isQuietHour,
+  nextGapFactor,
   OUTBOUND_POLICY_DEFAULTS,
   recordOutbound,
   recordOwnerMessage,
@@ -220,5 +222,49 @@ describe('outbound gate', () => {
   it('answers the same decision for the same inputs twice', () => {
     const sent = recordOutbound(state(), request({ now: NOON - HOUR, topic: 'weather' }))
     expect(decideOutbound(request(), sent, policy())).toEqual(decideOutbound(request(), sent, policy()))
+  })
+
+  it('keeps the plane gap when no draw was stored', () => {
+    // 老状态没有 gapFactor：间隔必须还是整整一小时，不能让升级本身改节奏。
+    // 主人在间隔里回了一句：下一个间隔按基础倍率算，这段测的是抖动本身。
+    const sent = recordOwnerMessage(recordOutbound(state(), request({ now: NOON - HOUR, topic: 'weather' })))
+
+    expect(sent.gapFactor).toBeUndefined()
+    expect(decideOutbound(request({ now: NOON - HOUR + 59 * 60_000, topic: 'later' }), sent, policy()))
+      .toMatchObject({ allow: false, reason: 'min-gap' })
+    expect(decideOutbound(request({ now: NOON, topic: 'later' }), sent, policy()).allow).toBe(true)
+  })
+
+  it('honours the wait the last message chose', () => {
+    const tight = recordOwnerMessage(recordOutbound(state(), request({ now: NOON - HOUR }), { random: () => 0 }))
+    const loose = recordOwnerMessage(recordOutbound(state(), request({ now: NOON - HOUR }), { random: () => 1 }))
+    const fortyTwoMinutes = request({ now: NOON - HOUR + 42 * 60_000, topic: 'later' })
+
+    expect(tight.gapFactor).toBeCloseTo(0.65, 6)
+    expect(loose.gapFactor).toBeCloseTo(1.35, 6)
+    expect(decideOutbound(fortyTwoMinutes, tight, policy()).allow).toBe(true)
+    expect(decideOutbound(fortyTwoMinutes, loose, policy())).toMatchObject({ allow: false, reason: 'min-gap' })
+  })
+
+  it('clamps a nonsense draw instead of swallowing the pacing', () => {
+    expect(gapFactorOf(state({ gapFactor: 99 }), policy())).toBeCloseTo(1.35, 6)
+    expect(gapFactorOf(state({ gapFactor: 0.01 }), policy())).toBeCloseTo(0.65, 6)
+    // 99 被夹到 1.35：60 分钟太早、82 分钟才放行。被夹到 1.35 而不是 99 就是「不许吞掉节奏」。
+    expect(decideOutbound(request({ now: NOON - HOUR + 60 * 60_000, topic: 'later' }), state({ lastSentAt: NOON - HOUR, gapFactor: 99, unanswered: 0 }), policy()))
+      .toMatchObject({ allow: false, reason: 'min-gap' })
+    expect(decideOutbound(request({ now: NOON - HOUR + 82 * 60_000, topic: 'later' }), state({ lastSentAt: NOON - HOUR, gapFactor: 99, unanswered: 0 }), policy()).allow).toBe(true)
+  })
+
+  it('draws the next factor inside the band and nowhere else', () => {
+    const draws = Array.from({ length: 500 }, () => nextGapFactor())
+    const zero = nextGapFactor(() => 0)
+    const one = nextGapFactor(() => 1)
+
+    expect(Math.min(...draws)).toBeGreaterThanOrEqual(0.65)
+    expect(Math.max(...draws)).toBeLessThanOrEqual(1.35)
+    expect(zero).toBeCloseTo(0.65, 6)
+    expect(one).toBeCloseTo(1.35, 6)
+    // 0 是关掉抖动：升级前后同一个行为，测试也能钉住旧节奏。
+    expect(nextGapFactor(() => 0.2, 0)).toBe(1)
   })
 })

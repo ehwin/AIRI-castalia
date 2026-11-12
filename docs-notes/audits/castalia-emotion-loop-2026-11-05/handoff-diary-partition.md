@@ -46,12 +46,13 @@
 `D:\AI\castalia\Castalia-Anima\src\memType.ts`
 
 ```ts
-export const DIARY_MEM_TYPE = 'diary';
+export const DIARY_MEM_TYPE = 'diary'
 
 export function normalizeMemType(v: any): MemType {
   // 日记分区走同一个 schema,但不在 MEM_TYPES 里,按普通类型名归一化。
-  if (v === DIARY_MEM_TYPE) return DIARY_MEM_TYPE as MemType;
-  return isMemType(v) ? v : 'general';
+  if (v === DIARY_MEM_TYPE)
+    return DIARY_MEM_TYPE as MemType
+  return isMemType(v) ? v : 'general'
 }
 ```
 

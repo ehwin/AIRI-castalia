@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
-
 import type { PresenceInput } from './arbiter'
+
+import { describe, expect, it } from 'vitest'
 
 import {
   decideAct,
@@ -8,18 +8,20 @@ import {
 } from './arbiter'
 import { defaultTimingConfig, planDelay } from './timing'
 
-const calm = (override: Partial<PresenceInput> = {}): PresenceInput => ({
-  now: 100_000,
-  lastUserAt: 0,
-  userSpeaking: false,
-  userSpeechMs: 0,
-  speaking: false,
-  answered: true,
-  gates: { allowProvoke: true, allowThink: true },
-  drives: { fatigue: 0, boredom: 0, curiosity: 0, focus: 0 },
-  mayProvoke: true,
-  ...override,
-})
+function calm(override: Partial<PresenceInput> = {}): PresenceInput {
+  return {
+    now: 100_000,
+    lastUserAt: 0,
+    userSpeaking: false,
+    userSpeechMs: 0,
+    speaking: false,
+    answered: true,
+    gates: { allowProvoke: true, allowThink: true },
+    drives: { fatigue: 0, boredom: 0, curiosity: 0, focus: 0 },
+    mayProvoke: true,
+    ...override,
+  }
+}
 
 describe('decideAct', () => {
   it('does nothing when the companion is already speaking', () => {

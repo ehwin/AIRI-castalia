@@ -162,7 +162,7 @@ function createAlibabaCloudNative(apiKey: string, endpoint: string) {
               const response = await fetch(endpoint, {
                 method: 'POST',
                 headers: {
-                  Authorization: `Bearer ${apiKey}`,
+                  'Authorization': `Bearer ${apiKey}`,
                   'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({

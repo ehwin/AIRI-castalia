@@ -395,8 +395,8 @@ AIRI 自带的东西：
 新增两个事件（`packages/plugin-protocol/src/types/events.ts`）：
 
 ```ts
-'session:sync:pull'   // { since: number }  → { sessions, messages, cursor }
-'session:sync:push'   // { sessions, messages } → 桌面落库，返回 accepted ids
+'session:sync:pull' // { since: number }  → { sessions, messages, cursor }
+'session:sync:push' // { sessions, messages } → 桌面落库，返回 accepted ids
 ```
 
 - **方向**：pocket 连上先 `pull({ since: lastCursor })`，本地 `mergeLoadedSessionMessages(local, incoming)`；本地新会话再 `push` 回桌面。
