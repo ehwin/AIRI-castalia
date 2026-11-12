@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -74,7 +74,9 @@ describe('static asset paths', () => {
     await mkdir(join(root, 'dist', 'ui'), { recursive: true })
     await writeFile(join(root, 'dist', 'ui', 'index.html'), '<html></html>')
 
-    await expect(resolveStaticAssetFilePath(root, 'dist/ui/index.html')).resolves.toBe(join(root, 'dist', 'ui', 'index.html'))
+    // 解析结果经过 realpath，Windows 上 tmpdir() 可能给 8.3 短名（RUNNER~1），
+    // 直接拿 join(root, ...) 比会在 CI 上假红。期望值也要走一次 realpath。
+    await expect(resolveStaticAssetFilePath(root, 'dist/ui/index.html')).resolves.toBe(await realpath(join(root, 'dist', 'ui', 'index.html')))
     await expect(resolveStaticAssetFilePath(root, '../outside.txt')).resolves.toBeUndefined()
   })
 
