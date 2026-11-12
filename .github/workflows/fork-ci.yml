@@ -25,11 +25,6 @@ jobs:
     name: Typecheck and test
     runs-on: windows-latest
     timeout-minutes: 40
-    env:
-      # 部署环境里带着这些变量时，插件测试会假红一条（见 castalia-plugin 的测试说明）
-      PSYCHE_BAND_HOLD: ''
-      PSYCHE_BAND_CENTER_OFFSET: ''
-      PSYCHE_BAND_ENTER: ''
     steps:
       - uses: actions/checkout@v4
         with:
