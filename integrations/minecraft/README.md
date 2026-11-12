@@ -55,6 +55,12 @@ Treat this service as a local-development and trusted-server tool only.
 
 5. The bot should automatically connect to both AIRI and the Minecraft server.
 
+## Game memory
+
+The bot keeps places, builds, plans, events, and one diary row per session in the Castalia memory bank, project `minecraft`, reached over the `game-bridge` MCP endpoint. The area, the categories, the write rules, and the two bot tools (`remember`, `recallMemory`) are in [docs/game-memory.md](docs/game-memory.md).
+
+Set `MEMORY_DISABLED=1` to run without the area. The bot then plays without recall.
+
 ## Cognitive Architecture
 
 AIRI's Minecraft agent is built on a **four-layered cognitive architecture** inspired by cognitive science, enabling reactive, conscious, and physically grounded behaviors.

@@ -16,6 +16,7 @@ import { MinecraftRuntimeConfigManager } from './composables/runtime-config'
 import { DebugService } from './debug'
 import { setupMineflayerViewer } from './debug/mineflayer-viewer'
 import { Mineflayer, wrapPlugin } from './libs/mineflayer'
+import { configureGameMemory } from './memory/memory-actions'
 import { MinecraftBotRuntime } from './minecraft-bot-runtime'
 import { initLogger, useLogger } from './utils/logger'
 
@@ -25,6 +26,17 @@ async function main() {
   initLogger() // todo: save logs to file
   initEnv()
   const logger = useLogger()
+
+  // The memory area is configured before any bot spawns: the brain reads it on session start.
+  configureGameMemory({
+    url: config.memory.url,
+    enabled: config.memory.enabled,
+    ...(config.memory.project ? { project: config.memory.project } : {}),
+  })
+  if (config.memory.enabled)
+    logger.withFields({ url: config.memory.url, project: config.memory.project }).log('Game memory area configured')
+  else
+    logger.log('Game memory disabled (MEMORY_DISABLED=1); the bot plays without recall')
 
   const runtimeConfigManager = new MinecraftRuntimeConfigManager()
   const configManager = {

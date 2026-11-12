@@ -18,6 +18,8 @@ import type { CancellationToken } from './task-state'
 
 import { config } from '../../composables/config'
 import { DebugService } from '../../debug'
+import { getGameMemory } from '../../memory/game-memory'
+import { buildMemoryBlock } from '../../memory/memory-block'
 import { ActionError } from '../../utils/errors'
 import { buildConsciousContextView } from './context-view'
 import { createHistoryRuntime } from './history-query'
@@ -230,6 +232,9 @@ const MAX_QUEUED_CONTROL_ACTIONS = 5
 const MAX_PENDING_CONTROL_ACTIONS = 4
 const ACTION_QUEUE_RECENT_HISTORY_LIMIT = 20
 const MAX_CONVERSATION_HISTORY_MESSAGES = 200
+// One recall per distinct chat line per 20 s: a player repeating a word must not turn into a
+// stream of embedding calls, but a genuinely new question still gets its own block.
+const CHAT_RECALL_COOLDOWN_MS = 20_000
 const NO_ACTION_FOLLOWUP_BUDGET_DEFAULT = 3
 const NO_ACTION_FOLLOWUP_BUDGET_MAX = 8
 const NO_ACTION_STAGNATION_REPEAT_LIMIT = 2
@@ -322,6 +327,8 @@ export class Brain {
   private noActionFollowupStagnationCount = 0
   private errorBurstGuardState: ErrorBurstGuardState | null = null
   private errorBurstGuardSuppressUntilTurnId = 0
+  /** Last chat line that triggered a recall, so a repeated line does not recall twice. */
+  private lastChatRecall: { text: string, at: number } | null = null
   private unsubscribeEventBus: (() => void) | null = null
   private onActionCompleted: ((...args: any[]) => void) | null = null
   private onActionFailed: ((...args: any[]) => void) | null = null
@@ -346,6 +353,12 @@ export class Brain {
         return
       }
 
+      if (event.payload.type === 'chat_message') {
+        const message = (event.payload as { metadata?: { message?: unknown } }).metadata?.message
+        if (typeof message === 'string')
+          this.recallForChat(message)
+      }
+
       this.enqueueEvent(bot, {
         type: 'perception',
         payload: event.payload,
@@ -353,6 +366,10 @@ export class Brain {
         timestamp: Date.now(),
       }).catch(err => this.deps.logger.withError(err).error('Brain: Failed to process perception event'))
     })
+
+    // The game memory area comes in front of the model once per session, not once per turn:
+    // a recall costs an embedding call, and the block is a dozen lines.
+    void this.hydrateGameMemory()
 
     // Action telemetry logger
     this.onActionCompleted = async ({ action, result }: { action: ActionInstruction, result: unknown }) => {
@@ -767,6 +784,77 @@ export class Brain {
       updateAiriContext: (text: string, hints?: string[], lane?: string) =>
         this.deps.airiBridge.sendContextUpdate(text, hints, lane),
     }
+  }
+
+  /**
+   * Puts the game memory area in front of the model once a session starts.
+   *
+   * Use when:
+   * - A bot spawns. The first decision of a session is "where am I and what was I doing",
+   *   which is exactly what the area holds.
+   *
+   * Why not every turn: a recall costs one embedding call, and the block stays in the history
+   * for the whole session. `recallForChat` covers the turns where a new question arrives.
+   */
+  private async hydrateGameMemory(): Promise<void> {
+    let memory: ReturnType<typeof getGameMemory>
+    try {
+      memory = getGameMemory()
+    }
+    catch {
+      // No memory client configured. A run without the area must still play.
+      return
+    }
+    const world = `${config.bot.host}:${config.bot.port}`
+    const [located, recent] = await Promise.all([
+      memory.search(`基地 坐标 箱子 传送门 计划 主人 ${world}`, 6),
+      memory.recent(8),
+    ])
+    const seen = new Set<string>()
+    const rows = [...located, ...recent].filter((hit) => {
+      const key = hit.id ?? hit.text.slice(0, 60)
+      if (seen.has(key))
+        return false
+      seen.add(key)
+      return true
+    })
+    const block = buildMemoryBlock(rows, { world })
+    if (!block)
+      return
+    this.conversationHistory.push({ role: 'user', content: block })
+    this.deps.logger.log('INFO', `Brain: injected game memory (${rows.length} rows)`)
+  }
+
+  /**
+   * Recalls against one chat line, so "where is my base" reaches the model with the answer.
+   *
+   * Why the cooldown: the same line repeated is the same query and the same embeddings bill.
+   * Why it never blocks: the block lands in history when it arrives. A turn that already
+   * started answers from what it has, which is what a person does too.
+   */
+  private recallForChat(message: string): void {
+    const text = message.trim()
+    if (!text)
+      return
+    const now = Date.now()
+    if (this.lastChatRecall && this.lastChatRecall.text === text && now - this.lastChatRecall.at < CHAT_RECALL_COOLDOWN_MS)
+      return
+    this.lastChatRecall = { text, at: now }
+    let memory: ReturnType<typeof getGameMemory>
+    try {
+      memory = getGameMemory()
+    }
+    catch {
+      return
+    }
+    const world = `${config.bot.host}:${config.bot.port}`
+    void memory.search(text, 4).then((hits) => {
+      const block = buildMemoryBlock(hits, { query: text, world })
+      if (!block)
+        return
+      this.conversationHistory.push({ role: 'user', content: block })
+      this.deps.logger.log('INFO', `Brain: injected recalled memory for chat (${hits.length} rows)`)
+    })
   }
 
   private isPlayerChatEvent(event: BotEvent): boolean {

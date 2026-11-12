@@ -1,6 +1,7 @@
 import type { Action } from '../../libs/mineflayer'
 import type { Mineflayer } from '../../libs/mineflayer/core'
 
+import { memoryActions } from '../../memory/memory-actions'
 import { actionsList } from './llm-actions'
 
 /**
@@ -12,7 +13,8 @@ export class ActionRegistry {
   private mineflayer: Mineflayer | null = null
 
   constructor() {
-    this.actions = actionsList
+    // The memory tools live with the client they use; the world tools stay in one catalogue.
+    this.actions = [...actionsList, ...memoryActions]
   }
 
   /**

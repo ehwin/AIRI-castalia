@@ -33,14 +33,19 @@
    ```jsonc
    {
      "paths": {
-       "home": "D:/castalia",                 // 也可用环境变量 CASTALIA_HOME 覆盖
-       "run":  "D:/castalia/run/Castalia",    // 引擎实例目录(含 dist/、viz/)
-       "banks": "D:/castalia/memory-banks",   // 活库目录
+       "home": "D:/castalia", // 也可用环境变量 CASTALIA_HOME 覆盖
+       "run": "D:/castalia/run/Castalia", // 引擎实例目录(含 dist/、viz/)
+       "banks": "D:/castalia/memory-banks", // 活库目录
        "node": "D:/castalia/run/Castalia/bin/CastaliaNode.exe"
      },
      "instances": [
-       { "id": "default", "label": "Castalia 记忆体", "variant": "lite",
-         "icon": "tray-icons/brand/lite-tray.png", "bank": "default" }
+       {
+         "id": "default",
+         "label": "Castalia 记忆体",
+         "variant": "lite",
+         "icon": "tray-icons/brand/lite-tray.png",
+         "bank": "default"
+       }
      ]
    }
    ```

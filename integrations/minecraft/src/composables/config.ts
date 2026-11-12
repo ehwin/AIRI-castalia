@@ -68,6 +68,18 @@ export const configSchema = z.object({
     clientName: requiredString('AIRI_CLIENT_NAME'),
     token: z.string().optional(),
   }),
+  // Game memory area: the Castalia bridge that holds the `minecraft` project. The bot reads
+  // before planning and writes what a later session must still know.
+  memory: z.object({
+    url: z.url({
+      error: 'MEMORY_MCP_URL must be a valid URL',
+    }).refine((value) => {
+      const protocol = new URL(value).protocol
+      return protocol === 'http:' || protocol === 'https:'
+    }, 'MEMORY_MCP_URL must use http or https'),
+    enabled: z.boolean().default(true),
+    project: z.string().trim().min(1).optional(),
+  }),
 })
 
 export type Config = z.infer<typeof configSchema>
@@ -101,6 +113,11 @@ const defaultConfig: Omit<Config, 'openai'> = {
     mcp: false,
     server: false,
     viewer: false,
+  },
+  memory: {
+    url: 'http://127.0.0.1:3320/mcp',
+    enabled: true,
+    project: 'minecraft',
   },
 }
 
@@ -138,6 +155,12 @@ export function initEnv(): void {
       clientName: env.AIRI_CLIENT_NAME ?? defaultConfig.airi.clientName,
       token: env.AIRI_WS_TOKEN || defaultConfig.airi.token,
     },
+    memory: {
+      url: env.MEMORY_MCP_URL || defaultConfig.memory.url,
+      // MEMORY_DISABLED=1 is the escape hatch for a machine without the Castalia stack.
+      enabled: env.MEMORY_DISABLED === '1' ? false : defaultConfig.memory.enabled,
+      project: env.MEMORY_PROJECT || defaultConfig.memory.project,
+    },
   })
 
   if (!parsedConfig.success) {
@@ -151,6 +174,7 @@ export function initEnv(): void {
   config.bot = parsedConfig.data.bot
   config.airi = parsedConfig.data.airi
   config.debug = parsedConfig.data.debug
+  config.memory = parsedConfig.data.memory
 
   logger.withFields({
     config: {
