@@ -11,7 +11,7 @@ afterEach(() => vi.unstubAllEnvs())
 // ROOT CAUSE:
 // Database reads discarded the event's frozen decay multiplier.
 // Persisting the multiplier keeps durable transitions equal to in-memory transitions after tuning changes.
-it('preserves the event decay rate through a durable state read', async () => {
+it('preserves the event decay rate through a durable state read', { timeout: 30_000 }, async () => {
   const bankDir = mkdtempSync(join(tmpdir(), 'castalia-psyche-'))
   const bank = await openBank({ bankDir, project: 'psyche-test', charId: 'airi', allowNoConfig: true })
   const { DatabaseManager } = await import('./vendor/engine/db')

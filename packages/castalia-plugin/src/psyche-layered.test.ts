@@ -20,7 +20,9 @@ const HOUR = 3600_000
 const t0 = Date.UTC(2026, 10, 1, 0, 0, 0)
 
 function fresh() {
-  return createPsycheState({}, t0)
+  // 基线显式钉成 0：默认值可被部署环境的 PSYCHE_BASELINE_* 覆盖，
+  // 那样「+0.2 够不够进 positive」就取决于机器，而不是代码。
+  return createPsycheState({ valence: 0, arousal: 0, dominance: 0 }, t0)
 }
 
 function shock(state: ReturnType<typeof fresh>, delta: number, at = t0) {
@@ -53,6 +55,24 @@ afterEach(() => {
 })
 
 describe('band 中心：默认是旧语义（中心=人格基线），标定走部署配置', () => {
+  // 这组断言说的就是「默认语义」，所以必须先把部署环境可能带上的标定变量清掉。
+  // 否则同一份代码在装过 calib 的机器上通过、在干净机器上失败（CI 就是这么红的）。
+  const BAND_ENV = ['PSYCHE_BAND_CENTER_OFFSET', 'PSYCHE_BAND_ENTER', 'PSYCHE_BAND_HOLD'] as const
+  const bandEnvOriginal = Object.fromEntries(BAND_ENV.map(k => [k, process.env[k]]))
+  beforeEach(() => {
+    for (const k of BAND_ENV)
+      delete process.env[k]
+  })
+  afterEach(() => {
+    for (const k of BAND_ENV) {
+      const value = bandEnvOriginal[k]
+      if (value === undefined)
+        delete process.env[k]
+      else
+        process.env[k] = value
+    }
+  })
+
   it('默认中心下，一次中等正向证据还不足以进入 positive', () => {
     const s = transitionPsycheState(fresh(), { kind: 'event', delta: { valence: 0.2 }, eventId: 'b1' }, t0)
     expect(s.band).toBe('neutral')
